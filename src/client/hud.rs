@@ -196,10 +196,16 @@ pub fn hud(
 
 /// Player position and velocity relative to the reference body, in world axes.
 fn relative_motion(player: &Player, bodies: &Bodies, tuning: &Tuning) -> Option<(Vec3, Vec3)> {
-    let reference = bodies.frame(player.reference_body?)?;
     let own = player.mode.body().and_then(|b| bodies.frame(b));
     let (position, velocity) = player.mode.world_kinematics(tuning, own.as_ref());
-    Some((position, velocity - reference.point_velocity(position)))
+    // The same velocity flight assist holds, so readouts show what it's doing.
+    let matched = bodies.matched_velocity(
+        player.reference_body?,
+        position,
+        tuning.match_surface_near,
+        tuning.match_surface_far,
+    )?;
+    Some((position, velocity - matched))
 }
 
 const REFERENCE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 190, 70);

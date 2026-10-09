@@ -39,6 +39,7 @@ type BodyData = (
 pub struct Bodies<'w, 's> {
     bodies: Query<'w, 's, BodyData>,
     collider_of: Query<'w, 's, &'static ColliderOf>,
+    shapes: Query<'w, 's, &'static Collider>,
 }
 
 impl Bodies<'_, '_> {
@@ -68,6 +69,39 @@ impl Bodies<'_, '_> {
             frame.angular_velocity = prev.angular;
         }
         Some(frame)
+    }
+
+    /// The velocity "holding still relative to `body`" means at `position`.
+    ///
+    /// Far from the body that is its center-of-mass velocity: a tumbling rock
+    /// rotates in front of you rather than dragging you around in an orbit.
+    /// Close in, it blends to the velocity of the nearest surface point, so
+    /// you can touch down on a moving face. The blend runs from `far` (pure
+    /// center of mass) to `near` (pure surface), measured from the surface.
+    pub fn matched_velocity(
+        &self,
+        body: Entity,
+        position: Vec3,
+        near: f32,
+        far: f32,
+    ) -> Option<Vec3> {
+        let frame = self.frame(body)?;
+        let Ok(shape) = self.shapes.get(body) else {
+            return Some(frame.linear_velocity);
+        };
+        let (surface, inside) = shape.project_point(frame.position, frame.rotation, position, true);
+        let distance = if inside {
+            0.0
+        } else {
+            surface.distance(position)
+        };
+        let k = ((distance - near) / (far - near).max(1e-3)).clamp(0.0, 1.0);
+        let center_weight = k * k * (3.0 - 2.0 * k);
+        Some(
+            frame
+                .point_velocity(surface)
+                .lerp(frame.linear_velocity, center_weight),
+        )
     }
 
     pub fn mass(&self, body: Entity) -> Option<BodyMass> {

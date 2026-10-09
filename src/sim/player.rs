@@ -971,14 +971,16 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
     let max_dv = t.thrust_accel * boost * ctx.dt;
     let reference_velocity = player
         .reference_body
-        .and_then(|b| bodies.frame(b))
-        .map(|f| f.point_velocity(position))
+        .and_then(|b| {
+            bodies.matched_velocity(b, position, t.match_surface_near, t.match_surface_far)
+        })
         .unwrap_or(Vec3::ZERO);
     // Reeling in: (anchor point, anchor velocity) of the rope being wound.
     let reeling_to = player.grapple.filter(|_| cmd.reel_in).and_then(|g| {
-        bodies
-            .frame(g.body)
-            .map(|f| (f.point_to_world(g.anchor), f.point_velocity(position)))
+        bodies.frame(g.body).map(|f| {
+            let anchor = f.point_to_world(g.anchor);
+            (anchor, f.point_velocity(anchor))
+        })
     });
     let swinging = !cmd.reel_in && player.grapple.is_some_and(|g| g.tension > 0.0);
     let thrust_dv = if cmd.brake {

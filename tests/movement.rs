@@ -593,16 +593,28 @@ fn eva_near_ship(app: &mut App, velocity_rel: Vec3) {
     );
 }
 
+/// Velocity relative to what flight assist holds still against (the ship).
 fn relative_velocity(app: &mut App) -> Vec3 {
+    use bevy::ecs::system::RunSystemOnce;
     let Mode::Eva {
         position, velocity, ..
     } = player(app).mode
     else {
         panic!("not EVA")
     };
-    velocity - ship_frame(app).point_velocity(position)
+    let ship = ship(app);
+    let matched = app
+        .world_mut()
+        .run_system_once(
+            move |bodies: space_game::sim::bodies::Bodies, t: Res<Tuning>| {
+                bodies
+                    .matched_velocity(ship, position, t.match_surface_near, t.match_surface_far)
+                    .unwrap()
+            },
+        )
+        .unwrap();
+    velocity - matched
 }
-
 #[test]
 fn flight_assist_stops_when_keys_released() {
     let mut app = app();
@@ -794,4 +806,77 @@ fn assisted_reel_with_swing_is_smooth_and_arrives_gently() {
         worst_arrival < tuning.attach_max_speed,
         "arrived at {worst_arrival} m/s"
     );
+}
+
+fn set_reference(app: &mut App, body: Entity) {
+    let world = app.world_mut();
+    world
+        .query::<&mut Player>()
+        .single_mut(world)
+        .unwrap()
+        .reference_body = Some(body);
+}
+
+#[test]
+fn assist_holds_still_beside_a_tumbling_rock_instead_of_orbiting() {
+    let mut app = app();
+    let rock = spawn_rock(
+        &mut app,
+        Vec3::new(0.0, 0.0, 80.0),
+        6.0,
+        Vec3::new(0.2, 0.4, 0.1),
+    );
+    // 30 m from the surface, at rest relative to the rock's center.
+    let start = Vec3::new(0.0, 36.0, 80.0);
+    set_mode(
+        &mut app,
+        Mode::Eva {
+            position: start,
+            velocity: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        },
+    );
+    set_reference(&mut app, rock);
+    ticks(&mut app, 180);
+    let Mode::Eva { position, .. } = player(&mut app).mode else {
+        panic!()
+    };
+    let rock_pos = app.world().get::<Position>(rock).unwrap().0;
+    let drift = (position - rock_pos).distance(start - Vec3::new(0.0, 0.0, 80.0));
+    // Co-rotating would have carried us ~0.46 rad/s * 36 m * 3 s ≈ 50 m around.
+    assert!(
+        drift < 0.5,
+        "drifted {drift} m relative to the rock's center"
+    );
+}
+
+#[test]
+fn assist_matches_the_surface_up_close() {
+    let tuning = Tuning::default();
+    let mut app = app();
+    let spin = Vec3::new(0.0, 0.5, 0.0);
+    let rock = spawn_rock(&mut app, Vec3::new(0.0, 0.0, 80.0), 6.0, spin);
+    // 1 m off the equator, moving with the surface beneath.
+    let offset = Vec3::new(7.0, 0.0, 0.0);
+    let surface_velocity = spin.cross(Vec3::X * 6.0);
+    set_mode(
+        &mut app,
+        Mode::Eva {
+            position: Vec3::new(0.0, 0.0, 80.0) + offset,
+            velocity: surface_velocity,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        },
+    );
+    set_reference(&mut app, rock);
+    assert!(tuning.match_surface_near > 1.0);
+    ticks(&mut app, 30);
+    let Mode::Eva { position, .. } = player(&mut app).mode else {
+        panic!("landed?")
+    };
+    let rock_pos = app.world().get::<Position>(rock).unwrap().0;
+    let height = (position - rock_pos).length() - 6.0;
+    // Still hovering over the moving surface, not left behind by it or pressed into it.
+    assert!((height - 1.0).abs() < 0.3, "height above surface {height}");
 }

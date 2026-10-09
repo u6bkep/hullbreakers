@@ -88,6 +88,8 @@ tuning! {
             boost_multiplier: 2.0, 1.0, 5.0;
             brake_accel: 10.0, 0.5, 30.0;
             assist_max_speed: 10.0, 1.0, 50.0;
+            match_surface_near: 2.0, 0.0, 20.0;
+            match_surface_far: 10.0, 1.0, 100.0;
             roll_rate_deg: 90.0, 10.0, 360.0;
             bounce_restitution: 0.2, 0.0, 1.0;
             bounce_friction: 0.4, 0.0, 2.0;
