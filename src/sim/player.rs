@@ -567,17 +567,47 @@ fn fire_grapple(ctx: &TickContext, bodies: &Bodies, player: &mut Player) {
     player.emit(PlayerEvent::GrappleAttached { distance, body });
 }
 
-/// Updates rope length from reel input; returns the winch's impulse limit.
-fn reel(grapple: &mut Grapple, cmd: &PlayerCommand, ctx: &TickContext) -> (f32, bool) {
+/// Applies reel input: returns the impulse limit and, while reeling, the
+/// winch speed. Paying out lengthens the rope directly.
+fn reel(
+    grapple: &mut Grapple,
+    cmd: &PlayerCommand,
+    ctx: &TickContext,
+    distance: f32,
+) -> (f32, Option<f32>) {
     let t = ctx.tuning;
-    if cmd.reel_in {
-        grapple.length = (grapple.length - t.reel_speed * ctx.dt).max(0.5);
-        (t.reel_force * ctx.dt, true)
+    if cmd.reel_in && grapple.length > MIN_ROPE {
+        (t.reel_force * ctx.dt, Some(winch_speed(distance, t)))
     } else {
         if cmd.pay_out {
             grapple.length = (grapple.length + t.reel_speed * ctx.dt).min(t.grapple_range);
         }
-        (t.rope_break_force * ctx.dt, false)
+        (t.rope_break_force * ctx.dt, None)
+    }
+}
+
+/// The winch brings the player to rest this far from the anchor.
+const WINCH_ARRIVE: f32 = 1.2;
+
+/// Winch speed at `distance` from the anchor: full speed far out, easing off
+/// so that the jetpack (flight assist) can stop you at `WINCH_ARRIVE` using
+/// half its thrust, keeping the rest to damp the swing that reeling in spins
+/// up (angular momentum is conserved as the radius shrinks).
+fn winch_speed(distance: f32, t: &Tuning) -> f32 {
+    (t.thrust_accel * (distance - WINCH_ARRIVE).max(0.0))
+        .sqrt()
+        .min(t.reel_speed)
+}
+
+/// The winch stops taking in rope at this length.
+const MIN_ROPE: f32 = 0.5;
+
+/// While reeling, the winch takes in slack as the ends approach. Must run
+/// before solving, against the current distance, or the winch sees the slack
+/// the player closed since last tick and disengages.
+fn take_in_slack(grapple: &mut Grapple, winch: Option<f32>, distance: f32) {
+    if winch.is_some() {
+        grapple.length = grapple.length.min(distance).max(MIN_ROPE);
     }
 }
 
@@ -648,8 +678,9 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
             bodies.mass(grapple.body),
             bodies.mass(body),
         ) {
-            let (max_impulse, reeling) = reel(&mut grapple, cmd, ctx);
             let anchor_w = anchor_frame.point_to_world(grapple.anchor);
+            let (max_impulse, winch) = reel(&mut grapple, cmd, ctx, anchor_w.distance(center_w));
+            take_in_slack(&mut grapple, winch, anchor_w.distance(center_w));
             let dir = (anchor_w - center_w).normalize_or_zero();
             let player_end = RopeEnd {
                 position: center_w,
@@ -670,6 +701,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                 ctx.dt,
                 t.rope_stiffness,
                 max_impulse,
+                winch,
             ) {
                 let tension = imp.magnitude / ctx.dt;
                 grapple.tension = tension;
@@ -684,9 +716,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                     leave(player, velocity, Detach::Yanked(tension));
                     return;
                 }
-                if imp.clamped && reeling {
-                    grapple.length = grapple.length.max(anchor_w.distance(center_w));
-                } else if imp.clamped {
+                if imp.clamped && winch.is_none() {
                     player.grapple = None;
                     player.emit(PlayerEvent::RopeSnapped);
                 }
@@ -944,16 +974,28 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
         .and_then(|b| bodies.frame(b))
         .map(|f| f.point_velocity(position))
         .unwrap_or(Vec3::ZERO);
-    let rope_pulling = player
-        .grapple
-        .is_some_and(|g| g.tension > 0.0 || cmd.reel_in);
+    // Reeling in: (anchor point, anchor velocity) of the rope being wound.
+    let reeling_to = player.grapple.filter(|_| cmd.reel_in).and_then(|g| {
+        bodies
+            .frame(g.body)
+            .map(|f| (f.point_to_world(g.anchor), f.point_velocity(position)))
+    });
+    let swinging = !cmd.reel_in && player.grapple.is_some_and(|g| g.tension > 0.0);
     let thrust_dv = if cmd.brake {
         (reference_velocity - velocity).clamp_length_max(t.brake_accel * ctx.dt)
-    } else if player.flight_assist && !(rope_pulling && input == Vec3::ZERO) {
+    } else if player.flight_assist && !(swinging && input == Vec3::ZERO) {
         // Steer toward the commanded velocity relative to the reference
-        // body. With no input that is "hold still"; while the rope is
-        // pulling and you aren't steering, the assist stays out of its way.
-        let target = reference_velocity + input * t.assist_max_speed * boost;
+        // body. With no input that is "hold still", except: while swinging
+        // on a taut rope the assist stays out of the way, and while reeling
+        // it flies with the winch (toward the anchor at the winch's speed),
+        // damping sideways swing and stopping you short of the anchor.
+        let target = match reeling_to {
+            Some((anchor, anchor_velocity)) if input == Vec3::ZERO => {
+                let offset = anchor - position;
+                anchor_velocity + offset.normalize_or_zero() * winch_speed(offset.length(), t)
+            }
+            _ => reference_velocity + input * t.assist_max_speed * boost,
+        };
         (target - velocity).clamp_length_max(max_dv)
     } else {
         input * max_dv
@@ -964,8 +1006,9 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
     // Rope.
     if let Some(mut grapple) = player.grapple {
         if let (Some(frame), Some(mass)) = (bodies.frame(grapple.body), bodies.mass(grapple.body)) {
-            let (max_impulse, reeling) = reel(&mut grapple, cmd, ctx);
             let anchor_w = frame.point_to_world(grapple.anchor);
+            let (max_impulse, winch) = reel(&mut grapple, cmd, ctx, anchor_w.distance(position));
+            take_in_slack(&mut grapple, winch, anchor_w.distance(position));
             let dir = (anchor_w - position).normalize_or_zero();
             let player_end = RopeEnd {
                 position,
@@ -986,15 +1029,13 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
                 ctx.dt,
                 t.rope_stiffness,
                 max_impulse,
+                winch,
             ) {
                 grapple.tension = imp.magnitude / ctx.dt;
                 velocity += imp.direction * imp.magnitude * inverse_mass;
                 bodies.apply_impulse(grapple.body, -imp.direction * imp.magnitude, anchor_w);
-                if imp.clamped && reeling {
-                    grapple.length = grapple.length.max(anchor_w.distance(position));
-                } else if imp.clamped {
-                    snapped = true;
-                }
+                // A force-limited winch saturating is normal; a rope is not.
+                snapped = imp.clamped && winch.is_none();
             }
             player.grapple = if snapped {
                 player.emit(PlayerEvent::RopeSnapped);

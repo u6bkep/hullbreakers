@@ -111,40 +111,66 @@ impl Synth {
     }
 
     /// Seamlessly looping band-limited noise (crossfaded tail into head).
-    fn noise_loop(&mut self, seconds: f32, cutoff: f32, gain: f32) -> Vec<f32> {
-        let len = (seconds * RATE as f32) as usize;
-        let fade = len / 4;
-        let a = 1.0 - (-TAU * cutoff / RATE as f32).exp();
-        let mut lp = 0.0;
-        let raw: Vec<f32> = (0..len + fade)
-            .map(|_| {
-                lp += a * (self.noise() - lp);
-                lp
-            })
-            .collect();
+    /// Makes `raw` (longer than `len`) loop seamlessly by crossfading the
+    /// tail past `len` into the head.
+    fn crossfade_loop(raw: Vec<f32>, len: usize) -> Vec<f32> {
+        let fade = raw.len() - len;
         let mut out = raw[..len].to_vec();
         for i in 0..fade {
             let w = i as f32 / fade as f32;
             out[i] = raw[len + i] * (1.0 - w) + raw[i] * w;
         }
-        out.iter_mut().for_each(|s| *s *= gain);
         out
     }
 
-    /// Looping motor whine. Frequencies are whole cycles per loop so it is seamless.
-    fn whine_loop(&mut self, gain: f32) -> Vec<f32> {
-        let seconds = 1.0;
-        let mut out = Self::buffer(seconds);
-        for (i, s) in out.iter_mut().enumerate() {
-            let t = i as f32 / RATE as f32;
-            let wobble = 1.0 + 0.15 * (TAU * 6.0 * t).sin();
-            *s = ((TAU * 180.0 * t).sin() * 0.6
-                + (TAU * 360.0 * t).sin() * 0.25
-                + (TAU * 543.0 * t).sin() * 0.1)
-                * wobble
-                * gain;
-        }
-        out
+    /// Looping noise through `poles` one-pole low-pass stages (more poles =
+    /// more muffled).
+    fn noise_loop(&mut self, seconds: f32, cutoff: f32, poles: usize, gain: f32) -> Vec<f32> {
+        let len = (seconds * RATE as f32) as usize;
+        let a = 1.0 - (-TAU * cutoff / RATE as f32).exp();
+        let mut stages = vec![0.0f32; poles];
+        let raw: Vec<f32> = (0..len + len / 4)
+            .map(|_| {
+                let mut x = self.noise();
+                for lp in stages.iter_mut() {
+                    *lp += a * (x - *lp);
+                    x = *lp;
+                }
+                x * gain
+            })
+            .collect();
+        Self::crossfade_loop(raw, len)
+    }
+
+    /// Looping winch: rope sliding through a fabric guide (band-passed noise
+    /// with a slow, irregular swell) over a soft geared-motor hum.
+    fn winch_loop(&mut self) -> Vec<f32> {
+        let len = RATE as usize * 2;
+        let (lo, hi) = (250.0, 1400.0);
+        let a_lo = 1.0 - (-TAU * lo / RATE as f32).exp();
+        let a_hi = 1.0 - (-TAU * hi / RATE as f32).exp();
+        let (mut lp_lo, mut lp_hi, mut swell, mut swell_target) = (0.0f32, 0.0f32, 0.5f32, 0.5f32);
+        let raw: Vec<f32> = (0..len + len / 4)
+            .map(|i| {
+                let t = i as f32 / RATE as f32;
+                // Band-pass: difference of two low-passes.
+                let n = self.noise();
+                lp_lo += a_lo * (n - lp_lo);
+                lp_hi += a_hi * (n - lp_hi);
+                if i % 2205 == 0 {
+                    swell_target = self.rng.random_range(0.45..1.0);
+                }
+                swell += (swell_target - swell) * 0.0004;
+                let slide = (lp_hi - lp_lo) * swell;
+                // Hum: a 60 Hz fundamental with soft harmonics and a 21 Hz gear flutter.
+                let hum: f32 = (1..=5)
+                    .map(|h| (TAU * 60.0 * h as f32 * t).sin() / (h * h) as f32)
+                    .sum();
+                let flutter = 1.0 + 0.25 * (TAU * 21.0 * t).sin();
+                slide * 3.0 + hum * flutter * 0.12
+            })
+            .collect();
+        Self::crossfade_loop(raw, len)
     }
 }
 
@@ -198,6 +224,9 @@ pub struct ReelLoop;
 pub struct AudioState {
     stride: f32,
     last_tension: f32,
+    /// How long the rope has been (nearly) slack; a twang needs real slack first.
+    slack_time: f32,
+    twang_cooldown: f32,
 }
 
 pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
@@ -212,10 +241,10 @@ pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
     };
     let sounds = Sounds {
         step_hull: add(mix(
-            synth.thud(0.12, 40.0, 900.0, 0.6),
-            synth.clank(0.12, 310.0, 60.0, 0.25),
+            synth.thud(0.14, 30.0, 380.0, 0.8),
+            synth.clank(0.1, 170.0, 70.0, 0.06),
         )),
-        step_rock: add(synth.thud(0.14, 30.0, 500.0, 0.7)),
+        step_rock: add(synth.thud(0.15, 28.0, 280.0, 0.8)),
         land_hull: add(mix(
             synth.thud(0.35, 14.0, 600.0, 0.9),
             synth.clank(0.4, 190.0, 12.0, 0.6),
@@ -244,8 +273,8 @@ pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         click_on: add(synth.beep(0.05, 1500.0, 0.25)),
         click_off: add(synth.beep(0.05, 900.0, 0.25)),
     };
-    let jet = add(synth.noise_loop(2.0, 1800.0, 0.9));
-    let whine = add(synth.whine_loop(0.35));
+    let jet = add(synth.noise_loop(2.0, 650.0, 2, 1.0));
+    let whine = add(synth.winch_loop());
     let looping = |volume: f32| PlaybackSettings {
         mode: PlaybackMode::Loop,
         volume: Volume::Linear(volume),
@@ -365,7 +394,7 @@ pub fn play_continuous_sounds(
             play(
                 &mut commands,
                 sound,
-                0.45 * speed_gain,
+                0.22 * speed_gain,
                 rand::rng().random_range(0.9..1.1),
             );
         }
@@ -374,30 +403,43 @@ pub fn play_continuous_sounds(
     }
 
     if let Ok(mut sink) = jet.single_mut() {
-        let target = (player.thrust * 0.3).min(0.8);
+        let target = (player.thrust * 0.22).min(0.55);
         let current = sink.volume().to_linear();
         sink.set_volume(Volume::Linear(
             current + (target - current) * (1.0 - (-dt * 18.0).exp()),
         ));
-        sink.set_speed(0.9 + player.thrust.min(2.0) * 0.12);
+        sink.set_speed(0.9 + player.thrust.min(2.0) * 0.08);
     }
 
     let tension = player.grapple.map(|g| g.tension).unwrap_or(0.0);
     if let Ok(mut sink) = reel.single_mut() {
         let reeling = player.grapple.is_some() && command.reel_in;
         let load = (tension / tuning.reel_force).clamp(0.0, 1.0);
-        let target = if reeling { 0.35 + 0.3 * load } else { 0.0 };
+        let target = if reeling { 0.18 + 0.15 * load } else { 0.0 };
         let current = sink.volume().to_linear();
         sink.set_volume(Volume::Linear(
             current + (target - current) * (1.0 - (-dt * 20.0).exp()),
         ));
         // The motor labours under load.
-        sink.set_speed(1.15 - 0.35 * load);
+        sink.set_speed(1.05 - 0.2 * load);
     }
 
-    // The rope snapping taut: a twang scaled by the jump in tension.
+    // The rope snapping taut: a twang scaled by the jump in tension. Only
+    // after real slack, and not more than twice a second.
     let taut_threshold = tuning.player_mass * 2.0;
-    if state.last_tension < taut_threshold && tension >= taut_threshold {
+    let was_slack = state.slack_time > 0.25;
+    state.twang_cooldown -= dt;
+    state.slack_time = if tension < tuning.player_mass * 0.5 {
+        state.slack_time + dt
+    } else {
+        0.0
+    };
+    if state.last_tension < taut_threshold
+        && tension >= taut_threshold
+        && was_slack
+        && state.twang_cooldown <= 0.0
+    {
+        state.twang_cooldown = 0.5;
         let strength = (tension / (tuning.player_mass * 20.0)).clamp(0.3, 1.2);
         play(
             &mut commands,
@@ -427,8 +469,8 @@ mod tests {
             rng: ChaCha8Rng::seed_from_u64(1),
         };
         for samples in [
-            normalize(synth.noise_loop(2.0, 1800.0, 1.0), 0.9),
-            normalize(synth.whine_loop(1.0), 0.9),
+            normalize(synth.noise_loop(2.0, 650.0, 2, 1.0), 0.9),
+            normalize(synth.winch_loop(), 0.9),
         ] {
             let jump = (samples[0] - samples[samples.len() - 1]).abs();
             let typical =

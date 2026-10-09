@@ -748,3 +748,50 @@ fn reference_body_is_chosen_with_crosshair_and_persists_while_booted() {
     assert_eq!(booted_state(&mut app).0, ship(&mut app));
     assert_eq!(player(&mut app).reference_body, Some(rock));
 }
+
+#[test]
+fn assisted_reel_with_swing_is_smooth_and_arrives_gently() {
+    let tuning = Tuning::default();
+    let mut app = app();
+    let frame = ship_frame(&mut app);
+    let position = frame.point_to_world(Vec3::new(2.6, 1.5, 30.0));
+    // Swinging sideways at 5 m/s when we start reeling.
+    let velocity = frame.point_velocity(position) + frame.dir_to_world(Vec3::X * 5.0);
+    set_mode(
+        &mut app,
+        Mode::Eva {
+            position,
+            velocity,
+            orientation: frame.rotation,
+            pitch: 0.0,
+        },
+    );
+    command(&mut app, |c| c.grapple = true);
+    ticks(&mut app, 1);
+    let anchor_local = player(&mut app).grapple.expect("hit the stern").anchor;
+    command(&mut app, |c| c.reel_in = true);
+    let (mut flips, mut last_taut, mut worst_arrival) = (0, false, 0.0f32);
+    for _ in 0..240 {
+        ticks(&mut app, 1);
+        let p = player(&mut app);
+        let g = p.grapple.expect("rope held");
+        let taut = g.tension > tuning.player_mass * 2.0;
+        flips += (taut != last_taut) as u32;
+        last_taut = taut;
+        if let Mode::Eva {
+            position, velocity, ..
+        } = p.mode
+        {
+            let frame = ship_frame(&mut app);
+            if frame.point_to_world(anchor_local).distance(position) < 2.5 {
+                worst_arrival =
+                    worst_arrival.max((velocity - frame.point_velocity(position)).length());
+            }
+        }
+    }
+    assert!(flips <= 6, "rope went taut/slack {flips} times in 4 s");
+    assert!(
+        worst_arrival < tuning.attach_max_speed,
+        "arrived at {worst_arrival} m/s"
+    );
+}

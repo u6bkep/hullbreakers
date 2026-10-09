@@ -28,8 +28,17 @@ pub struct RopeImpulse {
     pub clamped: bool,
 }
 
+/// Slack within which a running winch still engages the rope.
+const WINCH_ENGAGE: f32 = 0.02;
+
 /// Computes the rope impulse for this tick, or `None` if the rope is slack or
 /// already closing fast enough.
+///
+/// With `winch_speed`, the winch is a force-limited motor: it pulls until the
+/// ends close at that speed. The caller takes in slack as the ends approach
+/// (`length = min(length, distance)`), so the rope never runs ahead of the
+/// player and goes slack/taut every tick, which a length-shrinking winch on a
+/// rigid constraint does.
 pub fn solve_rope(
     player: RopeEnd,
     anchor: RopeEnd,
@@ -37,16 +46,22 @@ pub fn solve_rope(
     dt: f32,
     stiffness: f32,
     max_impulse: f32,
+    winch_speed: Option<f32>,
 ) -> Option<RopeImpulse> {
     let delta = anchor.position - player.position;
     let distance = delta.length();
-    if distance <= length || distance < 1e-4 {
+    let engage = if winch_speed.is_some() {
+        length - WINCH_ENGAGE
+    } else {
+        length
+    };
+    if distance <= engage || distance < 1e-4 {
         return None;
     }
     let direction = delta / distance;
     // Positive when the player is moving toward the anchor.
     let closing_speed = (player.velocity - anchor.velocity).dot(direction);
-    let target = stiffness * (distance - length) / dt;
+    let target = winch_speed.unwrap_or(0.0) + stiffness * (distance - length).max(0.0) / dt;
     if closing_speed >= target {
         return None;
     }
@@ -85,7 +100,7 @@ mod tests {
             velocity: Vec3::ZERO,
             inverse_mass: 0.0,
         };
-        assert!(solve_rope(p, a, 10.0, DT, 0.3, f32::MAX).is_none());
+        assert!(solve_rope(p, a, 10.0, DT, 0.3, f32::MAX, None).is_none());
     }
 
     #[test]
@@ -104,7 +119,7 @@ mod tests {
         };
         let before = kinetic(m1, p.velocity) + kinetic(m2, a.velocity);
         // Nudge just past full length so the constraint is active with no bias.
-        let imp = solve_rope(p, a, 10.0 - 1e-6, DT, 0.0, f32::MAX).expect("taut");
+        let imp = solve_rope(p, a, 10.0 - 1e-6, DT, 0.0, f32::MAX, None).expect("taut");
         p.velocity += imp.direction * imp.magnitude * p.inverse_mass;
         a.velocity -= imp.direction * imp.magnitude * a.inverse_mass;
         let after = kinetic(m1, p.velocity) + kinetic(m2, a.velocity);
@@ -131,7 +146,7 @@ mod tests {
             velocity: Vec3::ZERO,
             inverse_mass: 0.0,
         };
-        let imp = solve_rope(p, a, 10.0 - 1e-6, DT, 0.0, f32::MAX).unwrap();
+        let imp = solve_rope(p, a, 10.0 - 1e-6, DT, 0.0, f32::MAX, None).unwrap();
         let v = p.velocity + imp.direction * imp.magnitude * p.inverse_mass;
         assert!(v.abs_diff_eq(Vec3::new(0.0, 5.0, 0.0), 1e-3));
     }
@@ -149,8 +164,46 @@ mod tests {
             inverse_mass: 0.0,
         };
         let max = 1000.0 * DT;
-        let imp = solve_rope(p, a, 9.0, DT, 0.3, max).unwrap();
+        let imp = solve_rope(p, a, 9.0, DT, 0.3, max, None).unwrap();
         assert!(imp.clamped);
         assert_eq!(imp.magnitude, max);
+    }
+
+    #[test]
+    fn winch_reels_in_smoothly() {
+        // A player hanging at the end of a rope from a fixed anchor, reeled in.
+        let (m, force, speed) = (120.0, 8000.0, 20.0);
+        let anchor = RopeEnd {
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            inverse_mass: 0.0,
+        };
+        let mut pos = Vec3::X * 40.0;
+        let mut vel = Vec3::ZERO;
+        let mut length = 40.0;
+        let mut engaged = Vec::new();
+        for _ in 0..90 {
+            let p = RopeEnd {
+                position: pos,
+                velocity: vel,
+                inverse_mass: 1.0 / m,
+            };
+            let imp = solve_rope(p, anchor, length, DT, 0.3, force * DT, Some(speed));
+            if let Some(imp) = imp {
+                vel += imp.direction * imp.magnitude / m;
+            }
+            engaged.push(imp.is_some());
+            pos += vel * DT;
+            length = length.min(pos.length());
+        }
+        // Accelerates at force/mass until reaching reel speed, then holds it:
+        // never overshoots into slack and re-engages.
+        let closing = -vel.x;
+        assert!((closing - speed).abs() < 0.5, "closing at {closing}");
+        let flips = engaged.windows(2).filter(|w| w[0] != w[1]).count();
+        assert!(
+            flips <= 1,
+            "winch engaged/disengaged {flips} times: {engaged:?}"
+        );
     }
 }

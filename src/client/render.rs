@@ -290,8 +290,12 @@ pub fn draw_gizmos(
     player: Single<(&Player, &PlayerCommand)>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
     camera: Single<&Transform, With<PlayerCamera>>,
+    mut rope_sag: Local<f32>,
 ) {
     let (player, command) = *player;
+    if player.grapple.is_none() {
+        *rope_sag = 0.0;
+    }
     if let Some(grapple) = player.grapple {
         if let Ok(body) = transforms.get(grapple.body) {
             let frame = BodyFrame {
@@ -313,15 +317,23 @@ pub fn draw_gizmos(
                     ..BodyFrame::IDENTITY
                 });
             let (body_center, _) = player.mode.world_kinematics(&tuning, own_frame.as_ref());
+            // Sag eases in and out so a rope hovering at full length doesn't flicker.
+            let slack = grapple.length - body_center.distance(anchor);
+            let target = if slack > 0.15 && grapple.tension < 1.0 {
+                let d = body_center.distance(anchor);
+                (((d + slack).powi(2) - d * d).max(0.0).sqrt() * 0.35).min(4.0)
+            } else {
+                0.0
+            };
+            *rope_sag += (target - *rope_sag) * (1.0 - (-time.delta_secs() * 8.0).exp());
             draw_rope(
                 &mut gizmos,
                 &tuning,
                 &grapple,
                 command.reel_in,
-                grapple.length - body_center.distance(anchor),
+                *rope_sag,
                 hand,
                 anchor,
-                camera.rotation * Vec3::X,
                 time.elapsed_secs(),
             );
         }
@@ -381,10 +393,9 @@ fn draw_rope(
     tuning: &Tuning,
     grapple: &Grapple,
     reeling: bool,
-    slack: f32,
+    sag: f32,
     hand: Vec3,
     anchor: Vec3,
-    camera_right: Vec3,
     t: f32,
 ) {
     let span = anchor - hand;
@@ -393,7 +404,8 @@ fn draw_rope(
     let load = (grapple.tension / tuning.reel_force).clamp(0.0, 1.0);
     let pulling = reeling || grapple.tension > tuning.player_mass * 2.0;
 
-    let color = if slack > 0.15 && grapple.tension < 1.0 {
+    let slack = sag > 0.05;
+    let color = if slack {
         Color::srgb(0.45, 0.45, 0.45)
     } else if pulling {
         Color::srgb(1.0, 0.65 - 0.5 * load, 0.15 - 0.1 * load)
@@ -401,14 +413,10 @@ fn draw_rope(
         Color::srgb(1.0, 0.9, 0.55)
     };
 
-    if slack > 0.15 && grapple.tension < 1.0 {
-        // Sag as if the spare rope bowed out sideways.
-        let sag = (((distance + slack).powi(2) - distance.powi(2))
-            .max(0.0)
-            .sqrt()
-            * 0.35)
-            .min(4.0);
-        let side = dir.cross(camera_right).normalize_or_zero();
+    if slack {
+        // Bow the spare rope out in a fixed world direction, so it doesn't
+        // swing around as you look about.
+        let side = dir.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
         let points = (0..=24).map(|i| {
             let k = i as f32 / 24.0;
             hand + span * k + side * sag * (std::f32::consts::PI * k).sin()
