@@ -14,7 +14,7 @@ use super::camera::PlayerCamera;
 use crate::sim::SimMaterial;
 use crate::sim::asteroids::FIELD_DIRECTION;
 use crate::sim::frame::BodyFrame;
-use crate::sim::player::{Mode, Player};
+use crate::sim::player::{Grapple, Mode, Player, PlayerCommand};
 use crate::sim::ship::HullPart;
 use crate::sim::tuning::Tuning;
 
@@ -285,11 +285,13 @@ pub fn update_dust(
 /// Draws the grapple rope and, optionally, debug vectors.
 pub fn draw_gizmos(
     mut gizmos: Gizmos,
+    time: Res<Time>,
     tuning: Res<Tuning>,
-    player: Single<&Player>,
+    player: Single<(&Player, &PlayerCommand)>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
     camera: Single<&Transform, With<PlayerCamera>>,
 ) {
+    let (player, command) = *player;
     if let Some(grapple) = player.grapple {
         if let Ok(body) = transforms.get(grapple.body) {
             let frame = BodyFrame {
@@ -299,14 +301,29 @@ pub fn draw_gizmos(
             };
             let anchor = frame.point_to_world(grapple.anchor);
             let hand = camera.translation + camera.rotation * Vec3::new(0.25, -0.25, -0.4);
-            let taut = grapple.tension > 1.0;
-            let color = if taut {
-                Color::srgb(1.0, 0.85, 0.3)
-            } else {
-                Color::srgb(0.6, 0.55, 0.4)
-            };
-            gizmos.line(hand, anchor, color);
-            gizmos.sphere(Isometry3d::from_translation(anchor), 0.08, color);
+            // Slack is measured from the body center, as the sim does; the
+            // hand is only where the rope is drawn from.
+            let own_frame = player
+                .mode
+                .body()
+                .and_then(|b| transforms.get(b).ok())
+                .map(|t| BodyFrame {
+                    position: t.translation,
+                    rotation: t.rotation,
+                    ..BodyFrame::IDENTITY
+                });
+            let (body_center, _) = player.mode.world_kinematics(&tuning, own_frame.as_ref());
+            draw_rope(
+                &mut gizmos,
+                &tuning,
+                &grapple,
+                command.reel_in,
+                grapple.length - body_center.distance(anchor),
+                hand,
+                anchor,
+                camera.rotation * Vec3::X,
+                time.elapsed_secs(),
+            );
         }
     }
     if !tuning.show_gizmos {
@@ -351,4 +368,65 @@ pub fn draw_gizmos(
             );
         }
     }
+}
+
+/// Rope states, readable at a glance:
+/// - slack: grey, sagging by how much spare rope there is;
+/// - taut and holding: straight, pale gold;
+/// - pulling (reeling or under load): orange to red with load, with dashes
+///   crawling toward you while the winch runs.
+#[allow(clippy::too_many_arguments)]
+fn draw_rope(
+    gizmos: &mut Gizmos,
+    tuning: &Tuning,
+    grapple: &Grapple,
+    reeling: bool,
+    slack: f32,
+    hand: Vec3,
+    anchor: Vec3,
+    camera_right: Vec3,
+    t: f32,
+) {
+    let span = anchor - hand;
+    let distance = span.length();
+    let dir = span / distance.max(1e-3);
+    let load = (grapple.tension / tuning.reel_force).clamp(0.0, 1.0);
+    let pulling = reeling || grapple.tension > tuning.player_mass * 2.0;
+
+    let color = if slack > 0.15 && grapple.tension < 1.0 {
+        Color::srgb(0.45, 0.45, 0.45)
+    } else if pulling {
+        Color::srgb(1.0, 0.65 - 0.5 * load, 0.15 - 0.1 * load)
+    } else {
+        Color::srgb(1.0, 0.9, 0.55)
+    };
+
+    if slack > 0.15 && grapple.tension < 1.0 {
+        // Sag as if the spare rope bowed out sideways.
+        let sag = (((distance + slack).powi(2) - distance.powi(2))
+            .max(0.0)
+            .sqrt()
+            * 0.35)
+            .min(4.0);
+        let side = dir.cross(camera_right).normalize_or_zero();
+        let points = (0..=24).map(|i| {
+            let k = i as f32 / 24.0;
+            hand + span * k + side * sag * (std::f32::consts::PI * k).sin()
+        });
+        gizmos.linestrip(points, color);
+    } else {
+        gizmos.line(hand, anchor, color);
+        if reeling {
+            // Dashes running toward the hand at the reel speed.
+            let spacing = 1.5;
+            let offset = (t * tuning.reel_speed) % spacing;
+            let mut d = distance - offset;
+            while d > 0.3 {
+                let a = hand + dir * d;
+                gizmos.line(a, a - dir * 0.4, Color::WHITE);
+                d -= spacing;
+            }
+        }
+    }
+    gizmos.sphere(Isometry3d::from_translation(anchor), 0.08, color);
 }

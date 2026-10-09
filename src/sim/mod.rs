@@ -72,7 +72,8 @@ impl Plugin for SimPlugin {
                         .in_set(SimSystems::Drive),
                 );
         }
-        app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
+        app.add_message::<player::PlayerEvent>()
+            .insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
             .insert_resource(Gravity(Vec3::ZERO))
             .add_systems(Startup, (ship::spawn_ship, player::spawn_player).chain())
             .configure_sets(

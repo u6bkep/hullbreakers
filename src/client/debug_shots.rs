@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
-use crate::sim::player::{Mode, Player};
+use crate::sim::player::{Grapple, Mode, Player};
 use crate::sim::ship::Ship;
 
 #[derive(Resource)]
@@ -42,6 +42,14 @@ enum Vantage {
         look_at: Vec3,
         /// Drift relative to the ship, in ship axes.
         drift: Vec3,
+    },
+    /// EVA at `offset`, grappled to `anchor` (ship local) with `slack` meters
+    /// of spare rope, drifting away along the rope at `drift` m/s.
+    Rope {
+        offset: Vec3,
+        anchor: Vec3,
+        slack: f32,
+        drift: f32,
     },
 }
 
@@ -96,6 +104,24 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
                 offset: Vec3::new(-10.0, 4.0, 20.0),
                 look_at: Vec3::new(-60.0, 4.0, -20.0),
                 drift: Vec3::new(0.0, 0.0, 3.0),
+            },
+        ),
+        (
+            "rope_slack",
+            Vantage::Rope {
+                offset: Vec3::new(-8.0, 9.0, 28.0),
+                anchor: Vec3::new(0.0, 4.1, 6.0),
+                slack: 6.0,
+                drift: 0.0,
+            },
+        ),
+        (
+            "rope_taut",
+            Vantage::Rope {
+                offset: Vec3::new(-8.0, 9.0, 28.0),
+                anchor: Vec3::new(0.0, 4.1, 6.0),
+                slack: 0.0,
+                drift: 2.0,
             },
         ),
     ]
@@ -173,7 +199,36 @@ pub fn run_shot_script(
                 pitch: 0.0,
             }
         }
+        // Set up below, along with the grapple.
+        Vantage::Rope { .. } => player.mode,
     };
+    if let Vantage::Rope {
+        offset,
+        anchor,
+        slack,
+        drift,
+    } = shots[script.next].1
+    {
+        let position = ship_transform.transform_point(offset);
+        let anchor_w = ship_transform.transform_point(anchor);
+        let away = (position - anchor_w).normalize();
+        player.mode = Mode::Eva {
+            position,
+            velocity: away * drift,
+            orientation: Transform::from_translation(position)
+                .looking_at(anchor_w, ship_transform.up())
+                .rotation,
+            pitch: 0.0,
+        };
+        player.grapple = Some(Grapple {
+            body: ship_entity,
+            anchor,
+            length: position.distance(anchor_w) + slack,
+            tension: 0.0,
+        });
+    } else {
+        player.grapple = None;
+    }
     // Keep the scripted drift so the prograde marker is visible.
     player.flight_assist = false;
     player.discontinuity += 1;

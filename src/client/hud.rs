@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
-use avian3d::prelude::ColliderAabb;
+use avian3d::prelude::{ColliderAabb, SpatialQuery, SpatialQueryFilter};
 
 use super::camera::PlayerCamera;
 use super::input::MouseCaptured;
@@ -26,6 +26,8 @@ pub fn hud(
     bodies: Bodies,
     names: Query<&Name>,
     mut ships: Query<&mut Ship>,
+    camera: Single<&Transform, With<PlayerCamera>>,
+    spatial: SpatialQuery,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -45,6 +47,50 @@ pub fn hud(
         stroke,
     );
 
+    // Grapple target: a ring around the crosshair when something is in range.
+    let in_range = Dir3::new(camera.rotation * Vec3::NEG_Z)
+        .ok()
+        .and_then(|dir| {
+            spatial.cast_ray(
+                camera.translation,
+                dir,
+                tuning.grapple_range,
+                true,
+                &SpatialQueryFilter::default(),
+            )
+        });
+    if let Some(hit) = in_range {
+        let amber = egui::Color32::from_rgb(255, 190, 70);
+        painter.circle_stroke(center, 11.0, egui::Stroke::new(1.5, amber));
+        painter.text(
+            center + egui::vec2(16.0, -16.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!("{:.0} m", hit.distance),
+            egui::FontId::monospace(12.0),
+            amber,
+        );
+    }
+
+    // Rope load gauge under the crosshair.
+    if let Some(g) = player.grapple {
+        let load = (g.tension / tuning.reel_force).clamp(0.0, 1.0);
+        let bar =
+            egui::Rect::from_min_size(center + egui::vec2(-30.0, 20.0), egui::vec2(60.0, 4.0));
+        painter.rect_stroke(
+            bar,
+            1.0,
+            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(90)),
+            egui::StrokeKind::Outside,
+        );
+        let fill = egui::Rect::from_min_size(bar.min, egui::vec2(60.0 * load, 4.0));
+        let color = egui::Color32::from_rgb(
+            255,
+            (165.0 - 125.0 * load) as u8,
+            (40.0 - 25.0 * load) as u8,
+        );
+        painter.rect_filled(fill, 1.0, color);
+    }
+
     // Readouts.
     let name_of = |e: Option<Entity>| {
         e.and_then(|e| names.get(e).ok())
@@ -61,6 +107,7 @@ pub fn hud(
     egui::Area::new(egui::Id::new("readouts"))
         .anchor(egui::Align2::LEFT_BOTTOM, [16.0, -16.0])
         .show(ctx, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             let text = |s: String| {
                 egui::RichText::new(s)
                     .monospace()

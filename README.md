@@ -51,6 +51,16 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   jitter against the deck); sim discontinuities (landing, edge wraps) are hidden
   with a decaying pose offset.
 
+## Feedback
+
+- Sounds are synthesized at startup (`client/sfx.rs`) and heard through the
+  suit (non-spatial): footsteps, landing/impact clanks, release, jetpack hiss,
+  grapple fire/attach/release, reel whine under load, rope twang, rip-off warning.
+- Rope: grey and sagging when slack, straight pale gold when taut, orange to red
+  under load with dashes running in while reeling; load gauge under the crosshair.
+- Crosshair ring + distance when a surface is within grapple range.
+- Camera shake on impacts and rip-offs, a dip on landing, FOV kick on boost.
+
 ## Tuning
 
 All feel parameters are in `sim/tuning.rs` and appear in the Tab panel. "Save"

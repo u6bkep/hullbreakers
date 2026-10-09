@@ -8,8 +8,9 @@
 
 use bevy::prelude::*;
 
+use super::sfx::STEP_LENGTH;
 use crate::sim::frame::BodyFrame;
-use crate::sim::player::{Mode, Player, PlayerCommand, PreviousMode};
+use crate::sim::player::{Detach, Mode, Player, PlayerCommand, PlayerEvent, PreviousMode};
 use crate::sim::tuning::Tuning;
 
 #[derive(Component)]
@@ -55,8 +56,36 @@ fn render_frame(transform: &Transform) -> BodyFrame {
     }
 }
 
+/// Transient camera effects driven by gameplay events.
+#[derive(Resource, Default)]
+pub struct CameraFx {
+    /// 0..1; shake amplitude is trauma².
+    trauma: f32,
+    /// Downward eye offset after a landing, in meters.
+    dip: f32,
+    /// Extra FOV from boosting, in degrees.
+    fov_kick: f32,
+}
+
+pub fn camera_fx_events(mut fx: ResMut<CameraFx>, mut events: MessageReader<PlayerEvent>) {
+    for event in events.read() {
+        match *event {
+            PlayerEvent::Landed { speed, .. } => {
+                fx.dip = (fx.dip + 0.04 + 0.04 * speed).min(0.3);
+                fx.trauma += speed * 0.06;
+            }
+            PlayerEvent::Impact { speed, .. } => fx.trauma += speed * 0.1,
+            PlayerEvent::Detached(Detach::RippedOff(_) | Detach::Yanked(_)) => fx.trauma += 0.5,
+            PlayerEvent::RopeSnapped => fx.trauma += 0.3,
+            _ => {}
+        }
+        fx.trauma = fx.trauma.min(1.0);
+    }
+}
+
 pub fn update_camera(
     time: Res<Time>,
+    mut fx: ResMut<CameraFx>,
     fixed: Res<Time<Fixed>>,
     tuning: Res<Tuning>,
     player: Single<(&Player, &PreviousMode, &PlayerCommand)>,
@@ -99,7 +128,8 @@ pub fn update_camera(
             let frame = render_frame(body_transform);
             // Head bob scales with walking speed.
             let speed = velocity.length();
-            smooth.bob_phase += speed * time.delta_secs() * 2.2;
+            // One bob (half a sine period) per footstep.
+            smooth.bob_phase += speed * time.delta_secs() * std::f32::consts::PI / STEP_LENGTH;
             let bob = up
                 * smooth.bob_phase.sin().abs()
                 * tuning.head_bob
@@ -129,10 +159,28 @@ pub fn update_camera(
     smooth.last_eye = eye;
     smooth.last_rotation = rotation;
     eye += smooth.position_offset;
-    cam_transform.translation = eye;
-    cam_transform.rotation = (smooth.rotation_offset * rotation).normalize();
+    let mut rotation = (smooth.rotation_offset * rotation).normalize();
 
+    // Event effects: landing dip, shake, boost FOV.
+    let dt = time.delta_secs();
+    let t = time.elapsed_secs();
+    eye -= rotation * Vec3::Y * fx.dip;
+    let shake = fx.trauma * fx.trauma * 0.04;
+    rotation *= Quat::from_euler(
+        EulerRot::YXZ,
+        shake * (t * 31.0).sin(),
+        shake * (t * 37.0 + 1.3).sin(),
+        shake * 1.5 * (t * 23.0 + 2.1).sin(),
+    );
+    fx.dip *= (-dt * 7.0).exp();
+    fx.trauma = (fx.trauma - dt * 1.6).max(0.0);
+    let boosting = matches!(current, Mode::Eva { .. }) && command.sprint && player.thrust > 0.1;
+    let kick_target = if boosting { 8.0 } else { 0.0 };
+    fx.fov_kick += (kick_target - fx.fov_kick) * (1.0 - (-dt * 4.0).exp());
+
+    cam_transform.translation = eye;
+    cam_transform.rotation = rotation;
     if let Projection::Perspective(p) = &mut *projection {
-        p.fov = tuning.fov_deg.to_radians();
+        p.fov = (tuning.fov_deg + fx.fov_kick).to_radians();
     }
 }

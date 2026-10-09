@@ -189,6 +189,77 @@ impl Mode {
     }
 }
 
+/// Why the boots let go.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Detach {
+    Jumped,
+    BootsOff,
+    /// The surface accelerated away harder than adhesion (m/s²).
+    RippedOff(f32),
+    /// The rope out-pulled the boots (N).
+    Yanked(f32),
+}
+
+/// Discrete things that happened to a player this tick, for audio, camera
+/// effects, and the HUD.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub enum PlayerEvent {
+    Detached(Detach),
+    /// Boots caught a surface; relative speed in m/s. `rock` = asteroid.
+    Landed {
+        speed: f32,
+        body: Entity,
+    },
+    /// Bounced off something at this closing speed (m/s).
+    Impact {
+        speed: f32,
+        body: Entity,
+    },
+    /// Climbed onto a wall or wrapped around an edge.
+    SurfaceChanged {
+        body: Entity,
+    },
+    GrappleAttached {
+        distance: f32,
+        body: Entity,
+    },
+    GrappleMissed,
+    GrappleReleased,
+    RopeSnapped,
+    BootsToggled(bool),
+    AssistToggled(bool),
+    ReferenceSet {
+        distance: f32,
+    },
+    NoReferenceTarget,
+}
+
+impl std::fmt::Display for PlayerEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            PlayerEvent::Detached(Detach::Jumped) => write!(f, "jumped"),
+            PlayerEvent::Detached(Detach::BootsOff) => write!(f, "boots off"),
+            PlayerEvent::Detached(Detach::RippedOff(a)) => write!(f, "ripped off ({a:.1} m/s²)"),
+            PlayerEvent::Detached(Detach::Yanked(n)) => write!(f, "yanked off by rope ({n:.0} N)"),
+            PlayerEvent::Landed { speed, .. } => write!(f, "landed at {speed:.1} m/s"),
+            PlayerEvent::Impact { speed, .. } => write!(f, "bounced at {speed:.1} m/s"),
+            PlayerEvent::SurfaceChanged { .. } => write!(f, ""),
+            PlayerEvent::GrappleAttached { distance, .. } => {
+                write!(f, "grappled at {distance:.1} m")
+            }
+            PlayerEvent::GrappleMissed => write!(f, "grapple missed"),
+            PlayerEvent::GrappleReleased => write!(f, "grapple released"),
+            PlayerEvent::RopeSnapped => write!(f, "rope snapped"),
+            PlayerEvent::BootsToggled(on) => write!(f, "boots {}", if on { "on" } else { "off" }),
+            PlayerEvent::AssistToggled(on) => {
+                write!(f, "flight assist {}", if on { "on" } else { "off" })
+            }
+            PlayerEvent::ReferenceSet { distance } => write!(f, "reference set at {distance:.0} m"),
+            PlayerEvent::NoReferenceTarget => write!(f, "no body under crosshair"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grapple {
     pub body: Entity,
@@ -214,6 +285,20 @@ pub struct Player {
     /// wraps, wall transitions) so the camera can smooth over it.
     pub discontinuity: u32,
     pub last_event: String,
+    /// Jetpack output last tick as a fraction of base thrust (boost > 1).
+    pub thrust: f32,
+    /// Events raised this tick; flushed to [`PlayerEvent`] messages.
+    outbox: Vec<PlayerEvent>,
+}
+
+impl Player {
+    fn emit(&mut self, event: PlayerEvent) {
+        let text = event.to_string();
+        if !text.is_empty() {
+            self.last_event = text;
+        }
+        self.outbox.push(event);
+    }
 }
 
 /// The mode at the start of the most recent tick, for render interpolation.
@@ -240,6 +325,8 @@ pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::shi
             detach_timer: 0.0,
             discontinuity: 0,
             last_event: String::new(),
+            thrust: 0.0,
+            outbox: Vec::new(),
         },
         PreviousMode(mode),
         PlayerCommand::default(),
@@ -381,6 +468,7 @@ pub fn player_tick(
     mas: MoveAndSlide,
     mut bodies: Bodies,
     mut players: Query<(&mut Player, &mut PlayerCommand, &mut PreviousMode)>,
+    mut events: MessageWriter<PlayerEvent>,
 ) {
     let ctx = TickContext {
         tuning: &tuning,
@@ -396,11 +484,14 @@ pub fn player_tick(
         let cmd = command.consume_edges();
         let player = &mut *player;
         player.detach_timer -= ctx.dt;
+        player.thrust = 0.0;
         if cmd.toggle_boots {
             player.boots_on = !player.boots_on;
+            player.emit(PlayerEvent::BootsToggled(player.boots_on));
         }
         if cmd.toggle_assist {
             player.flight_assist = !player.flight_assist;
+            player.emit(PlayerEvent::AssistToggled(player.flight_assist));
         }
         let roll = cmd.roll * tuning.roll_rate_deg.to_radians() * ctx.dt;
         player.mode.apply_look(cmd.look, roll);
@@ -410,15 +501,17 @@ pub fn player_tick(
         if cmd.grapple {
             if player.grapple.take().is_none() {
                 fire_grapple(&ctx, &bodies, player);
+            } else {
+                player.emit(PlayerEvent::GrappleReleased);
             }
         }
         if cmd.set_reference {
             match aim(&ctx, &bodies, player, REFERENCE_RANGE) {
                 Some((body, _, distance)) => {
                     player.reference_body = Some(body);
-                    player.last_event = format!("reference set at {distance:.0} m");
+                    player.emit(PlayerEvent::ReferenceSet { distance });
                 }
-                None => player.last_event = "no body under crosshair".into(),
+                None => player.emit(PlayerEvent::NoReferenceTarget),
             }
         }
         if player
@@ -431,6 +524,7 @@ pub fn player_tick(
             Mode::Booted { .. } => booted_tick(&ctx, &mut bodies, player, &cmd),
             Mode::Eva { .. } => eva_tick(&ctx, &mut bodies, player, &cmd),
         }
+        events.write_batch(player.outbox.drain(..));
     }
 }
 
@@ -457,7 +551,7 @@ fn aim(
 
 fn fire_grapple(ctx: &TickContext, bodies: &Bodies, player: &mut Player) {
     let Some((body, point, distance)) = aim(ctx, bodies, player, ctx.tuning.grapple_range) else {
-        player.last_event = "grapple missed".into();
+        player.emit(PlayerEvent::GrappleMissed);
         return;
     };
     let Some(body_frame) = bodies.frame(body) else {
@@ -470,7 +564,7 @@ fn fire_grapple(ctx: &TickContext, bodies: &Bodies, player: &mut Player) {
         tension: 0.0,
     });
     player.reference_body = Some(body);
-    player.last_event = format!("grappled at {distance:.1} m");
+    player.emit(PlayerEvent::GrappleAttached { distance, body });
 }
 
 /// Updates rope length from reel input; returns the winch's impulse limit.
@@ -512,19 +606,19 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     };
     let previous_frame = bodies.previous_frame(body).unwrap_or(frame);
 
-    let leave = move |player: &mut Player, velocity: Vec3, event: &str| {
+    let leave = move |player: &mut Player, velocity: Vec3, why: Detach| {
         player.mode = booted_to_eva(&frame, feet, up, velocity, orientation, pitch, t);
         player.detach_timer = t.detach_cooldown;
         player.discontinuity += 1;
-        player.last_event = event.into();
+        player.emit(PlayerEvent::Detached(why));
     };
 
     if !player.boots_on {
-        leave(player, velocity + up * 0.3, "boots off");
+        leave(player, velocity + up * 0.3, Detach::BootsOff);
         return;
     }
     if cmd.jump {
-        leave(player, velocity + up * t.jump_speed, "jumped");
+        leave(player, velocity + up * t.jump_speed, Detach::Jumped);
         return;
     }
 
@@ -533,11 +627,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     let accel = frame.dir_to_local(frame.point_acceleration(&previous_frame, ctx.dt, feet_w));
     let accel_normal = accel.dot(up);
     if -accel_normal > t.adhesion_accel {
-        leave(
-            player,
-            velocity,
-            &format!("ripped off ({:.1} m/s²)", -accel_normal),
-        );
+        leave(player, velocity, Detach::RippedOff(-accel_normal));
         return;
     }
 
@@ -591,18 +681,14 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                 if peel > t.player_mass * t.adhesion_accel || drag > t.player_mass * t.shear_accel {
                     // The rope beats the boots. Solve it as EVA next tick.
                     player.grapple = Some(grapple);
-                    leave(
-                        player,
-                        velocity,
-                        &format!("yanked off by rope ({:.0} N)", tension),
-                    );
+                    leave(player, velocity, Detach::Yanked(tension));
                     return;
                 }
                 if imp.clamped && reeling {
                     grapple.length = grapple.length.max(anchor_w.distance(center_w));
                 } else if imp.clamped {
                     player.grapple = None;
-                    player.last_event = "rope snapped".into();
+                    player.emit(PlayerEvent::RopeSnapped);
                 }
                 bodies.apply_impulse(grapple.body, -imp.direction * imp.magnitude, anchor_w);
                 bodies.apply_impulse(body, imp.direction * imp.magnitude, feet_w);
@@ -681,6 +767,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                 orientation = turn * orientation;
                 velocity = turn * velocity;
                 player.discontinuity += 1;
+                player.emit(PlayerEvent::SurfaceChanged { body });
                 player.mode = Mode::Booted {
                     body,
                     feet: new_feet,
@@ -753,6 +840,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                 orientation = turn * orientation;
                 velocity = turn * velocity;
                 player.discontinuity += 1;
+                player.emit(PlayerEvent::SurfaceChanged { body });
                 player.mode = Mode::Booted {
                     body,
                     feet: new_feet,
@@ -859,7 +947,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
     let rope_pulling = player
         .grapple
         .is_some_and(|g| g.tension > 0.0 || cmd.reel_in);
-    velocity += if cmd.brake {
+    let thrust_dv = if cmd.brake {
         (reference_velocity - velocity).clamp_length_max(t.brake_accel * ctx.dt)
     } else if player.flight_assist && !(rope_pulling && input == Vec3::ZERO) {
         // Steer toward the commanded velocity relative to the reference
@@ -870,6 +958,8 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
     } else {
         input * max_dv
     };
+    velocity += thrust_dv;
+    player.thrust = thrust_dv.length() / (t.thrust_accel * ctx.dt);
 
     // Rope.
     if let Some(mut grapple) = player.grapple {
@@ -907,7 +997,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
                 }
             }
             player.grapple = if snapped {
-                player.last_event = "rope snapped".into();
+                player.emit(PlayerEvent::RopeSnapped);
                 None
             } else {
                 Some(grapple)
@@ -983,7 +1073,10 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
                 player.mode = landed;
                 player.reference_body = Some(body);
                 player.discontinuity += 1;
-                player.last_event = format!("landed at {:.1} m/s", relative.length());
+                player.emit(PlayerEvent::Landed {
+                    speed: relative.length(),
+                    body,
+                });
                 return;
             }
         }
@@ -1006,8 +1099,11 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
         let impulse = normal * normal_impulse + friction;
         velocity += impulse * inverse_mass;
         bodies.apply_impulse(body, -impulse, point);
-        if -closing > 1.0 {
-            player.last_event = format!("bounced at {:.1} m/s", -closing);
+        if -closing > 0.5 {
+            player.emit(PlayerEvent::Impact {
+                speed: -closing,
+                body,
+            });
         }
     }
 

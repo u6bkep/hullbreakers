@@ -6,6 +6,7 @@ pub mod debug_shots;
 pub mod hud;
 pub mod input;
 pub mod render;
+pub mod sfx;
 
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
@@ -17,6 +18,7 @@ impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EguiPlugin::default())
             .insert_resource(input::MouseCaptured(true))
+            .init_resource::<camera::CameraFx>()
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
             .add_systems(PreStartup, render::setup_materials)
@@ -27,6 +29,7 @@ impl Plugin for ClientPlugin {
                     render::setup_lighting,
                     render::setup_starfield,
                     render::setup_dust,
+                    sfx::setup_sounds,
                     render::setup_ship_lights.after(crate::sim::ship::spawn_ship),
                 ),
             )
@@ -46,7 +49,15 @@ impl Plugin for ClientPlugin {
                     .chain()
                     .before(TransformSystems::Propagate),
             )
-            .add_systems(Update, render::draw_gizmos)
+            .add_systems(
+                Update,
+                (
+                    render::draw_gizmos,
+                    sfx::play_event_sounds,
+                    sfx::play_continuous_sounds,
+                    camera::camera_fx_events,
+                ),
+            )
             .add_systems(EguiPrimaryContextPass, (hud::reference_overlay, hud::hud));
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
