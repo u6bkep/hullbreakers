@@ -727,3 +727,24 @@ fn riding_a_rock_out_of_the_field_keeps_rock_and_field_around_you() {
         .count();
     assert!(near > 20, "only {near} rocks within 250 m of the player");
 }
+
+#[test]
+fn reference_body_is_chosen_with_crosshair_and_persists_while_booted() {
+    let mut app = app();
+    // A rock straight ahead of a player standing on the deck, visible through the open stern.
+    let rock = spawn_rock(&mut app, Vec3::new(0.0, 1.6, 60.0), 3.0, Vec3::ZERO);
+    let mode = booted(&mut app, Vec3::new(0.0, 0.01, 10.0), Vec3::Y, Vec3::Z);
+    set_mode(&mut app, mode);
+    command(&mut app, |c| c.set_reference = true);
+    ticks(&mut app, 1);
+    assert_eq!(
+        player(&mut app).reference_body,
+        Some(rock),
+        "{}",
+        player(&mut app).last_event
+    );
+    // Still booted on the ship, the explicit choice sticks.
+    ticks(&mut app, 60);
+    assert_eq!(booted_state(&mut app).0, ship(&mut app));
+    assert_eq!(player(&mut app).reference_body, Some(rock));
+}

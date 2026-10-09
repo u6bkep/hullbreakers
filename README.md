@@ -19,6 +19,7 @@ SPACE_GAME_SHOTS=dir cargo run   # scripted screenshot tour, then exit
 | Q / E        | —                | roll                  |
 | F            | toggle mag boots | toggle mag boots (on = land on contact) |
 | V            | toggle flight assist (on by default) ||
+| T            | set reference body (what assist/brake match) to the one under the crosshair ||
 | X (hold)     | —                | brake relative to last body touched/grappled |
 | LMB          | fire / release grapple              ||
 | RMB (hold)   | reel in                             ||

@@ -50,6 +50,8 @@ pub struct PlayerCommand {
     pub toggle_boots: bool,
     pub toggle_assist: bool,
     pub grapple: bool,
+    /// Make the body under the crosshair the reference frame.
+    pub set_reference: bool,
 }
 
 impl PlayerCommand {
@@ -59,6 +61,7 @@ impl PlayerCommand {
         self.jump = false;
         self.toggle_boots = false;
         self.toggle_assist = false;
+        self.set_reference = false;
         self.grapple = false;
         taken
     }
@@ -128,6 +131,32 @@ impl Mode {
         match (self, frame) {
             (Mode::Booted { .. }, Some(f)) => (f.point_to_world(eye), f.rotation * rot),
             _ => (eye, rot),
+        }
+    }
+
+    /// World-space body center and velocity. `frame` must be the frame of
+    /// the body underfoot when booted.
+    pub fn world_kinematics(&self, tuning: &Tuning, frame: Option<&BodyFrame>) -> (Vec3, Vec3) {
+        match (*self, frame) {
+            (
+                Mode::Booted {
+                    feet, up, velocity, ..
+                },
+                Some(f),
+            ) => {
+                let center = feet + up * (tuning.capsule_height / 2.0);
+                (
+                    f.point_to_world(center),
+                    f.velocity_to_world(center, velocity),
+                )
+            }
+            (Mode::Booted { feet, velocity, .. }, None) => (feet, velocity),
+            (
+                Mode::Eva {
+                    position, velocity, ..
+                },
+                _,
+            ) => (position, velocity),
         }
     }
 
@@ -383,6 +412,15 @@ pub fn player_tick(
                 fire_grapple(&ctx, &bodies, player);
             }
         }
+        if cmd.set_reference {
+            match aim(&ctx, &bodies, player, REFERENCE_RANGE) {
+                Some((body, _, distance)) => {
+                    player.reference_body = Some(body);
+                    player.last_event = format!("reference set at {distance:.0} m");
+                }
+                None => player.last_event = "no body under crosshair".into(),
+            }
+        }
         if player
             .grapple
             .is_some_and(|g| bodies.frame(g.body).is_none())
@@ -396,35 +434,43 @@ pub fn player_tick(
     }
 }
 
-fn fire_grapple(ctx: &TickContext, bodies: &Bodies, player: &mut Player) {
+/// How far away a body can be picked as the reference frame.
+const REFERENCE_RANGE: f32 = 2000.0;
+
+/// The body under the crosshair: (body, world hit point, distance).
+fn aim(
+    ctx: &TickContext,
+    bodies: &Bodies,
+    player: &Player,
+    range: f32,
+) -> Option<(Entity, Vec3, f32)> {
     let frame = player.mode.body().and_then(|b| bodies.frame(b));
     let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
-    let Ok(dir) = Dir3::new(view * Vec3::NEG_Z) else {
-        return;
-    };
-    let Some(hit) =
-        ctx.mas
-            .spatial_query
-            .cast_ray(eye, dir, ctx.tuning.grapple_range, true, &ctx.filter)
-    else {
+    let dir = Dir3::new(view * Vec3::NEG_Z).ok()?;
+    let hit = ctx
+        .mas
+        .spatial_query
+        .cast_ray(eye, dir, range, true, &ctx.filter)?;
+    let body = bodies.body_of_collider(hit.entity)?;
+    Some((body, eye + dir * hit.distance, hit.distance))
+}
+
+fn fire_grapple(ctx: &TickContext, bodies: &Bodies, player: &mut Player) {
+    let Some((body, point, distance)) = aim(ctx, bodies, player, ctx.tuning.grapple_range) else {
         player.last_event = "grapple missed".into();
-        return;
-    };
-    let Some(body) = bodies.body_of_collider(hit.entity) else {
         return;
     };
     let Some(body_frame) = bodies.frame(body) else {
         return;
     };
-    let point = eye + dir * hit.distance;
     player.grapple = Some(Grapple {
         body,
         anchor: body_frame.point_to_local(point),
-        length: hit.distance,
+        length: distance,
         tension: 0.0,
     });
     player.reference_body = Some(body);
-    player.last_event = format!("grappled at {:.1} m", hit.distance);
+    player.last_event = format!("grappled at {distance:.1} m");
 }
 
 /// Updates rope length from reel input; returns the winch's impulse limit.
@@ -465,7 +511,6 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
         return;
     };
     let previous_frame = bodies.previous_frame(body).unwrap_or(frame);
-    player.reference_body = Some(body);
 
     let leave = move |player: &mut Player, velocity: Vec3, event: &str| {
         player.mode = booted_to_eva(&frame, feet, up, velocity, orientation, pitch, t);

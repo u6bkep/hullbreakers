@@ -47,7 +47,7 @@ impl Plugin for ClientPlugin {
                     .before(TransformSystems::Propagate),
             )
             .add_systems(Update, render::draw_gizmos)
-            .add_systems(EguiPrimaryContextPass, hud::hud);
+            .add_systems(EguiPrimaryContextPass, (hud::reference_overlay, hud::hud));
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
                 .add_systems(Update, debug_shots::run_shot_script);

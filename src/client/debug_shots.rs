@@ -40,6 +40,8 @@ enum Vantage {
     Eva {
         offset: Vec3,
         look_at: Vec3,
+        /// Drift relative to the ship, in ship axes.
+        drift: Vec3,
     },
 }
 
@@ -77,6 +79,7 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
             Vantage::Eva {
                 offset: Vec3::new(6.0, 5.0, 35.0),
                 look_at: Vec3::new(0.0, 1.5, 0.0),
+                drift: Vec3::new(-1.5, 0.8, -2.5),
             },
         ),
         (
@@ -84,6 +87,15 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
             Vantage::Eva {
                 offset: Vec3::new(0.0, 8.0, -25.0),
                 look_at: Vec3::new(0.0, 8.0, -200.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        (
+            "eva_away",
+            Vantage::Eva {
+                offset: Vec3::new(-10.0, 4.0, 20.0),
+                look_at: Vec3::new(-60.0, 4.0, -20.0),
+                drift: Vec3::new(0.0, 0.0, 3.0),
             },
         ),
     ]
@@ -144,7 +156,11 @@ pub fn run_shot_script(
                 pitch,
             }
         }
-        Vantage::Eva { offset, look_at } => {
+        Vantage::Eva {
+            offset,
+            look_at,
+            drift,
+        } => {
             let position = ship_transform.transform_point(offset);
             let target = ship_transform.transform_point(look_at);
             let orientation = Transform::from_translation(position)
@@ -152,12 +168,14 @@ pub fn run_shot_script(
                 .rotation;
             Mode::Eva {
                 position,
-                velocity: Vec3::ZERO,
+                velocity: ship_transform.rotation * drift,
                 orientation,
                 pitch: 0.0,
             }
         }
     };
+    // Keep the scripted drift so the prograde marker is visible.
+    player.flight_assist = false;
     player.discontinuity += 1;
     script.next += 1;
 }
