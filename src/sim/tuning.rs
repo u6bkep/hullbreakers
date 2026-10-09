@@ -85,18 +85,18 @@ tuning! {
             refuel_rate: 15.0, 0.0, 100.0;
         }
         "Jetpack" {
-            thrust_accel: 4.0, 0.5, 20.0;
+            thrust_accel: 10.0, 0.5, 30.0;
             boost_multiplier: 2.0, 1.0, 5.0;
-            brake_accel: 4.0, 0.5, 20.0;
-            fuel_capacity: 60.0, 5.0, 500.0;
+            brake_accel: 10.0, 0.5, 30.0;
+            fuel_capacity: 150.0, 5.0, 500.0;
             roll_rate_deg: 90.0, 10.0, 360.0;
             bounce_restitution: 0.2, 0.0, 1.0;
             bounce_friction: 0.4, 0.0, 2.0;
         }
         "Grapple" {
-            grapple_range: 80.0, 5.0, 300.0;
-            reel_speed: 8.0, 0.5, 40.0;
-            reel_force: 2000.0, 100.0, 20000.0;
+            grapple_range: 200.0, 5.0, 500.0;
+            reel_speed: 20.0, 0.5, 60.0;
+            reel_force: 8000.0, 100.0, 40000.0;
             rope_break_force: 50000.0, 1000.0, 500000.0;
             rope_stiffness: 0.3, 0.0, 1.0;
         }

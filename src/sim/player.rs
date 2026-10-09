@@ -152,7 +152,7 @@ impl Mode {
                 *orientation *= Quat::from_rotation_x(unclamped - *pitch);
                 let view_axis = *orientation * Quat::from_rotation_x(*pitch) * Vec3::NEG_Z;
                 *orientation =
-                    (Quat::from_axis_angle(view_axis, -roll_angle) * *orientation).normalize();
+                    (Quat::from_axis_angle(view_axis, roll_angle) * *orientation).normalize();
             }
         }
     }
@@ -965,4 +965,25 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
         orientation,
         pitch,
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positive_roll_is_clockwise() {
+        // E (positive roll) dips the view's right side, like a clockwise turn of the head.
+        let mut mode = Mode::Eva {
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        };
+        mode.apply_look(Vec2::ZERO, 0.2);
+        let Mode::Eva { orientation, .. } = mode else {
+            unreachable!()
+        };
+        assert!((orientation * Vec3::X).y < -0.1);
+    }
 }
