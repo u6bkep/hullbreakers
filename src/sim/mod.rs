@@ -61,7 +61,11 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 FixedUpdate,
-                (asteroids::apply_field_speed, asteroids::recycle_field).in_set(SimSystems::Drive),
+                (
+                    asteroids::apply_field_speed,
+                    asteroids::recycle_field.after(update_pins),
+                )
+                    .in_set(SimSystems::Drive),
             );
         }
         app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ))

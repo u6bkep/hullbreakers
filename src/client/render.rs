@@ -15,6 +15,7 @@ use crate::sim::SimMaterial;
 use crate::sim::asteroids::FIELD_DIRECTION;
 use crate::sim::frame::BodyFrame;
 use crate::sim::player::{Mode, Player};
+use crate::sim::ship::HullPart;
 use crate::sim::tuning::Tuning;
 
 #[derive(Resource)]
@@ -95,18 +96,25 @@ fn append_shape(
     }
 }
 
-/// Gives every sim collider tagged with a [`SimMaterial`] a matching mesh.
+/// Gives every sim entity tagged with a [`SimMaterial`] a mesh: from its
+/// collider (so what you see is what your boots stand on), or from its
+/// [`HullPart`] box for visual-only ship pieces.
 pub fn attach_meshes(
     add: On<Add, SimMaterial>,
-    query: Query<(&Collider, &SimMaterial)>,
+    query: Query<(Option<&Collider>, Option<&HullPart>, &SimMaterial)>,
     materials: Res<Materials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
 ) {
-    let Ok((collider, kind)) = query.get(add.entity) else {
+    let Ok((collider, part, kind)) = query.get(add.entity) else {
         return;
     };
-    let Some(mesh) = collider_mesh(collider) else {
+    let mesh = match (collider, part) {
+        (Some(collider), _) => collider_mesh(collider),
+        (None, Some(part)) => Some(Cuboid::from_size(part.size).into()),
+        (None, None) => None,
+    };
+    let Some(mesh) = mesh else {
         return;
     };
     let material = match kind {

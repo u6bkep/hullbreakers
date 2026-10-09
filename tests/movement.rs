@@ -433,3 +433,132 @@ fn bouncing_off_a_light_rock_conserves_momentum() {
         "momentum {before} -> {after}"
     );
 }
+
+/// Deepest overlap between the player's capsule and any collider.
+fn penetration(app: &mut App) -> f32 {
+    use bevy::ecs::system::RunSystemOnce;
+    app.world_mut()
+        .run_system_once(
+            |mas: MoveAndSlide,
+             tuning: Res<Tuning>,
+             players: Query<&Player>,
+             poses: Query<(&Position, &Rotation)>| {
+                let t = &*tuning;
+                let shape =
+                    Collider::capsule(t.capsule_radius, t.capsule_height - 2.0 * t.capsule_radius);
+                let (center, rotation) = match players.single().unwrap().mode {
+                    Mode::Booted { body, feet, up, .. } => {
+                        let (pos, rot) = poses.get(body).unwrap();
+                        (
+                            pos.0 + rot.0 * (feet + up * t.capsule_height / 2.0),
+                            rot.0 * Quat::from_rotation_arc(Vec3::Y, up),
+                        )
+                    }
+                    Mode::Eva {
+                        position,
+                        orientation,
+                        ..
+                    } => (position, orientation),
+                };
+                let mut deepest = 0.0f32;
+                mas.intersections(
+                    &shape,
+                    center,
+                    rotation,
+                    0.0,
+                    &SpatialQueryFilter::default(),
+                    |_, c, _| {
+                        deepest = deepest.max(c.penetration);
+                        true
+                    },
+                );
+                deepest
+            },
+        )
+        .unwrap()
+}
+
+/// Walks with `movement` for `n` ticks, returning the deepest overlap seen.
+fn walk_checked(app: &mut App, movement: Vec3, n: usize) -> f32 {
+    command(app, |c| c.movement = movement);
+    let mut worst = 0.0f32;
+    for _ in 0..n {
+        ticks(app, 1);
+        worst = worst.max(penetration(app));
+    }
+    worst
+}
+
+#[test]
+fn console_edge_toward_bow_does_not_embed() {
+    let mut app = app();
+    // On top of the bridge console, walking toward the bow wall.
+    let mode = booted(&mut app, Vec3::new(0.0, 1.01, -12.8), Vec3::Y, Vec3::NEG_Z);
+    set_mode(&mut app, mode);
+    let worst = walk_checked(&mut app, Vec3::Z, 240);
+    assert!(worst < 0.06, "capsule embedded {worst} m");
+    booted_state(&mut app);
+}
+
+#[test]
+fn window_slot_does_not_let_player_through() {
+    let mut app = app();
+    // Beside the console, walking into the bow wall below the window slot.
+    let mode = booted(&mut app, Vec3::new(2.8, 0.01, -12.0), Vec3::Y, Vec3::NEG_Z);
+    set_mode(&mut app, mode);
+    command(&mut app, |c| c.movement = Vec3::Z);
+    let (mut worst, mut furthest) = (0.0f32, f32::MAX);
+    for _ in 0..300 {
+        ticks(&mut app, 1);
+        worst = worst.max(penetration(&mut app));
+        furthest = furthest.min(booted_state(&mut app).1.z);
+    }
+    assert!(worst < 0.06, "capsule embedded {worst} m");
+    // The sill spans z = -15..-14.7; standing on it is fine, beyond is outside.
+    assert!(furthest > -15.0, "got outside the bow, z = {furthest}");
+}
+
+#[test]
+fn wandering_never_embeds() {
+    let mut app = app();
+    let mut rng = 0x9e3779b9u32;
+    let mut next = || {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        rng as f32 / u32::MAX as f32
+    };
+    let mut worst = 0.0f32;
+    for _ in 0..60 {
+        let yaw = (next() - 0.5) * 3.0;
+        let movement = Vec3::new(next() * 2.0 - 1.0, 0.0, next() * 2.0 - 1.0);
+        command(&mut app, |c| {
+            c.look.x += yaw;
+            c.sprint = true;
+        });
+        worst = worst.max(walk_checked(&mut app, movement, 30));
+    }
+    let (_, feet, up, _) = booted_state(&mut app);
+    assert!(
+        worst < 0.06,
+        "capsule embedded {worst} m (ended at {feet}, up {up})"
+    );
+}
+
+#[test]
+fn skids_when_ship_accelerates_beyond_shear() {
+    let mut tuning = Tuning::default();
+    tuning.ship_max_accel = 30.0;
+    tuning.lurch_delta_v = 10.0;
+    let mut app = app_with(tuning);
+    ticks(&mut app, 5);
+    app.world_mut()
+        .query::<&mut Ship>()
+        .single_mut(app.world_mut())
+        .unwrap()
+        .lurch();
+    ticks(&mut app, 3);
+    let (_, _, _, velocity) = booted_state(&mut app);
+    // Ship lurches toward -Z; we slide aft, toward +Z, relative to the deck.
+    assert!(velocity.z > 0.5, "no skid, velocity {velocity}");
+}

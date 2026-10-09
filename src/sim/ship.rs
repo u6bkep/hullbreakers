@@ -92,22 +92,46 @@ fn hull_layout() -> Vec<HullBox> {
     ]
 }
 
+/// Visual-only hull piece; the collision shape is the ship's compound collider.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct HullPart {
+    pub size: Vec3,
+}
+
+/// The ship's collision is one compound collider on the body entity itself.
+/// Avian only re-syncs *child* collider poses at the start of each physics
+/// step, so child colliders would be queried a tick stale (v·dt off) by the
+/// player controller, which runs after the step.
 pub fn spawn_ship(mut commands: Commands) {
+    let layout = hull_layout();
+    let collider = Collider::compound(
+        layout
+            .iter()
+            .map(|b| {
+                (
+                    b.center,
+                    Quat::IDENTITY,
+                    Collider::cuboid(b.size.x, b.size.y, b.size.z),
+                )
+            })
+            .collect(),
+    );
     commands
         .spawn((
             Name::new("Ship"),
             Ship::default(),
             RigidBody::Kinematic,
+            collider,
             SleepingDisabled,
             PreviousVelocity::default(),
             Transform::default(),
             Visibility::default(),
         ))
         .with_children(|ship| {
-            for (i, b) in hull_layout().into_iter().enumerate() {
+            for (i, b) in layout.into_iter().enumerate() {
                 ship.spawn((
                     Name::new(format!("Hull {i}")),
-                    Collider::cuboid(b.size.x, b.size.y, b.size.z),
+                    HullPart { size: b.size },
                     Transform::from_translation(b.center),
                     b.material,
                 ));

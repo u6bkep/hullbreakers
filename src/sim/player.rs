@@ -313,6 +313,30 @@ fn switch_frame(
     )
 }
 
+/// Deepest allowed overlap for a booted capsule after a transition. Avian's
+/// depenetration ignores overlaps deeper than 0.5 m, so transitions must never
+/// create them.
+const MAX_TRANSITION_PENETRATION: f32 = 0.03;
+
+/// Whether a booted capsule standing at `feet` with `up` (body-local) is clear
+/// of geometry.
+fn capsule_fits(ctx: &TickContext, frame: &BodyFrame, feet: Vec3, up: Vec3) -> bool {
+    let half = ctx.tuning.capsule_height / 2.0;
+    let mut deepest = 0.0f32;
+    ctx.mas.intersections(
+        &capsule(ctx.tuning),
+        frame.point_to_world(feet + up * half),
+        frame.rotation * Quat::from_rotation_arc(Vec3::Y, up),
+        0.0,
+        &ctx.filter,
+        |_, contact, _| {
+            deepest = deepest.max(contact.penetration);
+            true
+        },
+    );
+    deepest < MAX_TRANSITION_PENETRATION
+}
+
 /// Everything a single player tick needs from the world.
 struct TickContext<'a, 'w, 's> {
     tuning: &'a Tuning,
@@ -340,7 +364,6 @@ pub fn player_tick(
         return;
     }
     for (mut player, mut command, mut previous) in &mut players {
-        previous.0 = player.mode;
         let cmd = command.consume_edges();
         let player = &mut *player;
         player.detach_timer -= ctx.dt;
@@ -349,6 +372,9 @@ pub fn player_tick(
         }
         let roll = cmd.roll * tuning.roll_rate_deg.to_radians() * ctx.dt;
         player.mode.apply_look(cmd.look, roll);
+        // Recorded after look so the camera interpolates movement only; look
+        // is applied immediately (see `update_camera`).
+        previous.0 = player.mode;
         if cmd.grapple {
             if player.grapple.take().is_none() {
                 fire_grapple(&ctx, &bodies, player);
@@ -443,6 +469,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     let leave = move |player: &mut Player, velocity: Vec3, event: &str| {
         player.mode = booted_to_eva(&frame, feet, up, velocity, orientation, pitch, t);
         player.detach_timer = t.detach_cooldown;
+        player.discontinuity += 1;
         player.last_event = event.into();
     };
 
@@ -510,8 +537,13 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
             ) {
                 let tension = imp.magnitude / ctx.dt;
                 grapple.tension = tension;
-                if tension > t.player_mass * t.adhesion_accel {
-                    // The rope pulls harder than the boots hold. Solve it as EVA next tick.
+                // Split the pull into peel-off (against adhesion) and drag
+                // along the surface (against shear). Pulling into the surface is free.
+                let pull = frame.dir_to_local(imp.direction) * tension;
+                let peel = pull.dot(up);
+                let drag = (pull - up * peel).length();
+                if peel > t.player_mass * t.adhesion_accel || drag > t.player_mass * t.shear_accel {
+                    // The rope beats the boots. Solve it as EVA next tick.
                     player.grapple = Some(grapple);
                     leave(
                         player,
@@ -538,14 +570,16 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     // Shear: tangential frame acceleration beyond what the boots grip makes us skid.
     let accel_tangent = accel - up * accel_normal;
     let excess = accel_tangent.length() - t.shear_accel;
-    if excess > 0.0 {
-        velocity -= accel_tangent.normalize() * excess * ctx.dt;
-    }
+    let skidding = excess > 0.0;
 
-    // Walking.
+    // Walking. While skidding the boots have no grip to spare for it.
     let heading = (orientation * Vec3::NEG_Z).normalize();
     let right = orientation * Vec3::X;
-    let wish_dir = (heading * cmd.movement.z + right * cmd.movement.x).clamp_length_max(1.0);
+    let wish_dir = if skidding {
+        Vec3::ZERO
+    } else {
+        (heading * cmd.movement.z + right * cmd.movement.x).clamp_length_max(1.0)
+    };
     let speed = if cmd.sprint {
         t.sprint_speed
     } else {
@@ -553,7 +587,11 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     };
     let wish = wish_dir * speed;
     velocity -= up * velocity.dot(up);
-    velocity = velocity.move_towards(wish, t.walk_accel * ctx.dt);
+    if skidding {
+        velocity -= accel_tangent.normalize() * excess * ctx.dt;
+    } else {
+        velocity = velocity.move_towards(wish, t.walk_accel * ctx.dt);
+    }
 
     // Move in a frozen snapshot of the body's frame.
     let shape = capsule(t);
@@ -592,20 +630,22 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
             let new_up = frame.dir_to_local(normal_w);
             let d = (feet - frame.point_to_local(point_w)).dot(new_up);
             let new_feet = feet - new_up * d + up * (t.capsule_radius + 0.02);
-            let turn = Quat::from_rotation_arc(up, new_up);
-            orientation = turn * orientation;
-            velocity = turn * velocity;
-            player.discontinuity += 1;
-            player.mode = Mode::Booted {
-                body,
-                feet: new_feet,
-                up: new_up,
-                velocity,
-                orientation,
-                pitch,
-            };
-            retarget_body(bodies, player, entity, &frame);
-            return;
+            if capsule_fits(ctx, &frame, new_feet, new_up) {
+                let turn = Quat::from_rotation_arc(up, new_up);
+                orientation = turn * orientation;
+                velocity = turn * velocity;
+                player.discontinuity += 1;
+                player.mode = Mode::Booted {
+                    body,
+                    feet: new_feet,
+                    up: new_up,
+                    velocity,
+                    orientation,
+                    pitch,
+                };
+                retarget_body(bodies, player, entity, &frame, t);
+                return;
+            }
         }
     }
 
@@ -624,13 +664,17 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
         let snapped_center = center_w - up_w * hit.distance;
         feet = frame.point_to_local(snapped_center) - up * half;
         let new_up = frame.dir_to_local(hit.normal1).normalize();
-        let turn = Quat::from_rotation_arc(up, new_up);
-        if up.dot(new_up) < 0.985 {
-            player.discontinuity += 1;
+        // Tilting pivots the capsule about the feet; only follow the surface
+        // if the tilted capsule still fits.
+        if up.dot(new_up) < 0.9999 && capsule_fits(ctx, &frame, feet, new_up) {
+            let turn = Quat::from_rotation_arc(up, new_up);
+            if up.dot(new_up) < 0.985 {
+                player.discontinuity += 1;
+            }
+            orientation = (turn * orientation).normalize();
+            velocity = turn * velocity;
+            up = new_up;
         }
-        orientation = (turn * orientation).normalize();
-        velocity = turn * velocity;
-        up = new_up;
         player.mode = Mode::Booted {
             body,
             feet,
@@ -639,7 +683,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
             orientation,
             pitch,
         };
-        retarget_body(bodies, player, hit.entity, &frame);
+        retarget_body(bodies, player, hit.entity, &frame, t);
         return;
     }
 
@@ -654,9 +698,11 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
             .spatial_query
             .cast_ray(origin_w, back, 1.5, false, &ctx.filter)
         {
-            if hit.normal.dot(frame.dir_to_world(tangent)) > 0.3 {
-                let new_up = frame.dir_to_local(hit.normal).normalize();
-                let new_feet = frame.point_to_local(origin_w + back * hit.distance) + new_up * SKIN;
+            let new_up = frame.dir_to_local(hit.normal).normalize();
+            let new_feet = frame.point_to_local(origin_w + back * hit.distance) + new_up * SKIN;
+            if hit.normal.dot(frame.dir_to_world(tangent)) > 0.3
+                && capsule_fits(ctx, &frame, new_feet, new_up)
+            {
                 let turn = Quat::from_rotation_arc(up, new_up);
                 orientation = turn * orientation;
                 velocity = turn * velocity;
@@ -669,7 +715,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                     orientation,
                     pitch,
                 };
-                retarget_body(bodies, player, hit.entity, &frame);
+                retarget_body(bodies, player, hit.entity, &frame, t);
                 return;
             }
         }
@@ -686,8 +732,16 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     };
 }
 
-/// If the surface we just stepped onto belongs to another body, move into its frame.
-fn retarget_body(bodies: &Bodies, player: &mut Player, collider: Entity, from: &BodyFrame) {
+/// If the surface we just stepped onto belongs to another body moving slowly
+/// enough relative to the current one, move into its frame. A fast-moving
+/// surface is not something boots can step onto; it is an obstacle.
+fn retarget_body(
+    bodies: &Bodies,
+    player: &mut Player,
+    collider: Entity,
+    from: &BodyFrame,
+    t: &Tuning,
+) {
     let Mode::Booted {
         body,
         feet,
@@ -708,6 +762,10 @@ fn retarget_body(bodies: &Bodies, player: &mut Player, collider: Entity, from: &
     let Some(to) = bodies.frame(new_body) else {
         return;
     };
+    let feet_w = from.point_to_world(feet);
+    if (from.point_velocity(feet_w) - to.point_velocity(feet_w)).length() > t.attach_max_speed {
+        return;
+    }
     let (feet, up, velocity, orientation) =
         switch_frame(from, &to, feet, up, velocity, orientation);
     player.mode = Mode::Booted {
@@ -848,9 +906,6 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
         let Some(body) = bodies.body_of_collider(collider) else {
             continue;
         };
-        if resolved.contains(&body) {
-            continue;
-        }
         let (Some(frame), Some(mass)) = (bodies.frame(body), bodies.mass(body)) else {
             continue;
         };
@@ -869,13 +924,19 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
             let feet_point = position - axis * (t.capsule_height / 2.0);
             // Project the feet onto the contact plane.
             let contact = feet_point - normal * (feet_point - point).dot(normal);
-            player.mode = eva_to_booted(body, &frame, contact, normal, orientation, pitch);
-            player.reference_body = Some(body);
-            player.discontinuity += 1;
-            player.last_event = format!("landed at {:.1} m/s", relative.length());
-            return;
+            let landed = eva_to_booted(body, &frame, contact, normal, orientation, pitch);
+            if let Mode::Booted { feet, up, .. } = landed
+                && capsule_fits(ctx, &frame, feet, up)
+            {
+                player.mode = landed;
+                player.reference_body = Some(body);
+                player.discontinuity += 1;
+                player.last_event = format!("landed at {:.1} m/s", relative.length());
+                return;
+            }
         }
-        if closing >= 0.0 {
+        // One bounce per body per tick; the attach test above sees every contact.
+        if closing >= 0.0 || resolved.contains(&body) {
             continue;
         }
         resolved.push(body);
