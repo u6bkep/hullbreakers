@@ -68,7 +68,6 @@ tuning! {
             capsule_radius: 0.35, 0.2, 0.6;
             capsule_height: 1.8, 1.0, 2.5;
             eye_height: 1.62, 0.8, 2.3;
-            eva_radius: 0.45, 0.2, 0.8;
         }
         "Boots" {
             walk_speed: 3.0, 0.5, 10.0;

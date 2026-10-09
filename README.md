@@ -8,6 +8,23 @@ cargo test             # headless movement tests
 SPACE_GAME_SHOTS=dir cargo run   # scripted screenshot tour, then exit
 ```
 
+### Headless harness (for agents and CI)
+
+`tools/hl` runs the game in a GPU-accelerated headless sway (its own Wayland
+socket, no seat, renders on `HL_RENDER_NODE`, default `/dev/dri/renderD128`),
+drives it through a persistent virtual keyboard and pointer (`tools/hl-input`,
+real US keycodes and relative motion), and captures frames with grim. Needs
+`sway grim` and `xkbcli` (libxkbcommon).
+
+```
+tools/hl start && tools/hl game
+tools/hl look 300 0 10 300      # turn right, spread over 300 ms
+tools/hl down w; sleep 1.5; tools/hl up w
+tools/hl click left             # grapple
+tools/hl shot /tmp/frame.png
+tools/hl stop
+```
+
 ## Controls
 
 | Input        | Mag boots        | EVA                   |

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Headless test harness: a GPU-accelerated headless sway the game runs in,
+# driven with scripted input and captured with grim. Never touches the
+# user's seat: no DRM master, no libinput, its own Wayland socket.
+#
+#   tools/hl start [WxH]        start headless sway (default 1280x720)
+#   tools/hl game [args...]     launch target/debug/space_game inside it
+#   tools/hl key <keys...>      tap keys (w a s d q e f v x r t l space tab shift ctrl esc 0-9)
+#   tools/hl down <key> / up <key>   hold / release a key
+#   tools/hl look <dx> <dy> [steps] [ms]   relative mouse motion, optionally spread out
+#   tools/hl click [left|right] / press <btn> / release <btn>
+#   tools/hl send '<cmd>'       raw hl-input command (see tools/hl-input)
+#   tools/hl shot <file.png>    screenshot the output
+#   tools/hl wait <seconds>
+#   tools/hl stop               kill the game and sway
+#   tools/hl env                print the env to talk to the compositor
+#
+# State lives in target/headless/.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+STATE="$ROOT/target/headless"
+RENDER_NODE="${HL_RENDER_NODE:-/dev/dri/renderD128}" # RX 6800 XT
+mkdir -p "$STATE"
+
+load() {
+    [[ -f "$STATE/env" ]] || { echo "hl: not running (tools/hl start)" >&2; exit 1; }
+    # shellcheck disable=SC1091
+    source "$STATE/env"
+    export WAYLAND_DISPLAY SWAYSOCK
+}
+
+input() { echo "$1" >"$STATE/input.fifo"; }
+
+case "${1:-}" in
+start)
+    size="${2:-1280x720}"
+    [[ -f "$STATE/env" ]] && "$0" stop || true
+    cat >"$STATE/sway.conf" <<EOF
+output HEADLESS-1 resolution $size position 0,0
+default_border none
+default_floating_border none
+focus_follows_mouse no
+xwayland disable
+EOF
+    before="$(ls "$XDG_RUNTIME_DIR" | grep -E '^wayland-[0-9]+$' || true)"
+    (
+        unset WAYLAND_DISPLAY DISPLAY
+        export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
+        export WLR_RENDERER=vulkan WLR_RENDER_DRM_DEVICE="$RENDER_NODE"
+        exec sway -c "$STATE/sway.conf" >"$STATE/sway.log" 2>&1
+    ) &
+    pid=$!
+    for _ in $(seq 50); do
+        sock="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*."$pid".sock 2>/dev/null || true)"
+        display="$(comm -13 <(echo "$before" | sort) <(ls "$XDG_RUNTIME_DIR" | grep -E '^wayland-[0-9]+$' | sort) | head -1)"
+        [[ -n "$sock" && -n "$display" ]] && break
+        sleep 0.1
+    done
+    [[ -n "${sock:-}" && -n "${display:-}" ]] || { echo "hl: sway failed to start; see $STATE/sway.log" >&2; exit 1; }
+    printf 'SWAY_PID=%s\nSWAYSOCK=%s\nWAYLAND_DISPLAY=%s\n' "$pid" "$sock" "$display" >"$STATE/env"
+    # Persistent virtual keyboard + pointer (see tools/hl-input).
+    cargo build -q -p hl-input --manifest-path "$ROOT/Cargo.toml"
+    rm -f "$STATE/input.fifo" && mkfifo "$STATE/input.fifo"
+    WAYLAND_DISPLAY="$display" "$ROOT/target/debug/hl-input" "$STATE/input.fifo" >"$STATE/input.log" 2>&1 &
+    echo "INPUT_PID=$!" >>"$STATE/env"
+    echo "hl: sway $pid on $display ($size, $RENDER_NODE)"
+    ;;
+game)
+    load
+    shift
+    (
+        unset DISPLAY
+        cd "$ROOT"
+        exec ./target/debug/space_game "$@" >"$STATE/game.log" 2>&1
+    ) &
+    echo "GAME_PID=$!" >>"$STATE/env"
+    # Wait for the window to map.
+    for _ in $(seq 100); do
+        swaymsg -s "$SWAYSOCK" -t get_tree | grep -q '"app_id": "space_game"\|"name": "space-game"' && break
+        sleep 0.1
+    done
+    echo "hl: game started (log: $STATE/game.log)"
+    ;;
+key) load; shift; for k in "$@"; do input "tap $k"; done ;;
+down) load; input "key $2 down" ;;
+up) load; input "key $2 up" ;;
+look) load; input "move $2 $3 ${4:-1} ${5:-0}" ;;
+click) load; input "click ${2:-left}" ;;
+press) load; input "button $2 down" ;;
+release) load; input "button $2 up" ;;
+send) load; input "$2" ;;
+shot) load; grim -o HEADLESS-1 "$2" ;;
+wait) sleep "$2" ;;
+env) load; cat "$STATE/env" ;;
+stop)
+    if [[ -f "$STATE/env" ]]; then
+        # shellcheck disable=SC1091
+        source "$STATE/env"
+        [[ -n "${GAME_PID:-}" ]] && kill "$GAME_PID" 2>/dev/null || true
+        [[ -n "${INPUT_PID:-}" ]] && kill "$INPUT_PID" 2>/dev/null || true
+        kill "$SWAY_PID" 2>/dev/null || true
+        rm -f "$STATE/env"
+    fi
+    echo "hl: stopped"
+    ;;
+*) sed -n '2,20p' "$0"; exit 1 ;;
+esac

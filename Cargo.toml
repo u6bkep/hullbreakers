@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "tools/hl-input"]
+
 [package]
 name = "space_game"
 version = "0.1.0"

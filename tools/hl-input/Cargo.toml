@@ -1,0 +1,11 @@
+[package]
+name = "hl-input"
+version = "0.1.0"
+edition = "2024"
+description = "Persistent virtual keyboard + pointer for driving the game in a headless wlroots compositor"
+
+[dependencies]
+wayland-client = "0.31.15"
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
+rustix = { version = "1.1.5", features = ["fs"] }
