@@ -48,6 +48,7 @@ pub struct PlayerCommand {
     pub pay_out: bool,
     pub jump: bool,
     pub toggle_boots: bool,
+    pub toggle_assist: bool,
     pub grapple: bool,
 }
 
@@ -57,6 +58,7 @@ impl PlayerCommand {
         self.look = Vec2::ZERO;
         self.jump = false;
         self.toggle_boots = false;
+        self.toggle_assist = false;
         self.grapple = false;
         taken
     }
@@ -172,7 +174,9 @@ pub struct Grapple {
 pub struct Player {
     pub mode: Mode,
     pub boots_on: bool,
-    pub fuel: f32,
+    /// Flight assist: movement input commands a velocity relative to the
+    /// reference body instead of a raw thrust, and releasing the keys brakes.
+    pub flight_assist: bool,
     pub grapple: Option<Grapple>,
     /// The body velocities are reported (and braked) relative to.
     pub reference_body: Option<Entity>,
@@ -187,11 +191,7 @@ pub struct Player {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PreviousMode(pub Mode);
 
-pub fn spawn_player(
-    mut commands: Commands,
-    tuning: Res<Tuning>,
-    ship: Single<Entity, With<super::ship::Ship>>,
-) {
+pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::ship::Ship>>) {
     let mode = Mode::Booted {
         body: *ship,
         feet: Vec3::new(0.0, SKIN, 5.0),
@@ -205,7 +205,7 @@ pub fn spawn_player(
         Player {
             mode,
             boots_on: true,
-            fuel: tuning.fuel_capacity,
+            flight_assist: true,
             grapple: None,
             reference_body: Some(*ship),
             detach_timer: 0.0,
@@ -370,6 +370,9 @@ pub fn player_tick(
         if cmd.toggle_boots {
             player.boots_on = !player.boots_on;
         }
+        if cmd.toggle_assist {
+            player.flight_assist = !player.flight_assist;
+        }
         let roll = cmd.roll * tuning.roll_rate_deg.to_radians() * ctx.dt;
         player.mode.apply_look(cmd.look, roll);
         // Recorded after look so the camera interpolates movement only; look
@@ -390,7 +393,6 @@ pub fn player_tick(
             Mode::Booted { .. } => booted_tick(&ctx, &mut bodies, player, &cmd),
             Mode::Eva { .. } => eva_tick(&ctx, &mut bodies, player, &cmd),
         }
-        player.fuel = player.fuel.min(tuning.fuel_capacity);
     }
 }
 
@@ -464,7 +466,6 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     };
     let previous_frame = bodies.previous_frame(body).unwrap_or(frame);
     player.reference_body = Some(body);
-    player.fuel += t.refuel_rate * ctx.dt;
 
     let leave = move |player: &mut Player, velocity: Vec3, event: &str| {
         player.mode = booted_to_eva(&frame, feet, up, velocity, orientation, pitch, t);
@@ -799,25 +800,31 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
     pitch -= follow;
     let view = orientation * Quat::from_rotation_x(pitch);
 
-    // Jetpack.
-    let thrust_dir =
+    // Jetpack. Thrust is always limited to the jetpack's real acceleration;
+    // flight assist only chooses the thrust direction.
+    let input =
         (view * Vec3::new(cmd.movement.x, cmd.movement.y, -cmd.movement.z)).clamp_length_max(1.0);
-    let thrust = t.thrust_accel * if cmd.sprint { t.boost_multiplier } else { 1.0 };
-    let dv = thrust_dir * thrust * ctx.dt;
-    if player.fuel >= dv.length() {
-        velocity += dv;
-        player.fuel -= dv.length();
-    }
-    if cmd.brake {
-        if let Some(frame) = player.reference_body.and_then(|b| bodies.frame(b)) {
-            let relative = velocity - frame.point_velocity(position);
-            let dv = (-relative).clamp_length_max(t.brake_accel * ctx.dt);
-            if player.fuel >= dv.length() {
-                velocity += dv;
-                player.fuel -= dv.length();
-            }
-        }
-    }
+    let boost = if cmd.sprint { t.boost_multiplier } else { 1.0 };
+    let max_dv = t.thrust_accel * boost * ctx.dt;
+    let reference_velocity = player
+        .reference_body
+        .and_then(|b| bodies.frame(b))
+        .map(|f| f.point_velocity(position))
+        .unwrap_or(Vec3::ZERO);
+    let rope_pulling = player
+        .grapple
+        .is_some_and(|g| g.tension > 0.0 || cmd.reel_in);
+    velocity += if cmd.brake {
+        (reference_velocity - velocity).clamp_length_max(t.brake_accel * ctx.dt)
+    } else if player.flight_assist && !(rope_pulling && input == Vec3::ZERO) {
+        // Steer toward the commanded velocity relative to the reference
+        // body. With no input that is "hold still"; while the rope is
+        // pulling and you aren't steering, the assist stays out of its way.
+        let target = reference_velocity + input * t.assist_max_speed * boost;
+        (target - velocity).clamp_length_max(max_dv)
+    } else {
+        input * max_dv
+    };
 
     // Rope.
     if let Some(mut grapple) = player.grapple {

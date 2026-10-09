@@ -7,6 +7,7 @@
 //! | Shift            | sprint            | boost                  |
 //! | Q / E            | —                 | roll                   |
 //! | F                | toggle mag boots  | toggle mag boots       |
+//! | V                | toggle flight assist (on by default)       |
 //! | X (hold)         | —                 | brake vs. last body    |
 //! | LMB              | fire / release grapple                     |
 //! | RMB (hold)       | reel in                                    |
@@ -85,6 +86,7 @@ pub fn read_input(
     cmd.look += motion.delta * tuning.mouse_sensitivity;
     cmd.jump |= keys.just_pressed(KeyCode::Space);
     cmd.toggle_boots |= keys.just_pressed(KeyCode::KeyF);
+    cmd.toggle_assist |= keys.just_pressed(KeyCode::KeyV);
     cmd.grapple |= mouse.just_pressed(MouseButton::Left);
 
     if keys.just_pressed(KeyCode::KeyL) {

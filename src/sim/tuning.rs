@@ -82,13 +82,12 @@ tuning! {
             attach_max_speed: 4.0, 0.5, 20.0;
             attach_max_angle_deg: 70.0, 10.0, 180.0;
             detach_cooldown: 0.25, 0.0, 2.0;
-            refuel_rate: 15.0, 0.0, 100.0;
         }
         "Jetpack" {
             thrust_accel: 10.0, 0.5, 30.0;
             boost_multiplier: 2.0, 1.0, 5.0;
             brake_accel: 10.0, 0.5, 30.0;
-            fuel_capacity: 150.0, 5.0, 500.0;
+            assist_max_speed: 10.0, 1.0, 50.0;
             roll_rate_deg: 90.0, 10.0, 360.0;
             bounce_restitution: 0.2, 0.0, 1.0;
             bounce_friction: 0.4, 0.0, 2.0;

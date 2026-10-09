@@ -61,6 +61,16 @@ fn command(app: &mut App, f: impl FnOnce(&mut PlayerCommand)) {
     f(&mut c);
 }
 
+/// Contact tests drift into surfaces with no input; flight assist would brake.
+fn assist_off(app: &mut App) {
+    let world = app.world_mut();
+    world
+        .query::<&mut Player>()
+        .single_mut(world)
+        .unwrap()
+        .flight_assist = false;
+}
+
 fn ticks(app: &mut App, n: usize) {
     for _ in 0..n {
         app.update();
@@ -249,6 +259,7 @@ fn lurch_does_not_rip_player_off_the_deck() {
 #[test]
 fn lands_feet_first_on_deck() {
     let mut app = app();
+    assist_off(&mut app);
     let frame = ship_frame(&mut app);
     let position = frame.point_to_world(Vec3::new(0.0, 1.6, 5.0));
     let velocity = frame.point_velocity(position) + frame.dir_to_world(Vec3::NEG_Y);
@@ -270,6 +281,7 @@ fn lands_feet_first_on_deck() {
 #[test]
 fn bounces_when_landing_head_first() {
     let mut app = app();
+    assist_off(&mut app);
     let frame = ship_frame(&mut app);
     let position = frame.point_to_world(Vec3::new(0.0, 1.6, 5.0));
     let velocity = frame.point_velocity(position) + frame.dir_to_world(Vec3::NEG_Y);
@@ -302,6 +314,7 @@ fn bounces_when_landing_head_first() {
 #[test]
 fn grapple_reels_player_in() {
     let mut app = app();
+    assist_off(&mut app);
     let frame = ship_frame(&mut app);
     let position = frame.point_to_world(Vec3::new(2.6, 1.5, 30.0));
     let velocity = frame.point_velocity(position);
@@ -352,6 +365,7 @@ fn spawn_rock(app: &mut App, position: Vec3, radius: f32, angular: Vec3) -> Enti
 #[test]
 fn lands_on_and_walks_around_a_spinning_rock() {
     let mut app = app();
+    assist_off(&mut app);
     let rock = spawn_rock(
         &mut app,
         Vec3::new(0.0, 0.0, 80.0),
@@ -399,6 +413,7 @@ fn bouncing_off_a_light_rock_conserves_momentum() {
     tuning.bounce_restitution = 0.5;
     let mut app = app_with(tuning.clone());
     let rock = spawn_rock(&mut app, Vec3::new(0.0, 0.0, 80.0), 0.4, Vec3::ZERO);
+    assist_off(&mut app);
     let rock_mass = app.world().get::<ComputedMass>(rock).unwrap().value();
     // Boots off so we bounce rather than land.
     {
@@ -561,4 +576,82 @@ fn skids_when_ship_accelerates_beyond_shear() {
     let (_, _, _, velocity) = booted_state(&mut app);
     // Ship lurches toward -Z; we slide aft, toward +Z, relative to the deck.
     assert!(velocity.z > 0.5, "no skid, velocity {velocity}");
+}
+
+fn eva_near_ship(app: &mut App, velocity_rel: Vec3) {
+    let frame = ship_frame(app);
+    let position = frame.point_to_world(Vec3::new(0.0, 10.0, 0.0));
+    let velocity = frame.point_velocity(position) + velocity_rel;
+    set_mode(
+        app,
+        Mode::Eva {
+            position,
+            velocity,
+            orientation: frame.rotation,
+            pitch: 0.0,
+        },
+    );
+}
+
+fn relative_velocity(app: &mut App) -> Vec3 {
+    let Mode::Eva {
+        position, velocity, ..
+    } = player(app).mode
+    else {
+        panic!("not EVA")
+    };
+    velocity - ship_frame(app).point_velocity(position)
+}
+
+#[test]
+fn flight_assist_stops_when_keys_released() {
+    let mut app = app();
+    eva_near_ship(&mut app, Vec3::new(3.0, 0.0, -4.0));
+    // 5 m/s at 10 m/s² thrust: stopped within a second.
+    ticks(&mut app, 60);
+    assert!(relative_velocity(&mut app).length() < 0.05);
+}
+
+#[test]
+fn flight_assist_cruises_at_commanded_speed() {
+    let tuning = Tuning::default();
+    let mut app = app();
+    eva_near_ship(&mut app, Vec3::ZERO);
+    command(&mut app, |c| c.movement = Vec3::Z);
+    ticks(&mut app, 120);
+    let rel = relative_velocity(&mut app);
+    let forward = ship_frame(&mut app).dir_to_world(Vec3::NEG_Z);
+    assert!(
+        (rel.dot(forward) - tuning.assist_max_speed).abs() < 0.3,
+        "rel {rel}"
+    );
+}
+
+#[test]
+fn without_assist_momentum_is_kept() {
+    let mut app = app();
+    {
+        let world = app.world_mut();
+        world
+            .query::<&mut Player>()
+            .single_mut(world)
+            .unwrap()
+            .flight_assist = false;
+    }
+    let drift = Vec3::new(1.0, 0.0, 0.5);
+    eva_near_ship(&mut app, drift);
+    let Mode::Eva {
+        velocity: before, ..
+    } = player(&mut app).mode
+    else {
+        unreachable!()
+    };
+    ticks(&mut app, 30);
+    let Mode::Eva {
+        velocity: after, ..
+    } = player(&mut app).mode
+    else {
+        unreachable!()
+    };
+    assert!(before.abs_diff_eq(after, 1e-4), "{before} -> {after}");
 }

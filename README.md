@@ -18,6 +18,7 @@ SPACE_GAME_SHOTS=dir cargo run   # scripted screenshot tour, then exit
 | Shift        | sprint           | boost                 |
 | Q / E        | —                | roll                  |
 | F            | toggle mag boots | toggle mag boots (on = land on contact) |
+| V            | toggle flight assist (on by default) ||
 | X (hold)     | —                | brake relative to last body touched/grappled |
 | LMB          | fire / release grapple              ||
 | RMB (hold)   | reel in                             ||

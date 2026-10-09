@@ -71,17 +71,14 @@ pub fn hud(
                     .color(egui::Color32::from_rgb(170, 230, 255))
             };
             ui.label(text(format!(
-                "{mode}   boots {}",
-                if player.boots_on { "ON" } else { "off" }
+                "{mode}   boots {}   assist {}",
+                if player.boots_on { "ON" } else { "off" },
+                if player.flight_assist { "ON" } else { "off" }
             )));
             ui.label(text(format!(
                 "rel {:>6.2} m/s  vs {}",
                 relative_speed,
                 name_of(player.reference_body)
-            )));
-            ui.label(text(format!(
-                "fuel {:>5.1} / {:.0} m/s Δv",
-                player.fuel, tuning.fuel_capacity
             )));
             if let Some(g) = player.grapple {
                 ui.label(text(format!(
