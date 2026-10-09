@@ -655,3 +655,75 @@ fn without_assist_momentum_is_kept() {
     };
     assert!(before.abs_diff_eq(after, 1e-4), "{before} -> {after}");
 }
+
+#[test]
+fn riding_a_rock_out_of_the_field_keeps_rock_and_field_around_you() {
+    use space_game::sim::asteroids::Asteroid;
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        AssetPlugin::default(),
+        bevy::mesh::MeshPlugin,
+    ));
+    app.add_plugins(PhysicsPlugins::default());
+    app.insert_resource(Tuning::default());
+    app.add_plugins(SimPlugin { asteroids: true });
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / 60.0,
+    )));
+    app.finish();
+    app.cleanup();
+    ticks(&mut app, 3);
+    let (rock, radius) = {
+        let w = app.world_mut();
+        let mut q = w.query::<(Entity, &Asteroid, &Position)>();
+        q.iter(w)
+            .filter(|(_, a, _)| a.radius > 4.0 && a.radius < 10.0)
+            .min_by(|a, b| a.2.0.length().total_cmp(&b.2.0.length()))
+            .map(|(e, a, _)| (e, a.radius))
+            .unwrap()
+    };
+    let rock_pos = app.world().get::<Position>(rock).unwrap().0;
+    let rock_vel = app.world().get::<LinearVelocity>(rock).unwrap().0;
+    assist_off(&mut app);
+    set_mode(
+        &mut app,
+        Mode::Eva {
+            position: rock_pos + Vec3::Y * (radius * 1.6 + 2.0),
+            velocity: rock_vel - Vec3::Y * 2.0,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        },
+    );
+    // Ride well past the downstream end of the ship's field box, then jump.
+    ticks(&mut app, 60 * 40);
+    assert_eq!(booted_state(&mut app).0, rock);
+    command(&mut app, |c| c.jump = true);
+    ticks(&mut app, 2);
+    let rock_after = app.world().get::<Position>(rock).unwrap().0;
+    let Mode::Eva { position, .. } = player(&mut app).mode else {
+        panic!("did not jump")
+    };
+    assert!(
+        position.z > 420.0,
+        "test should leave the ship's field box, z = {}",
+        position.z
+    );
+    assert!(
+        rock_after.distance(position) < 3.0 * radius,
+        "rock was teleported to {rock_after}"
+    );
+    // And the field has followed the player.
+    ticks(&mut app, 60 * 30);
+    let Mode::Eva { position, .. } = player(&mut app).mode else {
+        unreachable!()
+    };
+    let w = app.world_mut();
+    let near = w
+        .query_filtered::<&Position, With<Asteroid>>()
+        .iter(w)
+        .filter(|p| p.0.distance(position) < 250.0)
+        .count();
+    assert!(near > 20, "only {near} rocks within 250 m of the player");
+}

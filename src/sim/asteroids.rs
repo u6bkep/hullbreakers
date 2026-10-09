@@ -8,7 +8,6 @@ use rand_chacha::ChaCha8Rng;
 
 use super::SimMaterial;
 use super::bodies::PreviousVelocity;
-use super::ship::Ship;
 use super::tuning::Tuning;
 
 pub const FIELD_LENGTH: f32 = 800.0;
@@ -109,19 +108,20 @@ fn random_radius(rng: &mut impl Rng) -> f32 {
     min * (max / min).powf(rng.random::<f32>().powi(3))
 }
 
-/// A position in the field box (relative to `center`), keeping big rocks out
-/// of the ship's flight corridor. `z_range` selects the slab to spawn into.
+/// A position in the field box (relative to `center`). With `corridor`, big
+/// rocks keep out of the ship's flight line. `z_range` selects the slab.
 fn random_field_position(
     rng: &mut impl Rng,
     center: Vec3,
     radius: f32,
+    corridor: bool,
     z_range: (f32, f32),
 ) -> Vec3 {
     loop {
         let x = rng.random_range(-FIELD_WIDTH / 2.0..FIELD_WIDTH / 2.0);
         let y = rng.random_range(-FIELD_WIDTH / 2.0..FIELD_WIDTH / 2.0);
         let lateral = Vec2::new(x, y).length();
-        if radius > CORRIDOR_MIN_RADIUS && lateral < CORRIDOR_RADIUS + radius {
+        if corridor && radius > CORRIDOR_MIN_RADIUS && lateral < CORRIDOR_RADIUS + radius {
             continue;
         }
         let z = rng.random_range(z_range.0..z_range.1);
@@ -143,6 +143,7 @@ pub fn spawn_field(mut commands: Commands, tuning: Res<Tuning>) {
             &mut rng,
             Vec3::ZERO,
             radius,
+            true,
             (-FIELD_LENGTH / 2.0, FIELD_LENGTH / 2.0),
         );
         let (linear, angular) = drift(&mut rng, tuning.field_speed);
@@ -182,12 +183,34 @@ pub fn apply_field_speed(
     }
 }
 
-/// Rocks that leave the box around the ship are respawned on the far side
-/// with fresh lateral positions and drift.
+/// A place the field must be populated around: the ship, and every player
+/// (who may ride a rock or fly far from the ship).
+#[derive(Clone, Copy, Debug)]
+pub struct InterestPoint {
+    pub position: Vec3,
+    /// Keep big rocks out of this point's flight corridor (the ship's).
+    pub corridor: bool,
+}
+
+/// Interest points for this tick, gathered before recycling.
+#[derive(Resource, Default)]
+pub struct FieldInterest(pub Vec<InterestPoint>);
+
+/// Respawned rocks never appear closer than this to any interest point.
+const SPAWN_CLEARANCE: f32 = 250.0;
+
+fn in_box(rel: Vec3, radius: f32) -> bool {
+    let half_l = FIELD_LENGTH / 2.0 + radius;
+    let half_w = FIELD_WIDTH / 2.0 + radius;
+    rel.x.abs() <= half_w && rel.y.abs() <= half_w && rel.dot(FIELD_DIRECTION).abs() <= half_l
+}
+
+/// Rocks outside the box around every interest point are respawned at the
+/// upstream end of one of them, out of sight of all of them.
 pub fn recycle_field(
     tuning: Res<Tuning>,
+    interest: Res<FieldInterest>,
     mut rng: ResMut<FieldRng>,
-    ship: Single<&Position, With<Ship>>,
     mut rocks: Query<
         (
             &Asteroid,
@@ -195,22 +218,39 @@ pub fn recycle_field(
             &mut LinearVelocity,
             &mut AngularVelocity,
         ),
-        (Without<Ship>, Without<Pinned>),
+        Without<Pinned>,
     >,
 ) {
-    let center = ship.0;
+    let points = &interest.0;
+    if points.is_empty() {
+        return;
+    }
     let half_l = FIELD_LENGTH / 2.0;
-    let half_w = FIELD_WIDTH / 2.0;
     for (rock, mut pos, mut lin, mut ang) in &mut rocks {
-        let rel = pos.0 - center;
-        let out_lateral = rel.x.abs() > half_w + rock.radius || rel.y.abs() > half_w + rock.radius;
-        let downstream = rel.dot(FIELD_DIRECTION) > half_l + rock.radius;
-        let upstream = rel.dot(FIELD_DIRECTION) < -half_l - rock.radius;
-        if !(out_lateral || downstream || upstream) {
+        if points
+            .iter()
+            .any(|p| in_box(pos.0 - p.position, rock.radius))
+        {
             continue;
         }
-        // Re-enter at the upstream end, in a thin slab so rocks don't pop in close.
-        pos.0 = random_field_position(&mut rng.0, center, rock.radius, (-half_l, -half_l + 60.0));
+        let mut candidate = pos.0;
+        for _ in 0..8 {
+            let p = points[rng.0.random_range(0..points.len())];
+            candidate = random_field_position(
+                &mut rng.0,
+                p.position,
+                rock.radius,
+                p.corridor,
+                (-half_l, -half_l + 60.0),
+            );
+            if points
+                .iter()
+                .all(|q| q.position.distance(candidate) > SPAWN_CLEARANCE)
+            {
+                break;
+            }
+        }
+        pos.0 = candidate;
         let (linear, angular) = drift(&mut rng.0, tuning.field_speed);
         lin.0 = linear;
         ang.0 = angular;

@@ -53,20 +53,24 @@ impl Plugin for SimPlugin {
             app.insert_resource(tuning);
         }
         if self.asteroids {
-            app.add_systems(
-                Startup,
-                asteroids::spawn_field
-                    .after(ship::spawn_ship)
-                    .before(player::spawn_player),
-            )
-            .add_systems(
-                FixedUpdate,
-                (
-                    asteroids::apply_field_speed,
-                    asteroids::recycle_field.after(update_pins),
+            app.init_resource::<asteroids::FieldInterest>()
+                .add_systems(
+                    Startup,
+                    asteroids::spawn_field
+                        .after(ship::spawn_ship)
+                        .before(player::spawn_player),
                 )
-                    .in_set(SimSystems::Drive),
-            );
+                .add_systems(
+                    FixedUpdate,
+                    (
+                        asteroids::apply_field_speed,
+                        asteroids::recycle_field
+                            .after(update_pins)
+                            .after(update_field_interest),
+                        update_field_interest,
+                    )
+                        .in_set(SimSystems::Drive),
+                );
         }
         app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
             .insert_resource(Gravity(Vec3::ZERO))
@@ -111,5 +115,30 @@ fn update_pins(
         if !pinned.contains(e) {
             commands.entity(e).insert(asteroids::Pinned);
         }
+    }
+}
+
+/// The field is kept populated around the ship and every player.
+fn update_field_interest(
+    mut interest: ResMut<asteroids::FieldInterest>,
+    ships: Query<&Position, With<ship::Ship>>,
+    players: Query<&player::Player>,
+    bodies: bodies::Bodies,
+    tuning: Res<tuning::Tuning>,
+) {
+    interest.0.clear();
+    interest
+        .0
+        .extend(ships.iter().map(|p| asteroids::InterestPoint {
+            position: p.0,
+            corridor: true,
+        }));
+    for p in &players {
+        let frame = p.mode.body().and_then(|b| bodies.frame(b));
+        let (eye, _) = p.mode.world_view(&tuning, frame.as_ref());
+        interest.0.push(asteroids::InterestPoint {
+            position: eye,
+            corridor: false,
+        });
     }
 }
