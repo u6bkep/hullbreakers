@@ -1,7 +1,10 @@
 //! Procedurally synthesized sound effects, driven by [`PlayerEvent`]s and
 //! continuous player state. Everything is heard "through the suit": there is
-//! no sound in vacuum, so effects are non-spatial and contact sounds are
-//! dull and bassy.
+//! no sound in vacuum, so your own effects are non-spatial and contact
+//! sounds are dull and bassy. Other players are heard only through structure
+//! you share: their footsteps, landings, bumps and grapple strikes on the
+//! body you stand on reach you from their direction, fading with distance.
+//! In EVA you hear nothing of them.
 
 use std::f32::consts::TAU;
 
@@ -13,6 +16,8 @@ use rand_chacha::ChaCha8Rng;
 use crate::sim::asteroids::Asteroid;
 use super::events::Presented;
 use crate::sim::events::{Detach, PlayerEvent};
+use super::events::EventCursor;
+use super::render::Avatar;
 use super::{LocalInput, LocalPlayer};
 use crate::sim::player::{Mode, Player, PlayerTelemetry};
 use crate::sim::tuning::Tuning;
@@ -299,6 +304,124 @@ fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, speed
             ..default()
         },
     ));
+}
+
+/// Distance (m) at which another player's sounds are as loud as your own
+/// would be at 1 m: hull plating carries sound well.
+const STRUCTURE_SCALE: f32 = 0.25;
+/// Other players' sounds, relative to the same sound of your own.
+const REMOTE_GAIN: f32 = 0.7;
+
+fn play_at(
+    commands: &mut Commands,
+    sound: &Handle<AudioSource>,
+    volume: f32,
+    speed: f32,
+    position: Vec3,
+) {
+    commands.spawn((
+        AudioPlayer(sound.clone()),
+        PlaybackSettings {
+            mode: PlaybackMode::Despawn,
+            volume: Volume::Linear(volume * REMOTE_GAIN),
+            speed,
+            spatial: true,
+            spatial_scale: Some(bevy::audio::SpatialScale::new(STRUCTURE_SCALE)),
+            ..default()
+        },
+        Transform::from_translation(position),
+    ));
+}
+
+/// What presentation keeps for each other player.
+#[derive(Component, Default)]
+pub struct RemoteHearing {
+    events: EventCursor,
+    stride: f32,
+}
+
+/// Other players' contact sounds, carried through the body you share.
+pub fn play_remote_sounds(
+    mut commands: Commands,
+    time: Res<Time>,
+    tuning: Res<Tuning>,
+    sounds: Res<Sounds>,
+    rocks: Query<(), With<Asteroid>>,
+    listener: Query<&Player, With<LocalPlayer>>,
+    mut players: Query<(Entity, &Player, Option<&mut RemoteHearing>), Without<LocalPlayer>>,
+    avatars: Query<(&Avatar, &GlobalTransform)>,
+    poses: Query<&GlobalTransform, Without<Avatar>>,
+) {
+    let shared = listener.single().ok().and_then(|p| p.mode.body());
+    let dt = time.delta_secs();
+    let mut rng = rand::rng();
+    for (entity, player, hearing) in &mut players {
+        let Some(mut hearing) = hearing else {
+            commands.entity(entity).insert(RemoteHearing::default());
+            continue;
+        };
+        // Read the log whether or not it's heard, so nothing plays late.
+        let events = hearing.events.take_new(&player.events);
+        let Some(position) = avatars
+            .iter()
+            .find(|(a, _)| a.player == entity)
+            .map(|(_, t)| t.translation())
+        else {
+            continue;
+        };
+        let surface = |body: Entity| {
+            if rocks.contains(body) {
+                (&sounds.step_rock, &sounds.land_rock)
+            } else {
+                (&sounds.step_hull, &sounds.land_hull)
+            }
+        };
+        for event in events {
+            let pitch = rng.random_range(0.92..1.08);
+            match event {
+                PlayerEvent::Landed { speed, body } if Some(body) == shared => {
+                    let volume = (0.4 + speed * 0.2).min(1.2);
+                    play_at(&mut commands, surface(body).1, volume, pitch, position);
+                }
+                PlayerEvent::Impact { speed, body } if Some(body) == shared => {
+                    let volume = (speed * 0.25).min(1.4);
+                    play_at(&mut commands, &sounds.impact, volume, pitch * 0.9, position);
+                }
+                PlayerEvent::SurfaceChanged { body } | PlayerEvent::BodyChanged { body }
+                    if Some(body) == shared =>
+                {
+                    play_at(&mut commands, surface(body).0, 0.8, pitch * 0.85, position);
+                }
+                PlayerEvent::GrappleAttached { body, .. } if Some(body) == shared => {
+                    // Heard where the hook struck the body.
+                    let anchor = player
+                        .grapple
+                        .filter(|g| g.body == body)
+                        .and_then(|g| Some(poses.get(body).ok()?.transform_point(g.anchor)))
+                        .unwrap_or(position);
+                    play_at(&mut commands, &sounds.grapple_attach, 0.6, pitch, anchor);
+                }
+                _ => {}
+            }
+        }
+        match player.mode {
+            Mode::Booted { body, velocity, .. } if Some(body) == shared => {
+                hearing.stride += velocity.length() * dt;
+                if hearing.stride > STEP_LENGTH {
+                    hearing.stride -= STEP_LENGTH;
+                    let speed_gain = (velocity.length() / tuning.walk_speed).clamp(0.4, 1.3);
+                    play_at(
+                        &mut commands,
+                        surface(body).0,
+                        0.22 * speed_gain,
+                        rng.random_range(0.9..1.1),
+                        position,
+                    );
+                }
+            }
+            _ => hearing.stride = STEP_LENGTH * 0.6,
+        }
+    }
 }
 
 pub fn play_event_sounds(

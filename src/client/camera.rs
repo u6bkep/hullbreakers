@@ -45,6 +45,8 @@ pub fn spawn_camera(mut commands: Commands, tuning: Res<Tuning>) {
             last_rotation: Quat::IDENTITY,
             ..default()
         },
+        // Ears for other players' sounds (see `sfx::play_remote_sounds`).
+        SpatialListener::new(0.2),
         Transform::default(),
     ));
 }

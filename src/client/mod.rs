@@ -89,6 +89,7 @@ impl Plugin for ClientPlugin {
                     render::draw_gizmos,
                     sfx::play_continuous_sounds,
                     events::present_events,
+                    sfx::play_remote_sounds,
                     (sfx::play_event_sounds, camera::camera_fx_events)
                         .after(events::present_events),
                 )

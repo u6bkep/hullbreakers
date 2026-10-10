@@ -31,6 +31,8 @@ tools/hl shot /tmp/frame.png
 tools/hl stop
 ```
 
+Games launched by `tools/hl` play into an ALSA null device, not your speakers.
+
 Run `tools/hl game` again (e.g. `tools/hl game --connect 127.0.0.1`) for more
 instances; sway tiles them side by side (`tools/hl start 2560x720` gives each
 a 1280-wide half). `tools/hl focus <title>` picks which one gets input; the

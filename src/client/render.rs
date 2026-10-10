@@ -443,7 +443,7 @@ fn draw_rope(
 /// The visible body of another player.
 #[derive(Component)]
 pub struct Avatar {
-    player: Entity,
+    pub player: Entity,
 }
 
 /// Keeps a capsule (with a visor showing where they look) on every other

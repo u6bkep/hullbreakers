@@ -44,7 +44,7 @@ const LATE_TICKS: u32 = 15;
 
 impl EventCursor {
     /// The events in `log` not yet presented, marking them presented.
-    fn take_new(&mut self, log: &EventLog) -> Vec<PlayerEvent> {
+    pub fn take_new(&mut self, log: &EventLog) -> Vec<PlayerEvent> {
         let now = log.tick();
         self.presented
             .retain(|(t, _)| now.wrapping_sub(*t) <= LOG_TICKS);
