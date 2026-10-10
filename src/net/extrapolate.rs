@@ -16,7 +16,7 @@ use lightyear::prelude::client::LocalTimelineSync;
 use crate::sim::{SimTick, TICK_HZ};
 use crate::sim::bodies::{BodyInertia, PreviousVelocity};
 use crate::sim::frame::BodyFrame;
-use crate::sim::motion::Motion;
+use crate::sim::motion::{Motion, rotation_error};
 
 /// Replicate this body by its motion.
 #[derive(Component)]
@@ -42,6 +42,7 @@ pub fn track_motion(
             &AngularVelocity,
             &BodyInertia,
             Option<&mut Motion>,
+            Option<&Name>,
         ),
         With<Extrapolated>,
     >,
@@ -54,7 +55,7 @@ pub fn track_motion(
         info!("extrapolated bodies: {:.1} motion updates/s", stats.1 as f32 / 10.0);
         *stats = (0, 0);
     }
-    for (entity, pos, rot, lin, ang, inertia, motion) in &mut bodies {
+    for (entity, pos, rot, lin, ang, inertia, motion, name) in &mut bodies {
         let actual = BodyFrame {
             position: pos.0,
             rotation: rot.0,
@@ -71,12 +72,16 @@ pub fn track_motion(
         let predicted = motion.frame_at(tick.0, inertia.center_of_mass);
         // Errors at the body's extent, so a big rock's slight turn counts.
         let reach = inertia.reach;
-        let turn = predicted.rotation.angle_between(actual.rotation);
+        let turn = rotation_error(predicted.rotation, actual.rotation);
         let position_error =
             (predicted.center_of_mass - actual.center_of_mass).length() + turn * reach;
         let velocity_error = (predicted.linear_velocity - actual.linear_velocity).length()
             + (predicted.angular_velocity - actual.angular_velocity).length() * reach;
         if position_error > POSITION_TOLERANCE || velocity_error > VELOCITY_TOLERANCE {
+            debug!(
+                "re-sending motion of {}: position off {position_error:.3} m, velocity off {velocity_error:.3} m/s",
+                name.map_or("?", |n| n.as_str())
+            );
             *motion = Motion::sample(tick.0, &actual);
             stats.1 += 1;
         }

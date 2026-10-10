@@ -28,7 +28,7 @@ use crate::sim::input::PlayerInput;
 use crate::sim::player::{Mode, Player, PlayerTelemetry, PreviousMode, new_player};
 use crate::sim::ship::{Ship, ShipHull};
 use crate::sim::tuning::Tuning;
-use crate::sim::motion::Motion;
+use crate::sim::motion::{Motion, rotation_error};
 use crate::sim::bodies::Bodies;
 use crate::sim::{PlayerSimPlugin, SimPlugin, SimSharedPlugin, SimSystems, SimTick, TICK_HZ};
 
@@ -278,7 +278,7 @@ fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
     const SPEED: f32 = 0.02;
     const ANGLE: f32 = 0.005;
     let far = |a: Vec3, b: Vec3, tolerance: f32| a.distance(b) > tolerance;
-    let turned = |a: Quat, b: Quat| a.angle_between(b) > ANGLE;
+    let turned = |a: Quat, b: Quat| rotation_error(a, b) > ANGLE;
     let modes = match (confirmed.mode, predicted.mode) {
         (
             Mode::Eva {
@@ -410,6 +410,11 @@ fn start_server(commands: &mut Commands, port: u16) -> Entity {
             NetcodeServer::new(lightyear::netcode::prelude::server::NetcodeConfig {
                 protocol_id: PROTOCOL_ID,
                 private_key: PRIVATE_KEY,
+                // A connect token names the address the client dialled. A
+                // host can't know that (LAN IP, VPN IP, public IP through a
+                // forwarded port), and with direct-IP play and a shared key
+                // the check protects nothing.
+                server_addr_check: false,
                 ..default()
             }),
             LocalAddr(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)),

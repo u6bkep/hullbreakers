@@ -71,9 +71,27 @@ impl Motion {
     }
 }
 
+/// The angle (radians) between two orientations, accurate for tiny angles.
+/// (`2·acos(|a·b|)`, glam's `angle_between`, can't resolve angles below
+/// ~1e-3 rad in f32: acos is too flat near 1.)
+pub fn rotation_error(a: Quat, b: Quat) -> f32 {
+    let relative = a * b.inverse();
+    2.0 * relative.xyz().length().min(1.0).asin()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rotation_error_resolves_tiny_angles() {
+        let a = Quat::from_rotation_y(1.0);
+        assert!(rotation_error(a, a) < 1e-6);
+        let b = Quat::from_rotation_y(1.0 + 1e-5) ;
+        assert!((rotation_error(a, b) - 1e-5).abs() < 2e-6);
+        // Either cover of the same rotation.
+        assert!(rotation_error(a, -a) < 1e-6);
+    }
 
     #[test]
     fn spins_about_the_center_of_mass() {
