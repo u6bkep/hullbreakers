@@ -231,6 +231,5 @@ pub fn run_shot_script(
     }
     // Keep the scripted drift so the prograde marker is visible.
     player.flight_assist = false;
-    player.discontinuity += 1;
     script.next += 1;
 }

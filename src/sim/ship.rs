@@ -9,22 +9,27 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use super::SimMaterial;
 use super::bodies::PreviousVelocity;
 use super::tuning::Tuning;
+use super::{SimMaterial, SimTick, TICK_HZ};
 
 #[derive(Component, Default)]
 pub struct Ship {
-    /// Seconds of forward lurch remaining.
-    pub lurch_remaining: f32,
-    elapsed: f32,
+    /// Tick the current forward lurch started on.
+    lurch_start: Option<u32>,
 }
 
-impl Ship {
-    pub fn lurch(&mut self) {
-        self.lurch_remaining = 1.0;
-    }
+/// Orders for the ship, from whoever is allowed to give them. Consumed by the
+/// authoritative simulation only: the ship is not something a client
+/// predicts, so these never need replaying.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub enum ShipCommand {
+    /// Debug: a one-second forward lurch.
+    Lurch,
 }
+
+const LURCH_SECONDS: f32 = 1.0;
+const WOBBLE_SECONDS: u32 = 20;
 
 /// Ship-local forward axis.
 pub const SHIP_FORWARD: Vec3 = Vec3::NEG_Z;
@@ -143,7 +148,9 @@ pub fn spawn_ship(mut commands: Commands) {
 /// optional forward lurch limited by `ship_max_accel`.
 pub fn drive_ship(
     time: Res<Time>,
+    tick: Res<SimTick>,
     tuning: Res<Tuning>,
+    mut orders: MessageReader<ShipCommand>,
     mut ships: Query<(
         &mut Ship,
         &Rotation,
@@ -152,17 +159,23 @@ pub fn drive_ship(
     )>,
 ) {
     let dt = time.delta_secs();
+    let lurch = orders.read().any(|o| *o == ShipCommand::Lurch);
+    // Wobble phase from the tick, exact however long the game runs.
+    let wobble_ticks = WOBBLE_SECONDS * TICK_HZ as u32;
+    let phase = (tick.0 % wobble_ticks) as f32 / wobble_ticks as f32 * std::f32::consts::TAU;
     for (mut ship, rot, mut lin, mut ang) in &mut ships {
-        ship.elapsed += dt;
-        let wobble_freq = std::f32::consts::TAU / 20.0;
-        let yaw_rate = tuning.ship_yaw_wobble_deg.to_radians()
-            * wobble_freq
-            * (wobble_freq * ship.elapsed).cos();
+        if lurch {
+            ship.lurch_start = Some(tick.0);
+        }
+        let wobble_freq = std::f32::consts::TAU / WOBBLE_SECONDS as f32;
+        let yaw_rate = tuning.ship_yaw_wobble_deg.to_radians() * wobble_freq * phase.cos();
         let roll_axis = rot.0 * SHIP_FORWARD;
         ang.0 = roll_axis * tuning.ship_roll_rate_deg.to_radians() + rot.0 * Vec3::Y * yaw_rate;
 
-        let target = if ship.lurch_remaining > 0.0 {
-            ship.lurch_remaining -= dt;
+        let lurching = ship.lurch_start.is_some_and(|start| {
+            (tick.0.wrapping_sub(start) as f32 / TICK_HZ as f32) < LURCH_SECONDS
+        });
+        let target = if lurching {
             rot.0 * SHIP_FORWARD * tuning.lurch_delta_v
         } else {
             Vec3::ZERO

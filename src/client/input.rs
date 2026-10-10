@@ -1,4 +1,4 @@
-//! Keyboard and mouse to [`PlayerCommand`].
+//! Keyboard and mouse to [`PlayerInput`].
 //!
 //! | Input            | Booted            | EVA                    |
 //! |------------------|-------------------|------------------------|
@@ -20,8 +20,8 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
-use crate::sim::player::PlayerCommand;
-use crate::sim::ship::Ship;
+use crate::sim::input::PlayerInput;
+use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::Tuning;
 
 /// Whether the mouse is captured for look. False while the tuning panel is open.
@@ -56,10 +56,10 @@ pub fn read_input(
     motion: Res<AccumulatedMouseMotion>,
     captured: Res<MouseCaptured>,
     tuning: Res<Tuning>,
-    mut commands: Query<&mut PlayerCommand>,
-    mut ships: Query<&mut Ship>,
+    mut inputs: Query<&mut PlayerInput>,
+    mut ship_orders: MessageWriter<ShipCommand>,
 ) {
-    let Ok(mut cmd) = commands.single_mut() else {
+    let Ok(mut cmd) = inputs.single_mut() else {
         return;
     };
     if !captured.0 {
@@ -84,16 +84,21 @@ pub fn read_input(
     cmd.brake = keys.pressed(KeyCode::KeyX);
     cmd.reel_in = mouse.pressed(MouseButton::Right);
     cmd.pay_out = keys.pressed(KeyCode::KeyR);
-    cmd.look += motion.delta * tuning.mouse_sensitivity;
-    cmd.jump |= keys.just_pressed(KeyCode::Space);
-    cmd.toggle_boots |= keys.just_pressed(KeyCode::KeyF);
-    cmd.toggle_assist |= keys.just_pressed(KeyCode::KeyV);
-    cmd.set_reference |= keys.just_pressed(KeyCode::KeyT);
-    cmd.grapple |= mouse.just_pressed(MouseButton::Left);
+    cmd.add_look(motion.delta * tuning.mouse_sensitivity);
+    let presses = &mut cmd.presses;
+    for (pressed, counter) in [
+        (keys.just_pressed(KeyCode::Space), &mut presses.jump),
+        (keys.just_pressed(KeyCode::KeyF), &mut presses.toggle_boots),
+        (keys.just_pressed(KeyCode::KeyV), &mut presses.toggle_assist),
+        (keys.just_pressed(KeyCode::KeyT), &mut presses.set_reference),
+        (mouse.just_pressed(MouseButton::Left), &mut presses.grapple),
+    ] {
+        if pressed {
+            counter.press();
+        }
+    }
 
     if keys.just_pressed(KeyCode::KeyL) {
-        for mut ship in &mut ships {
-            ship.lurch();
-        }
+        ship_orders.write(ShipCommand::Lurch);
     }
 }

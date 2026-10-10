@@ -11,7 +11,10 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 use crate::sim::asteroids::Asteroid;
-use crate::sim::player::{Detach, Mode, Player, PlayerCommand, PlayerEvent};
+use super::events::Presented;
+use crate::sim::events::{Detach, PlayerEvent};
+use crate::sim::input::PlayerInput;
+use crate::sim::player::{Mode, Player, PlayerTelemetry};
 use crate::sim::tuning::Tuning;
 
 const RATE: u32 = 44_100;
@@ -300,12 +303,12 @@ fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, speed
 
 pub fn play_event_sounds(
     mut commands: Commands,
-    mut events: MessageReader<PlayerEvent>,
+    mut events: MessageReader<Presented>,
     sounds: Res<Sounds>,
     rocks: Query<(), With<Asteroid>>,
 ) {
     let mut rng = rand::rng();
-    for event in events.read() {
+    for Presented(event) in events.read() {
         let pitch = rng.random_range(0.92..1.08);
         match *event {
             PlayerEvent::Landed { speed, body } => {
@@ -329,7 +332,7 @@ pub fn play_event_sounds(
                 play(&mut commands, &sounds.warning, 0.7, 1.0);
             }
             PlayerEvent::Detached(_) => play(&mut commands, &sounds.release, 0.6, pitch),
-            PlayerEvent::SurfaceChanged { body } => {
+            PlayerEvent::SurfaceChanged { body } | PlayerEvent::BodyChanged { body } => {
                 let sound = if rocks.contains(body) {
                     &sounds.step_rock
                 } else {
@@ -373,12 +376,12 @@ pub fn play_continuous_sounds(
     tuning: Res<Tuning>,
     sounds: Res<Sounds>,
     mut state: ResMut<AudioState>,
-    player: Single<(&Player, &PlayerCommand)>,
+    player: Single<(&Player, &PlayerInput, &PlayerTelemetry)>,
     rocks: Query<(), With<Asteroid>>,
     mut jet: Query<&mut AudioSink, (With<JetpackLoop>, Without<ReelLoop>)>,
     mut reel: Query<&mut AudioSink, (With<ReelLoop>, Without<JetpackLoop>)>,
 ) {
-    let (player, command) = *player;
+    let (player, input, telemetry) = *player;
     let dt = time.delta_secs();
 
     if let Mode::Booted { body, velocity, .. } = player.mode {
@@ -403,17 +406,17 @@ pub fn play_continuous_sounds(
     }
 
     if let Ok(mut sink) = jet.single_mut() {
-        let target = (player.thrust * 0.22).min(0.55);
+        let target = (telemetry.thrust * 0.22).min(0.55);
         let current = sink.volume().to_linear();
         sink.set_volume(Volume::Linear(
             current + (target - current) * (1.0 - (-dt * 18.0).exp()),
         ));
-        sink.set_speed(0.9 + player.thrust.min(2.0) * 0.08);
+        sink.set_speed(0.9 + telemetry.thrust.min(2.0) * 0.08);
     }
 
     let tension = player.grapple.map(|g| g.tension).unwrap_or(0.0);
     if let Ok(mut sink) = reel.single_mut() {
-        let reeling = player.grapple.is_some() && command.reel_in;
+        let reeling = player.grapple.is_some() && input.reel_in;
         let load = (tension / tuning.reel_force).clamp(0.0, 1.0);
         let target = if reeling { 0.18 + 0.15 * load } else { 0.0 };
         let current = sink.volume().to_linear();

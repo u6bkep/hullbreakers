@@ -7,11 +7,16 @@ use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use space_game::sim::SimPlugin;
 use space_game::sim::frame::BodyFrame;
-use space_game::sim::player::{Mode, Player, PlayerCommand};
-use space_game::sim::ship::Ship;
+use space_game::sim::input::PlayerInput;
+use space_game::sim::player::{Mode, Player};
+use space_game::sim::ship::{Ship, ShipCommand};
 use space_game::sim::tuning::Tuning;
 
 fn app_with(tuning: Tuning) -> App {
+    app_configured(tuning, false)
+}
+
+fn app_configured(tuning: Tuning, asteroids: bool) -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -21,7 +26,7 @@ fn app_with(tuning: Tuning) -> App {
     ));
     app.add_plugins(PhysicsPlugins::default());
     app.insert_resource(tuning);
-    app.add_plugins(SimPlugin { asteroids: false });
+    app.add_plugins(SimPlugin { asteroids });
     app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         1.0 / 60.0,
     )));
@@ -52,13 +57,23 @@ fn set_mode(app: &mut App, mode: Mode) {
     p.mode = mode;
 }
 
-fn command(app: &mut App, f: impl FnOnce(&mut PlayerCommand)) {
+fn command(app: &mut App, f: impl FnOnce(&mut PlayerInput)) {
     let world = app.world_mut();
-    let mut c = world
-        .query::<&mut PlayerCommand>()
-        .single_mut(world)
-        .unwrap();
+    let mut c = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
     f(&mut c);
+}
+
+/// The text of the player's most recent event.
+fn last_event(app: &mut App) -> String {
+    player(app)
+        .events
+        .last()
+        .and_then(|(_, e)| e.caption())
+        .unwrap_or_default()
+}
+
+fn lurch(app: &mut App) {
+    app.world_mut().write_message(ShipCommand::Lurch);
 }
 
 /// Contact tests drift into surfaces with no input; flight assist would brake.
@@ -127,7 +142,7 @@ fn booted_state(app: &mut App) -> (Entity, Vec3, Vec3, Vec3) {
             velocity,
             ..
         } => (body, feet, up, velocity),
-        Mode::Eva { .. } => panic!("expected booted, got EVA: {}", player(app).last_event),
+        Mode::Eva { .. } => panic!("expected booted, got EVA: {}", last_event(app)),
     }
 }
 
@@ -162,7 +177,7 @@ fn jump_carries_surface_velocity() {
     let mode = booted(&mut app, Vec3::new(3.0, 0.01, 5.0), Vec3::Y, Vec3::NEG_Z);
     set_mode(&mut app, mode);
     ticks(&mut app, 30);
-    command(&mut app, |c| c.jump = true);
+    command(&mut app, |c| c.presses.jump.press());
     ticks(&mut app, 1);
     let Mode::Eva {
         position, velocity, ..
@@ -232,26 +247,19 @@ fn lurch_rips_player_off_the_stern() {
     set_mode(&mut app, mode);
     ticks(&mut app, 10);
     booted_state(&mut app);
-    app.world_mut()
-        .query::<&mut Ship>()
-        .single_mut(app.world_mut())
-        .unwrap()
-        .lurch();
+    lurch(&mut app);
     ticks(&mut app, 30);
     let p = player(&mut app);
     assert!(matches!(p.mode, Mode::Eva { .. }), "still booted");
-    assert!(p.last_event.contains("ripped"), "event: {}", p.last_event);
+    let event = last_event(&mut app);
+    assert!(event.contains("ripped"), "event: {event}");
 }
 
 #[test]
 fn lurch_does_not_rip_player_off_the_deck() {
     let mut app = app();
     ticks(&mut app, 10);
-    app.world_mut()
-        .query::<&mut Ship>()
-        .single_mut(app.world_mut())
-        .unwrap()
-        .lurch();
+    lurch(&mut app);
     ticks(&mut app, 90);
     booted_state(&mut app);
 }
@@ -327,7 +335,7 @@ fn grapple_reels_player_in() {
             pitch: 0.0,
         },
     );
-    command(&mut app, |c| c.grapple = true);
+    command(&mut app, |c| c.presses.grapple.press());
     ticks(&mut app, 1);
     let grapple = player(&mut app)
         .grapple
@@ -548,7 +556,7 @@ fn wandering_never_embeds() {
         let yaw = (next() - 0.5) * 3.0;
         let movement = Vec3::new(next() * 2.0 - 1.0, 0.0, next() * 2.0 - 1.0);
         command(&mut app, |c| {
-            c.look.x += yaw;
+            c.add_look(Vec2::new(yaw, 0.0));
             c.sprint = true;
         });
         worst = worst.max(walk_checked(&mut app, movement, 30));
@@ -567,11 +575,7 @@ fn skids_when_ship_accelerates_beyond_shear() {
     tuning.lurch_delta_v = 10.0;
     let mut app = app_with(tuning);
     ticks(&mut app, 5);
-    app.world_mut()
-        .query::<&mut Ship>()
-        .single_mut(app.world_mut())
-        .unwrap()
-        .lurch();
+    lurch(&mut app);
     ticks(&mut app, 3);
     let (_, _, _, velocity) = booted_state(&mut app);
     // Ship lurches toward -Z; we slide aft, toward +Z, relative to the deck.
@@ -711,7 +715,7 @@ fn riding_a_rock_out_of_the_field_keeps_rock_and_field_around_you() {
     // Ride well past the downstream end of the ship's field box, then jump.
     ticks(&mut app, 60 * 40);
     assert_eq!(booted_state(&mut app).0, rock);
-    command(&mut app, |c| c.jump = true);
+    command(&mut app, |c| c.presses.jump.press());
     ticks(&mut app, 2);
     let rock_after = app.world().get::<Position>(rock).unwrap().0;
     let Mode::Eva { position, .. } = player(&mut app).mode else {
@@ -747,13 +751,13 @@ fn reference_body_is_chosen_with_crosshair_and_persists_while_booted() {
     let rock = spawn_rock(&mut app, Vec3::new(0.0, 1.6, 60.0), 3.0, Vec3::ZERO);
     let mode = booted(&mut app, Vec3::new(0.0, 0.01, 10.0), Vec3::Y, Vec3::Z);
     set_mode(&mut app, mode);
-    command(&mut app, |c| c.set_reference = true);
+    command(&mut app, |c| c.presses.set_reference.press());
     ticks(&mut app, 1);
     assert_eq!(
         player(&mut app).reference_body,
         Some(rock),
         "{}",
-        player(&mut app).last_event
+        last_event(&mut app)
     );
     // Still booted on the ship, the explicit choice sticks.
     ticks(&mut app, 60);
@@ -778,7 +782,7 @@ fn assisted_reel_with_swing_is_smooth_and_arrives_gently() {
             pitch: 0.0,
         },
     );
-    command(&mut app, |c| c.grapple = true);
+    command(&mut app, |c| c.presses.grapple.press());
     ticks(&mut app, 1);
     let anchor_local = player(&mut app).grapple.expect("hit the stern").anchor;
     command(&mut app, |c| c.reel_in = true);
@@ -879,4 +883,126 @@ fn assist_matches_the_surface_up_close() {
     let height = (position - rock_pos).length() - 6.0;
     // Still hovering over the moving surface, not left behind by it or pressed into it.
     assert!((height - 1.0).abs() < 0.3, "height above surface {height}");
+}
+
+/// Walks over a faceted rock and returns the largest per-tick turn of `up`
+/// (ignoring deliberate relocations) and the total turn.
+fn walk_faceted_rock(tuning: Tuning) -> (f32, f32) {
+    use rand::SeedableRng;
+    let mut app = app_with(tuning);
+    assist_off(&mut app);
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
+    let rock = app
+        .world_mut()
+        .spawn((
+            space_game::sim::asteroids::asteroid_collider(&mut rng, 6.0),
+            ColliderDensity(space_game::sim::asteroids::ROCK_DENSITY),
+            RigidBody::Dynamic,
+            SleepingDisabled,
+            space_game::sim::bodies::PreviousVelocity::default(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 80.0)),
+        ))
+        .id();
+    ticks(&mut app, 2);
+    set_mode(
+        &mut app,
+        Mode::Eva {
+            position: Vec3::new(0.0, 0.0, 66.0),
+            velocity: Vec3::Z * 1.5,
+            orientation: Quat::from_rotation_arc(Vec3::Y, Vec3::NEG_Z),
+            pitch: 0.0,
+        },
+    );
+    for _ in 0..900 {
+        ticks(&mut app, 1);
+        if matches!(player(&mut app).mode, Mode::Booted { .. }) {
+            break;
+        }
+    }
+    assert_eq!(booted_state(&mut app).0, rock, "never landed on the rock");
+
+    command(&mut app, |c| c.movement = Vec3::Z);
+    let (mut last_up, mut worst, mut total) = (booted_state(&mut app).2, 0.0f32, 0.0f32);
+    for _ in 0..240 {
+        ticks(&mut app, 1);
+        let (body, _, up, _) = booted_state(&mut app);
+        assert_eq!(body, rock);
+        let step = last_up.angle_between(up).to_degrees();
+        // Wall climbs and edge wraps relocate the capsule on purpose.
+        if step < 45.0 {
+            worst = worst.max(step);
+        }
+        total += step;
+        last_up = up;
+    }
+    (worst, total)
+}
+
+/// Walking over a faceted rock turns the body smoothly: `up` follows the
+/// surface at a limited rate instead of snapping at every face.
+#[test]
+fn up_turns_smoothly_walking_over_a_faceted_rock() {
+    let (worst, total) = walk_faceted_rock(Tuning::default());
+    assert!(total > 10.0, "walked without the surface turning ({total}°)");
+    assert!(worst < 6.0, "up turned {worst}° in one tick");
+    // Following the surface instantly snaps at the creases.
+    let mut snappy = Tuning::default();
+    snappy.surface_follow_rate = 1e4;
+    let (snap_worst, _) = walk_faceted_rock(snappy);
+    assert!(
+        snap_worst > 2.0 * worst,
+        "smoothing made no difference ({snap_worst}° vs {worst}°)"
+    );
+}
+
+/// Two runs from startup with the same inputs give bit-identical results.
+/// Necessary for rollback, not sufficient: it doesn't catch state that is
+/// identical across fresh runs but not restored by a rollback (e.g. Avian's
+/// solver warm-start data). That needs a snapshot/restore test once there is
+/// a snapshot to restore.
+#[test]
+fn simulation_is_deterministic() {
+    fn run() -> (Player, Vec<(Vec3, Quat, Vec3)>) {
+        let mut app = app_configured(Tuning::default(), true);
+        // Walk and look around, jump off, fly, grapple, reel in.
+        let script: &[(usize, fn(&mut PlayerInput))] = &[
+            (40, |c| c.movement = Vec3::new(0.3, 0.0, 1.0)),
+            (30, |c| c.add_look(Vec2::new(0.4, -0.2))),
+            (20, |c| c.presses.jump.press()),
+            (60, |c| c.movement = Vec3::new(0.0, 0.5, 1.0)),
+            (5, |c| c.presses.grapple.press()),
+            (90, |c| c.reel_in = true),
+        ];
+        for (n, f) in script {
+            command(&mut app, f);
+            ticks(&mut app, *n);
+        }
+        let bodies = app
+            .world_mut()
+            .query::<(&Position, &Rotation, &LinearVelocity)>()
+            .iter(app.world())
+            .map(|(p, r, v)| (p.0, r.0, v.0))
+            .collect();
+        (player(&mut app), bodies)
+    }
+    let (a, b) = (run(), run());
+    assert_eq!(a.0, b.0, "player state diverged");
+    assert!(a.1.len() > 300);
+    assert!(a.1 == b.1, "body state diverged");
+}
+
+/// A held input is read every tick; a press in it acts once.
+#[test]
+fn a_press_acts_once_however_often_the_input_is_read() {
+    let mut app = app();
+    ticks(&mut app, 5);
+    command(&mut app, |c| c.presses.toggle_boots.press());
+    ticks(&mut app, 30);
+    let toggles = player(&mut app)
+        .events
+        .iter()
+        .filter(|(_, e)| matches!(e, space_game::sim::events::PlayerEvent::BootsToggled(_)))
+        .count();
+    assert_eq!(toggles, 1);
+    assert!(!player(&mut app).boots_on);
 }

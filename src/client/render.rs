@@ -14,7 +14,8 @@ use super::camera::PlayerCamera;
 use crate::sim::SimMaterial;
 use crate::sim::asteroids::FIELD_DIRECTION;
 use crate::sim::frame::BodyFrame;
-use crate::sim::player::{Grapple, Mode, Player, PlayerCommand};
+use crate::sim::input::PlayerInput;
+use crate::sim::player::{Grapple, Mode, Player};
 use crate::sim::ship::HullPart;
 use crate::sim::tuning::Tuning;
 
@@ -287,12 +288,12 @@ pub fn draw_gizmos(
     mut gizmos: Gizmos,
     time: Res<Time>,
     tuning: Res<Tuning>,
-    player: Single<(&Player, &PlayerCommand)>,
+    player: Single<(&Player, &PlayerInput)>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
     camera: Single<&Transform, With<PlayerCamera>>,
     mut rope_sag: Local<f32>,
 ) {
-    let (player, command) = *player;
+    let (player, input) = *player;
     if player.grapple.is_none() {
         *rope_sag = 0.0;
     }
@@ -330,7 +331,7 @@ pub fn draw_gizmos(
                 &mut gizmos,
                 &tuning,
                 &grapple,
-                command.reel_in,
+                input.reel_in,
                 *rope_sag,
                 hand,
                 anchor,

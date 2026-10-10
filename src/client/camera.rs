@@ -3,14 +3,17 @@
 //! The render pose is built in the frame the player lives in: a booted player's
 //! eye is placed relative to the *interpolated* transform of the body underfoot,
 //! so the player never jitters against the deck no matter how the body moves.
-//! Discontinuities reported by the sim (landing, edge wraps, wall transitions)
-//! are hidden by a decaying pose offset.
+//! Events that relocate the view (landing, edge wraps, wall transitions) are
+//! smoothed over by a decaying pose offset.
 
 use bevy::prelude::*;
 
+use super::events::Presented;
 use super::sfx::STEP_LENGTH;
+use crate::sim::events::{Detach, PlayerEvent};
 use crate::sim::frame::BodyFrame;
-use crate::sim::player::{Detach, Mode, Player, PlayerCommand, PlayerEvent, PreviousMode};
+use crate::sim::input::PlayerInput;
+use crate::sim::player::{Mode, Player, PlayerTelemetry, PreviousMode};
 use crate::sim::tuning::Tuning;
 
 #[derive(Component)]
@@ -19,7 +22,6 @@ pub struct PlayerCamera;
 /// Render-side camera state.
 #[derive(Component, Default)]
 pub struct CameraSmoothing {
-    seen_discontinuity: u32,
     position_offset: Vec3,
     rotation_offset: Quat,
     last_eye: Vec3,
@@ -67,8 +69,8 @@ pub struct CameraFx {
     fov_kick: f32,
 }
 
-pub fn camera_fx_events(mut fx: ResMut<CameraFx>, mut events: MessageReader<PlayerEvent>) {
-    for event in events.read() {
+pub fn camera_fx_events(mut fx: ResMut<CameraFx>, mut events: MessageReader<Presented>) {
+    for Presented(event) in events.read() {
         match *event {
             PlayerEvent::Landed { speed, .. } => {
                 fx.dip = (fx.dip + 0.04 + 0.04 * speed).min(0.3);
@@ -88,21 +90,23 @@ pub fn update_camera(
     mut fx: ResMut<CameraFx>,
     fixed: Res<Time<Fixed>>,
     tuning: Res<Tuning>,
-    player: Single<(&Player, &PreviousMode, &PlayerCommand)>,
+    mut events: MessageReader<Presented>,
+    player: Single<(&Player, &PreviousMode, &PlayerInput, &PlayerTelemetry)>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
     camera: Single<(&mut Transform, &mut CameraSmoothing, &mut Projection), With<PlayerCamera>>,
 ) {
-    let (player, previous, command) = *player;
+    let (player, previous, input, telemetry) = *player;
     let (mut cam_transform, mut smooth, mut projection) = camera.into_inner();
     let alpha = fixed.overstep_fraction();
 
     // Apply look input the sim hasn't consumed yet, for zero-latency aim.
     let mut current = player.mode;
     let mut prior = previous.0;
-    current.apply_look(command.look, 0.0);
-    prior.apply_look(command.look, 0.0);
+    let pending_look = player.input.pending_look(input);
+    current.apply_look(pending_look, 0.0);
+    prior.apply_look(pending_look, 0.0);
 
-    let discontinuity = player.discontinuity != smooth.seen_discontinuity;
+    let relocated = events.read().any(|e| e.0.relocates_view());
     let (local_eye, local_rot) = {
         let (eye, rot) = current.view(&tuning);
         let same_frame = match (prior, current) {
@@ -110,7 +114,7 @@ pub fn update_camera(
             (Mode::Booted { body: a, .. }, Mode::Booted { body: b, .. }) => a == b,
             _ => false,
         };
-        if same_frame && !discontinuity {
+        if same_frame && !relocated {
             let (prior_eye, prior_rot) = prior.view(&tuning);
             (prior_eye.lerp(eye, alpha), prior_rot.slerp(rot, alpha))
         } else {
@@ -142,8 +146,7 @@ pub fn update_camera(
         Mode::Eva { .. } => (local_eye, local_rot),
     };
 
-    if discontinuity {
-        smooth.seen_discontinuity = player.discontinuity;
+    if relocated {
         smooth.position_offset = smooth.last_eye + smooth.position_offset - eye;
         smooth.rotation_offset =
             (smooth.rotation_offset * smooth.last_rotation * rotation.inverse()).normalize();
@@ -174,7 +177,7 @@ pub fn update_camera(
     );
     fx.dip *= (-dt * 7.0).exp();
     fx.trauma = (fx.trauma - dt * 1.6).max(0.0);
-    let boosting = matches!(current, Mode::Eva { .. }) && command.sprint && player.thrust > 0.1;
+    let boosting = matches!(current, Mode::Eva { .. }) && input.sprint && telemetry.thrust > 0.1;
     let kick_target = if boosting { 8.0 } else { 0.0 };
     fx.fov_kick += (kick_target - fx.fov_kick) * (1.0 - (-dt * 4.0).exp());
 

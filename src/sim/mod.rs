@@ -1,11 +1,14 @@
 //! Headless simulation: everything that would run on a server.
 //!
 //! Nothing here touches rendering, windows, or input devices. Input arrives as
-//! [`player::PlayerCommand`] components; the client layer reads state back out.
+//! [`input::PlayerInput`] components; the client layer reads state back out,
+//! including each player's tick-stamped [`events::EventLog`].
 
 pub mod asteroids;
 pub mod bodies;
+pub mod events;
 pub mod frame;
+pub mod input;
 pub mod player;
 pub mod rope;
 pub mod ship;
@@ -15,6 +18,15 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 pub const TICK_HZ: f64 = 60.0;
+
+/// The number of the simulation tick being run. Everything the sim does is a
+/// function of state, input, and this, so re-running a tick reproduces it.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SimTick(pub u32);
+
+fn advance_tick(mut tick: ResMut<SimTick>) {
+    tick.0 = tick.0.wrapping_add(1);
+}
 
 /// Visual material class of a collider. The sim only tags; the client decides
 /// what it looks like.
@@ -72,7 +84,8 @@ impl Plugin for SimPlugin {
                         .in_set(SimSystems::Drive),
                 );
         }
-        app.add_message::<player::PlayerEvent>()
+        app.init_resource::<SimTick>()
+            .add_message::<ship::ShipCommand>()
             .insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
             .insert_resource(Gravity(Vec3::ZERO))
             .add_systems(Startup, (ship::spawn_ship, player::spawn_player).chain())
@@ -80,6 +93,7 @@ impl Plugin for SimPlugin {
                 FixedUpdate,
                 (SimSystems::RecordVelocities, SimSystems::Drive).chain(),
             )
+            .add_systems(FixedFirst, advance_tick)
             .add_systems(
                 FixedUpdate,
                 (

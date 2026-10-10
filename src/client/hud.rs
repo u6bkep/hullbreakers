@@ -6,10 +6,11 @@ use bevy_egui::{EguiContexts, egui};
 use avian3d::prelude::{ColliderAabb, SpatialQuery, SpatialQueryFilter};
 
 use super::camera::PlayerCamera;
+use super::events::EventCursor;
 use super::input::MouseCaptured;
 use crate::sim::bodies::Bodies;
 use crate::sim::player::{Mode, Player};
-use crate::sim::ship::Ship;
+use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::{TUNING_PATH, Tuning};
 
 #[derive(Resource, Default)]
@@ -25,7 +26,8 @@ pub fn hud(
     player: Single<&Player>,
     bodies: Bodies,
     names: Query<&Name>,
-    mut ships: Query<&mut Ship>,
+    events: Res<EventCursor>,
+    mut ship_orders: MessageWriter<ShipCommand>,
     camera: Single<&Transform, With<PlayerCamera>>,
     spatial: SpatialQuery,
 ) -> Result {
@@ -132,7 +134,7 @@ pub fn hud(
                     name_of(Some(g.body))
                 )));
             }
-            ui.label(text(player.last_event.clone()));
+            ui.label(text(events.last_text.clone()));
             if captured.0 {
                 ui.label(
                     egui::RichText::new("Tab: tuning panel")
@@ -160,9 +162,7 @@ pub fn hud(
                     panel.status = "reset to defaults".into();
                 }
                 if ui.button("Ship lurch (L)").clicked() {
-                    for mut ship in &mut ships {
-                        ship.lurch();
-                    }
+                    ship_orders.write(ShipCommand::Lurch);
                 }
             });
             ui.label(&panel.status);

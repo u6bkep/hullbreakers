@@ -17,8 +17,11 @@ use avian3d::character_controller::move_and_slide::DepenetrationConfig;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
+use super::SimTick;
 use super::bodies::Bodies;
+use super::events::{Detach, EventLog, PlayerEvent};
 use super::frame::BodyFrame;
+use super::input::{InputCursor, PlayerInput, TickInput};
 use super::rope::{RopeEnd, solve_rope};
 use super::tuning::Tuning;
 
@@ -30,42 +33,6 @@ const WRAP_DEPTH: f32 = 0.08;
 const BODY_FOLLOW_RATE: f32 = 3.0;
 /// Fraction of the capsule (from the bottom) that counts as "feet".
 const FEET_REGION: f32 = 0.3;
-
-/// One tick of player intent. Continuous fields are overwritten by the input
-/// layer each frame; `look` accumulates; edge-triggered flags are cleared once
-/// the simulation has consumed them.
-#[derive(Component, Clone, Debug, Default)]
-pub struct PlayerCommand {
-    /// Accumulated mouse look in radians: x = yaw right, y = pitch down.
-    pub look: Vec2,
-    /// -1..1, positive rolls clockwise.
-    pub roll: f32,
-    /// x = right, y = up, z = forward, each -1..1.
-    pub movement: Vec3,
-    pub sprint: bool,
-    pub brake: bool,
-    pub reel_in: bool,
-    pub pay_out: bool,
-    pub jump: bool,
-    pub toggle_boots: bool,
-    pub toggle_assist: bool,
-    pub grapple: bool,
-    /// Make the body under the crosshair the reference frame.
-    pub set_reference: bool,
-}
-
-impl PlayerCommand {
-    fn consume_edges(&mut self) -> Self {
-        let taken = self.clone();
-        self.look = Vec2::ZERO;
-        self.jump = false;
-        self.toggle_boots = false;
-        self.toggle_assist = false;
-        self.set_reference = false;
-        self.grapple = false;
-        taken
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -189,77 +156,6 @@ impl Mode {
     }
 }
 
-/// Why the boots let go.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Detach {
-    Jumped,
-    BootsOff,
-    /// The surface accelerated away harder than adhesion (m/s²).
-    RippedOff(f32),
-    /// The rope out-pulled the boots (N).
-    Yanked(f32),
-}
-
-/// Discrete things that happened to a player this tick, for audio, camera
-/// effects, and the HUD.
-#[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub enum PlayerEvent {
-    Detached(Detach),
-    /// Boots caught a surface; relative speed in m/s. `rock` = asteroid.
-    Landed {
-        speed: f32,
-        body: Entity,
-    },
-    /// Bounced off something at this closing speed (m/s).
-    Impact {
-        speed: f32,
-        body: Entity,
-    },
-    /// Climbed onto a wall or wrapped around an edge.
-    SurfaceChanged {
-        body: Entity,
-    },
-    GrappleAttached {
-        distance: f32,
-        body: Entity,
-    },
-    GrappleMissed,
-    GrappleReleased,
-    RopeSnapped,
-    BootsToggled(bool),
-    AssistToggled(bool),
-    ReferenceSet {
-        distance: f32,
-    },
-    NoReferenceTarget,
-}
-
-impl std::fmt::Display for PlayerEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            PlayerEvent::Detached(Detach::Jumped) => write!(f, "jumped"),
-            PlayerEvent::Detached(Detach::BootsOff) => write!(f, "boots off"),
-            PlayerEvent::Detached(Detach::RippedOff(a)) => write!(f, "ripped off ({a:.1} m/s²)"),
-            PlayerEvent::Detached(Detach::Yanked(n)) => write!(f, "yanked off by rope ({n:.0} N)"),
-            PlayerEvent::Landed { speed, .. } => write!(f, "landed at {speed:.1} m/s"),
-            PlayerEvent::Impact { speed, .. } => write!(f, "bounced at {speed:.1} m/s"),
-            PlayerEvent::SurfaceChanged { .. } => write!(f, ""),
-            PlayerEvent::GrappleAttached { distance, .. } => {
-                write!(f, "grappled at {distance:.1} m")
-            }
-            PlayerEvent::GrappleMissed => write!(f, "grapple missed"),
-            PlayerEvent::GrappleReleased => write!(f, "grapple released"),
-            PlayerEvent::RopeSnapped => write!(f, "rope snapped"),
-            PlayerEvent::BootsToggled(on) => write!(f, "boots {}", if on { "on" } else { "off" }),
-            PlayerEvent::AssistToggled(on) => {
-                write!(f, "flight assist {}", if on { "on" } else { "off" })
-            }
-            PlayerEvent::ReferenceSet { distance } => write!(f, "reference set at {distance:.0} m"),
-            PlayerEvent::NoReferenceTarget => write!(f, "no body under crosshair"),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grapple {
     pub body: Entity,
@@ -270,7 +166,8 @@ pub struct Grapple {
     pub tension: f32,
 }
 
-#[derive(Component, Clone, Debug)]
+/// Everything about a player that the simulation carries from tick to tick.
+#[derive(Component, Clone, Debug, PartialEq)]
 pub struct Player {
     pub mode: Mode,
     pub boots_on: bool,
@@ -281,24 +178,23 @@ pub struct Player {
     /// The body velocities are reported (and braked) relative to.
     pub reference_body: Option<Entity>,
     pub detach_timer: f32,
-    /// Incremented whenever the view jumps discontinuously (landing, edge
-    /// wraps, wall transitions) so the camera can smooth over it.
-    pub discontinuity: u32,
-    pub last_event: String,
-    /// Jetpack output last tick as a fraction of base thrust (boost > 1).
-    pub thrust: f32,
-    /// Events raised this tick; flushed to [`PlayerEvent`] messages.
-    outbox: Vec<PlayerEvent>,
+    /// How much of [`PlayerInput`] has been applied.
+    pub input: InputCursor,
+    pub events: EventLog,
 }
 
 impl Player {
     fn emit(&mut self, event: PlayerEvent) {
-        let text = event.to_string();
-        if !text.is_empty() {
-            self.last_event = text;
-        }
-        self.outbox.push(event);
+        self.events.push(event);
     }
+}
+
+/// Per-tick outputs derived from the simulation, for presentation. Not state:
+/// recomputed every tick.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct PlayerTelemetry {
+    /// Jetpack output as a fraction of base thrust (boost > 1).
+    pub thrust: f32,
 }
 
 /// The mode at the start of the most recent tick, for render interpolation.
@@ -323,13 +219,12 @@ pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::shi
             grapple: None,
             reference_body: Some(*ship),
             detach_timer: 0.0,
-            discontinuity: 0,
-            last_event: String::new(),
-            thrust: 0.0,
-            outbox: Vec::new(),
+            input: InputCursor::default(),
+            events: EventLog::default(),
         },
         PreviousMode(mode),
-        PlayerCommand::default(),
+        PlayerInput::default(),
+        PlayerTelemetry::default(),
     ));
 }
 
@@ -464,11 +359,16 @@ struct TickContext<'a, 'w, 's> {
 
 pub fn player_tick(
     time: Res<Time>,
+    tick: Res<SimTick>,
     tuning: Res<Tuning>,
     mas: MoveAndSlide,
     mut bodies: Bodies,
-    mut players: Query<(&mut Player, &mut PlayerCommand, &mut PreviousMode)>,
-    mut events: MessageWriter<PlayerEvent>,
+    mut players: Query<(
+        &mut Player,
+        &PlayerInput,
+        &mut PreviousMode,
+        &mut PlayerTelemetry,
+    )>,
 ) {
     let ctx = TickContext {
         tuning: &tuning,
@@ -480,11 +380,12 @@ pub fn player_tick(
     if ctx.dt <= 0.0 {
         return;
     }
-    for (mut player, mut command, mut previous) in &mut players {
-        let cmd = command.consume_edges();
+    for (mut player, input, mut previous, mut telemetry) in &mut players {
         let player = &mut *player;
-        player.detach_timer -= ctx.dt;
-        player.thrust = 0.0;
+        player.events.begin_tick(tick.0);
+        let cmd = player.input.advance(input);
+        player.detach_timer = (player.detach_timer - ctx.dt).max(0.0);
+        telemetry.thrust = 0.0;
         if cmd.toggle_boots {
             player.boots_on = !player.boots_on;
             player.emit(PlayerEvent::BootsToggled(player.boots_on));
@@ -522,9 +423,8 @@ pub fn player_tick(
         }
         match player.mode {
             Mode::Booted { .. } => booted_tick(&ctx, &mut bodies, player, &cmd),
-            Mode::Eva { .. } => eva_tick(&ctx, &mut bodies, player, &cmd),
+            Mode::Eva { .. } => telemetry.thrust = eva_tick(&ctx, &mut bodies, player, &cmd),
         }
-        events.write_batch(player.outbox.drain(..));
     }
 }
 
@@ -571,7 +471,7 @@ fn fire_grapple(ctx: &TickContext, bodies: &Bodies, player: &mut Player) {
 /// winch speed. Paying out lengthens the rope directly.
 fn reel(
     grapple: &mut Grapple,
-    cmd: &PlayerCommand,
+    cmd: &TickInput,
     ctx: &TickContext,
     distance: f32,
 ) -> (f32, Option<f32>) {
@@ -611,7 +511,7 @@ fn take_in_slack(grapple: &mut Grapple, winch: Option<f32>, distance: f32) {
     }
 }
 
-fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &PlayerCommand) {
+fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &TickInput) {
     let t = ctx.tuning;
     let Mode::Booted {
         body,
@@ -639,7 +539,6 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     let leave = move |player: &mut Player, velocity: Vec3, why: Detach| {
         player.mode = booted_to_eva(&frame, feet, up, velocity, orientation, pitch, t);
         player.detach_timer = t.detach_cooldown;
-        player.discontinuity += 1;
         player.emit(PlayerEvent::Detached(why));
     };
 
@@ -778,12 +677,14 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     velocity = frame.dir_to_local(out.projected_velocity);
     velocity -= up * velocity.dot(up);
 
-    // Walking straight into a wall climbs onto it.
+    // Walking straight into a wall climbs onto it. A wall is steeper than
+    // walkable ground, which the ground snap below leans onto instead.
     let wish_w = frame.dir_to_world(wish_dir);
     let up_w = frame.dir_to_world(up);
+    let max_cos = t.max_ground_angle_deg.to_radians().cos();
     let wall = hits
         .iter()
-        .filter(|(_, n, _)| n.dot(up_w).abs() < 0.77)
+        .filter(|(_, n, _)| n.dot(up_w).abs() < max_cos)
         .filter(|(_, n, _)| wish_w.dot(-*n) > 0.7)
         .max_by(|a, b| wish_w.dot(-a.1).total_cmp(&wish_w.dot(-b.1)))
         .copied();
@@ -796,7 +697,6 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                 let turn = Quat::from_rotation_arc(up, new_up);
                 orientation = turn * orientation;
                 velocity = turn * velocity;
-                player.discontinuity += 1;
                 player.emit(PlayerEvent::SurfaceChanged { body });
                 player.mode = Mode::Booted {
                     body,
@@ -822,21 +722,23 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
         SKIN,
         &ctx.filter,
     );
-    let max_cos = t.max_ground_angle_deg.to_radians().cos();
     if let Some(hit) = ground.filter(|h| h.normal1.dot(up_w) > max_cos) {
         let snapped_center = center_w - up_w * hit.distance;
         feet = frame.point_to_local(snapped_center) - up * half;
-        let new_up = frame.dir_to_local(hit.normal1).normalize();
-        // Tilting pivots the capsule about the feet; only follow the surface
-        // if the tilted capsule still fits.
-        if up.dot(new_up) < 0.9999 && capsule_fits(ctx, &frame, feet, new_up) {
-            let turn = Quat::from_rotation_arc(up, new_up);
-            if up.dot(new_up) < 0.985 {
-                player.discontinuity += 1;
+        // Lean toward the surface normal at a limited rate, so walking over
+        // a faceted surface turns the body smoothly instead of snapping at
+        // every face. Tilting pivots the capsule about the feet; only follow
+        // the surface if the tilted capsule still fits.
+        let target_up = frame.dir_to_local(hit.normal1).normalize();
+        if up.dot(target_up) < 0.9999 {
+            let follow = 1.0 - (-t.surface_follow_rate * ctx.dt).exp();
+            let turn = Quat::IDENTITY.slerp(Quat::from_rotation_arc(up, target_up), follow);
+            let new_up = (turn * up).normalize();
+            if capsule_fits(ctx, &frame, feet, new_up) {
+                orientation = (turn * orientation).normalize();
+                velocity = turn * velocity;
+                up = new_up;
             }
-            orientation = (turn * orientation).normalize();
-            velocity = turn * velocity;
-            up = new_up;
         }
         player.mode = Mode::Booted {
             body,
@@ -869,7 +771,6 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                 let turn = Quat::from_rotation_arc(up, new_up);
                 orientation = turn * orientation;
                 velocity = turn * velocity;
-                player.discontinuity += 1;
                 player.emit(PlayerEvent::SurfaceChanged { body });
                 player.mode = Mode::Booted {
                     body,
@@ -941,10 +842,11 @@ fn retarget_body(
         pitch,
     };
     player.reference_body = Some(new_body);
-    player.last_event = "stepped onto another body".into();
+    player.emit(PlayerEvent::BodyChanged { body: new_body });
 }
 
-fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &PlayerCommand) {
+/// Returns the jetpack output as a fraction of base thrust.
+fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &TickInput) -> f32 {
     let t = ctx.tuning;
     let Mode::Eva {
         mut position,
@@ -953,7 +855,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
         mut pitch,
     } = player.mode
     else {
-        return;
+        return 0.0;
     };
     let inverse_mass = 1.0 / t.player_mass;
 
@@ -1003,7 +905,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
         input * max_dv
     };
     velocity += thrust_dv;
-    player.thrust = thrust_dv.length() / (t.thrust_accel * ctx.dt);
+    let thrust = thrust_dv.length() / (t.thrust_accel * ctx.dt);
 
     // Rope.
     if let Some(mut grapple) = player.grapple {
@@ -1115,12 +1017,11 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
             {
                 player.mode = landed;
                 player.reference_body = Some(body);
-                player.discontinuity += 1;
                 player.emit(PlayerEvent::Landed {
                     speed: relative.length(),
                     body,
                 });
-                return;
+                return thrust;
             }
         }
         // One bounce per body per tick; the attach test above sees every contact.
@@ -1156,6 +1057,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &P
         orientation,
         pitch,
     };
+    thrust
 }
 
 #[cfg(test)]

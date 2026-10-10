@@ -1,8 +1,10 @@
 //! Client layer: input, camera, rendering, debug UI. Reads sim state, writes
-//! only [`crate::sim::player::PlayerCommand`] (plus debug actions).
+//! only [`crate::sim::input::PlayerInput`] and [`crate::sim::ship::ShipCommand`]
+//! (plus debug actions).
 
 pub mod camera;
 pub mod debug_shots;
+pub mod events;
 pub mod hud;
 pub mod input;
 pub mod render;
@@ -19,6 +21,8 @@ impl Plugin for ClientPlugin {
         app.add_plugins(EguiPlugin::default())
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<camera::CameraFx>()
+            .init_resource::<events::EventCursor>()
+            .add_message::<events::Presented>()
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
             .add_systems(PreStartup, render::setup_materials)
@@ -53,9 +57,10 @@ impl Plugin for ClientPlugin {
                 Update,
                 (
                     render::draw_gizmos,
-                    sfx::play_event_sounds,
                     sfx::play_continuous_sounds,
-                    camera::camera_fx_events,
+                    events::present_events,
+                    (sfx::play_event_sounds, camera::camera_fx_events)
+                        .after(events::present_events),
                 ),
             )
             .add_systems(EguiPrimaryContextPass, (hud::reference_overlay, hud::hud));

@@ -49,8 +49,17 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 
 ## Architecture
 
-- `src/sim/` is headless (would run on a server). Input arrives as a
-  `PlayerCommand` component; nothing in `sim` touches rendering or devices.
+- `src/sim/` is headless (would run on a server); nothing in it touches
+  rendering or devices. Each tick is a function of state, input, and the tick
+  number, so it can be re-run (network rollback) and reproduces bit-for-bit:
+  - **Input** (`sim/input.rs`) is absolute: look is a running total and button
+    presses are counters. The sim applies the difference since its
+    `InputCursor`, so a repeated input is a no-op and a skipped one catches up.
+  - **Events** (`sim/events.rs`) are tick-stamped entries in each player's
+    `EventLog`, not messages. A re-simulated tick rewrites its own entries.
+    The client presents each one once (`client/events.rs`).
+  - Time-dependent behaviour (ship wobble, lurch) derives from `SimTick`.
+    Orders to the ship arrive as `ShipCommand` messages.
 - `src/client/` is input, camera, greybox rendering, the HUD, and the tuning panel.
 - **Reference frames** (`sim/frame.rs`): a booted player is simulated in the
   local coordinates of the body underfoot, so a rolling ship is a stable floor.

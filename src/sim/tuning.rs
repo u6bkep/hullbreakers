@@ -78,6 +78,7 @@ tuning! {
             shear_accel: 12.0, 0.5, 50.0;
             ground_probe: 0.3, 0.05, 1.0;
             max_ground_angle_deg: 50.0, 10.0, 89.0;
+            surface_follow_rate: 10.0, 1.0, 60.0;
             attach_max_speed: 4.0, 0.5, 20.0;
             attach_max_angle_deg: 70.0, 10.0, 180.0;
             detach_cooldown: 0.25, 0.0, 2.0;
