@@ -12,7 +12,7 @@ use super::events::Presented;
 use super::sfx::STEP_LENGTH;
 use crate::sim::events::{Detach, PlayerEvent};
 use crate::sim::frame::BodyFrame;
-use super::{LocalInput, LocalPlayer};
+use super::{LocalInput, LocalPlayer, ViewCorrection};
 use crate::sim::player::{Mode, Player, PlayerTelemetry, PreviousMode};
 use crate::sim::tuning::Tuning;
 
@@ -91,6 +91,7 @@ pub fn update_camera(
     fixed: Res<Time<Fixed>>,
     tuning: Res<Tuning>,
     mut events: MessageReader<Presented>,
+    mut correction: ResMut<ViewCorrection>,
     local: Res<LocalInput>,
     player: Single<(&Player, Option<&PreviousMode>, &PlayerTelemetry), With<LocalPlayer>>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
@@ -159,6 +160,17 @@ pub fn update_camera(
         (-time.delta_secs() / tuning.smooth_time).exp()
     } else {
         0.0
+    };
+    // Corrections from the network: keep showing the old view, blend out.
+    // A relocation this frame already blends from the last drawn view,
+    // whatever moved it.
+    if !relocated {
+        smooth.position_offset += correction.position;
+        smooth.rotation_offset = (smooth.rotation_offset * correction.rotation).normalize();
+    }
+    *correction = ViewCorrection {
+        position: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
     };
     smooth.position_offset *= decay;
     smooth.rotation_offset = Quat::IDENTITY.slerp(smooth.rotation_offset, decay);

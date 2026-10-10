@@ -16,6 +16,17 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 pub use crate::net::{LocalInput, LocalPlayer};
 
+/// A jump in the local player's view that the camera should blend over
+/// rather than show: the network replacing a mispredicted state. Whoever
+/// causes one adds to it; the camera takes it.
+#[derive(Resource, Default)]
+pub struct ViewCorrection {
+    /// World-space eye displacement (old minus new).
+    pub position: Vec3,
+    /// Rotation taking the new view to the old.
+    pub rotation: Quat,
+}
+
 /// `PostUpdate` systems that write body transforms for this frame (when
 /// Avian's interpolation doesn't). The camera follows them.
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
@@ -33,6 +44,10 @@ impl Plugin for ClientPlugin {
         app.add_plugins(EguiPlugin::default())
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<camera::CameraFx>()
+            .insert_resource(ViewCorrection {
+                rotation: Quat::IDENTITY,
+                ..default()
+            })
             .init_resource::<events::EventCursor>()
             .add_message::<events::Presented>()
             .init_resource::<hud::PanelState>()

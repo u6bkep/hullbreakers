@@ -68,6 +68,30 @@ impl Plugin for SimSharedPlugin {
     }
 }
 
+/// Player simulation: every player that has [`input::PlayerInput`] here is
+/// simulated here. The authority simulates all of them; a network client
+/// simulates (predicts) only its own.
+pub struct PlayerSimPlugin;
+
+impl Plugin for PlayerSimPlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(
+            FixedUpdate,
+            (SimSystems::RecordVelocities, SimSystems::Drive).chain(),
+        )
+        .add_systems(
+            FixedUpdate,
+            bodies::record_previous_velocity.in_set(SimSystems::RecordVelocities),
+        )
+        .add_systems(
+            FixedPostUpdate,
+            player::player_tick
+                .in_set(SimSystems::Players)
+                .after(PhysicsSystems::Last),
+        );
+    }
+}
+
 /// The authoritative simulation.
 pub struct SimPlugin {
     /// Spawn the asteroid field. Tests turn it off for a quiet ship.
@@ -88,7 +112,7 @@ impl Default for SimPlugin {
 
 impl Plugin for SimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(SimSharedPlugin);
+        app.add_plugins((SimSharedPlugin, PlayerSimPlugin));
         if self.asteroids {
             app.init_resource::<asteroids::FieldInterest>()
                 .add_systems(Startup, asteroids::spawn_field.after(ship::spawn_ship))
@@ -117,23 +141,10 @@ impl Plugin for SimPlugin {
         app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
             .insert_resource(Gravity(Vec3::ZERO))
             .add_systems(Startup, ship::spawn_ship)
-            .configure_sets(
-                FixedUpdate,
-                (SimSystems::RecordVelocities, SimSystems::Drive).chain(),
-            )
             .add_systems(FixedFirst, advance_tick)
             .add_systems(
                 FixedUpdate,
-                (
-                    (ship::drive_ship, update_pins).in_set(SimSystems::Drive),
-                    bodies::record_previous_velocity.in_set(SimSystems::RecordVelocities),
-                ),
-            )
-            .add_systems(
-                FixedPostUpdate,
-                player::player_tick
-                    .in_set(SimSystems::Players)
-                    .after(PhysicsSystems::Last),
+                (ship::drive_ship, update_pins).in_set(SimSystems::Drive),
             );
     }
 }

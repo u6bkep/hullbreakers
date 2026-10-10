@@ -77,8 +77,15 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   `--server`. Replicated state is the sim's own: generating components that
   every peer expands locally (`ShipHull` builds the hull, `Asteroid { seed }`
   the rock's shape), each body's `Motion`, and `Player` state, whose event
-  log carries what happened. Players are interpolated (a client's own player
-  included, until prediction lands).
+  log carries what happened.
+- **Prediction**: a client simulates its own player ahead of the server
+  (`PlayerSimPlugin`: a player with `PlayerInput` is simulated wherever it
+  is) against bodies posed at the same tick from their motion, and rolls
+  back when the server's state differs beyond tolerance (`player_diverged`).
+  The camera blends over corrections (`ViewCorrection`). Other players are
+  interpolated. `SPACE_GAME_LAG=ms[,loss%]` simulates a bad link on a client;
+  clients log their rollback rate every 10 s. Measured at 100–150 ms: under
+  1 rollback/s walking, wall-walking, flying, grappling and reeling.
 - **Extrapolated bodies** (`sim/motion.rs`, `net/extrapolate.rs`): a body is
   sent as its free flight at a tick (center of mass, rotation, velocities),
   which every peer evaluates at its own tick, so clients see bodies where

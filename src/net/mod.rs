@@ -25,11 +25,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::sim::asteroids::Asteroid;
 use crate::sim::input::PlayerInput;
-use crate::sim::player::{Mode, Player, PlayerTelemetry, new_player};
+use crate::sim::player::{Mode, Player, PlayerTelemetry, PreviousMode, new_player};
 use crate::sim::ship::{Ship, ShipHull};
 use crate::sim::tuning::Tuning;
 use crate::sim::motion::Motion;
-use crate::sim::{SimPlugin, SimSharedPlugin, SimSystems, SimTick, TICK_HZ};
+use crate::sim::bodies::Bodies;
+use crate::sim::{PlayerSimPlugin, SimPlugin, SimSharedPlugin, SimSystems, SimTick, TICK_HZ};
 
 mod extrapolate;
 
@@ -96,7 +97,13 @@ impl Plugin for NetPlugin {
                 tick_duration: tick,
             });
         }
-        app.add_plugins(ProtocolPlugin);
+        app.add_plugins(ProtocolPlugin)
+            // Wherever a player is simulated, it is from the input lightyear
+            // holds for this tick.
+            .add_systems(
+                FixedUpdate,
+                apply_network_input.before(SimSystems::RecordVelocities),
+            );
         // Ticks are lightyear's on every peer, so a body's motion means the
         // same thing everywhere.
         app.add_systems(
@@ -127,10 +134,6 @@ impl Plugin for NetPlugin {
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players))
             .add_systems(
-                FixedUpdate,
-                apply_network_input.before(SimSystems::RecordVelocities),
-            )
-            .add_systems(
                 FixedPostUpdate,
                 extrapolate::track_motion.after(SimSystems::Players),
             );
@@ -144,14 +147,31 @@ impl Plugin for NetPlugin {
                     .disable::<PhysicsTransformPlugin>()
                     .disable::<PhysicsInterpolationPlugin>(),
                 SimSharedPlugin,
+                // Simulates (predicts) this client's own player.
+                PlayerSimPlugin,
             ))
             .add_observer(extrapolate::prepare_extrapolated)
             .add_systems(Update, adopt_host_tuning)
             .init_resource::<extrapolate::DrawClock>()
+            .init_resource::<ViewBeforeRollback>()
+            .configure_sets(
+                FixedPostUpdate,
+                SimSystems::Players.before(PredictionSystems::UpdateHistory),
+            )
             .add_systems(
                 FixedUpdate,
-                extrapolate::follow_motion.run_if(extrapolate::synced),
+                extrapolate::follow_motion
+                    .in_set(SimSystems::Drive)
+                    .run_if(extrapolate::synced),
             )
+            .add_systems(
+                PreUpdate,
+                (
+                    note_view_before_rollback.before(PredictionSystems::Rollback),
+                    hand_rollback_to_camera.after(PredictionSystems::Rollback),
+                ),
+            )
+            .add_systems(Update, report_rollbacks)
             .add_systems(
                 PostUpdate,
                 (extrapolate::advance_draw_clock, extrapolate::draw_extrapolated)
@@ -164,7 +184,14 @@ impl Plugin for NetPlugin {
             // for rollback), even before anything is predicted.
             app.init_resource::<LocalInput>()
                 .insert_resource(PredictionManager::default())
-                .add_systems(PreUpdate, mark_local_player)
+                // A client can't simulate its player before its clock (and
+                // so the bodies around it) is in step with the authority.
+                .add_systems(
+                    PreUpdate,
+                    mark_local_player.run_if(move |sync: Option<Res<LocalTimelineSync>>| {
+                        mode.is_authority() || extrapolate::synced(sync)
+                    }),
+                )
                 .add_systems(
                     FixedPreUpdate,
                     write_local_input.in_set(lightyear::prelude::client::input::InputSystems::WriteClientInputs),
@@ -206,11 +233,100 @@ impl Plugin for ProtocolPlugin {
         app.component::<Asteroid>().replicate_once();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();
-        app.component::<PlayerTelemetry>().replicate();
+        // Derived each tick wherever the player is simulated; never worth a
+        // rollback of its own.
+        app.component::<PlayerTelemetry>()
+            .replicate()
+            .predict()
+            .with_rollback_condition(|_, _| false);
+        // A client predicts its own player and interpolates the others.
         app.component::<Player>()
             .replicate()
+            .predict()
+            .with_rollback_condition(player_diverged)
             .add_interpolation_with(interpolate_player);
     }
+}
+
+/// Whether a predicted player state has strayed from the authority's state
+/// for the same tick far enough to re-simulate. Tolerances sit above the
+/// noise of extrapolated body poses (1 cm) so agreement isn't re-simulated.
+fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
+    // A body this client hasn't received yet: nothing to predict against,
+    // so nothing a rollback could fix.
+    let unknown = |body: Option<Entity>| body == Some(Entity::PLACEHOLDER);
+    if unknown(confirmed.mode.body()) || unknown(confirmed.reference_body) {
+        return false;
+    }
+    const DISTANCE: f32 = 0.02;
+    const SPEED: f32 = 0.02;
+    const ANGLE: f32 = 0.005;
+    let far = |a: Vec3, b: Vec3, tolerance: f32| a.distance(b) > tolerance;
+    let turned = |a: Quat, b: Quat| a.angle_between(b) > ANGLE;
+    let modes = match (confirmed.mode, predicted.mode) {
+        (
+            Mode::Eva {
+                position: p0,
+                velocity: v0,
+                orientation: o0,
+                pitch: a0,
+            },
+            Mode::Eva {
+                position: p1,
+                velocity: v1,
+                orientation: o1,
+                pitch: a1,
+            },
+        ) => far(p0, p1, DISTANCE) || far(v0, v1, SPEED) || turned(o0, o1) || (a0 - a1).abs() > ANGLE,
+        (
+            Mode::Booted {
+                body: b0,
+                feet: f0,
+                up: u0,
+                velocity: v0,
+                orientation: o0,
+                pitch: a0,
+            },
+            Mode::Booted {
+                body: b1,
+                feet: f1,
+                up: u1,
+                velocity: v1,
+                orientation: o1,
+                pitch: a1,
+            },
+        ) => {
+            b0 != b1
+                || far(f0, f1, DISTANCE)
+                || u0.angle_between(u1) > ANGLE
+                || far(v0, v1, SPEED)
+                || turned(o0, o1)
+                || (a0 - a1).abs() > ANGLE
+        }
+        _ => true,
+    };
+    let grapples = match (confirmed.grapple, predicted.grapple) {
+        (None, None) => false,
+        (Some(g0), Some(g1)) => {
+            g0.body != g1.body || far(g0.anchor, g1.anchor, DISTANCE) || (g0.length - g1.length).abs() > DISTANCE
+        }
+        _ => true,
+    };
+    let diverged = modes
+        || grapples
+        || confirmed.boots_on != predicted.boots_on
+        || confirmed.flight_assist != predicted.flight_assist
+        || confirmed.reference_body != predicted.reference_body
+        || confirmed.input != predicted.input;
+    if diverged {
+        debug!(
+            "diverged: modes {modes} grapple {grapples} input {}\n  confirmed {:?}\n  predicted {:?}",
+            confirmed.input != predicted.input,
+            confirmed.mode,
+            predicted.mode
+        );
+    }
+    diverged
 }
 
 /// Moves a player smoothly between two received states. Within one mode
@@ -302,7 +418,7 @@ fn connect(commands: &mut Commands, server: SocketAddr) {
             ReplicationReceiver,
             LocalAddr(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)),
             PeerAddr(server),
-            Link::default(),
+            Link::default().with_conditioner(simulated_lag()),
             NetcodeClient::new(
                 auth,
                 lightyear::netcode::client_plugin::NetcodeConfig::default(),
@@ -314,13 +430,35 @@ fn connect(commands: &mut Commands, server: SocketAddr) {
     commands.trigger(Connect { entity: client });
 }
 
-/// Players are replicated to every client, and every client but the host's
-/// own interpolates them.
-fn to_clients() -> (Replicate, InterpolationTarget) {
-    (
-        Replicate::to_clients(NetworkTarget::All),
-        InterpolationTarget::to_clients(NetworkTarget::AllExceptSingle(HOST_PEER)),
-    )
+/// `SPACE_GAME_LAG=ms[,loss%]` delays (±10% jitter) and drops what a client
+/// receives, to test prediction against a bad link.
+fn simulated_lag() -> Option<RecvLinkConditioner> {
+    let spec = std::env::var("SPACE_GAME_LAG").ok()?;
+    let mut parts = spec.split(',');
+    let ms: u64 = parts.next()?.trim().parse().ok()?;
+    let loss: f32 = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0.0);
+    info!("simulating {ms} ms latency, {loss}% loss on receive");
+    Some(RecvLinkConditioner::new(LinkConditionerConfig {
+        incoming_latency: Duration::from_millis(ms),
+        incoming_jitter: Duration::from_millis(ms / 10),
+        good_loss: loss / 100.0,
+        ..default()
+    }))
+}
+
+/// Client: how often prediction was wrong, every 10 s.
+fn report_rollbacks(time: Res<Time>, metrics: Res<PredictionMetrics>, mut last: Local<(f32, u32, u32)>) {
+    last.0 += time.delta_secs();
+    if last.0 < 10.0 {
+        return;
+    }
+    let (rollbacks, ticks) = (metrics.rollbacks - last.1, metrics.rollback_ticks - last.2);
+    info!(
+        "prediction: {:.1} rollbacks/s, {:.1} ticks each",
+        rollbacks as f32 / last.0,
+        ticks as f32 / rollbacks.max(1) as f32
+    );
+    *last = (0.0, metrics.rollbacks, metrics.rollback_ticks);
 }
 
 fn on_link(add: On<Add, LinkOf>, mut commands: Commands) {
@@ -339,28 +477,39 @@ struct Slot(u32);
 /// A system rather than a `Connected` observer: the host's own client
 /// connects during startup, before the ship exists.
 fn spawn_players(
-    clients: Query<Entity, (With<ClientOf>, With<Connected>, Without<HasPlayer>)>,
+    clients: Query<(Entity, &RemoteId), (With<ClientOf>, With<Connected>, Without<HasPlayer>)>,
     ship: Query<Entity, With<Ship>>,
     slots: Query<&Slot>,
     mut commands: Commands,
 ) {
     let Ok(ship) = ship.single() else { return };
     let mut taken: Vec<u32> = slots.iter().map(|s| s.0).collect();
-    for client in &clients {
+    for (client, peer) in &clients {
         let index = (0..).find(|i| !taken.contains(i)).expect("unbounded");
         taken.push(index);
         info!("client {client:?} joined as player {}", index + 1);
         commands.entity(client).insert(HasPlayer);
-        commands.spawn((
+        let owner = peer.0;
+        // The owner predicts its player; everyone else (but the host, who
+        // shares the authority's world) interpolates it. The host's own
+        // player is simply authoritative.
+        let interpolate = InterpolationTarget::to_clients(NetworkTarget::AllExcept(
+            [owner, HOST_PEER].into_iter().collect(),
+        ));
+        let mut player = commands.spawn((
             new_player(ship, index),
             Slot(index),
             ActionState::<PlayerInput>::default(),
-            to_clients(),
+            Replicate::to_clients(NetworkTarget::All),
+            interpolate,
             ControlledBy {
                 owner: client,
                 lifetime: Default::default(),
             },
         ));
+        if owner != HOST_PEER {
+            player.insert(PredictionTarget::to_clients(NetworkTarget::Single(owner)));
+        }
     }
 }
 
@@ -405,13 +554,15 @@ fn apply_network_input(mut players: Query<(&ActionState<PlayerInput>, &mut Playe
 /// Marks the player this machine controls. A system, not an observer: on a
 /// client, an interpolated `Player` appears some time after `Controlled`.
 fn mark_local_player(
-    players: Query<Entity, (With<Controlled>, With<Player>, Without<LocalPlayer>)>,
+    players: Query<(Entity, &Player), (With<Controlled>, Without<LocalPlayer>)>,
     mut commands: Commands,
 ) {
-    for entity in &players {
+    for (entity, player) in &players {
+        // Input makes the player simulated here (predicted, on a client).
         commands
             .entity(entity)
-            .insert((LocalPlayer, InputMarker::<PlayerInput>::default()));
+            .insert((LocalPlayer, InputMarker::<PlayerInput>::default()))
+            .insert_if_new((PlayerInput::default(), PreviousMode(player.mode)));
     }
 }
 
@@ -422,6 +573,47 @@ fn write_local_input(
     for mut action in &mut actions {
         action.0 = local.0;
     }
+}
+
+/// The local player's mode before this frame's rollback, if any, so the
+/// camera can be handed the difference.
+#[derive(Resource, Default)]
+struct ViewBeforeRollback {
+    mode: Option<Mode>,
+    rollbacks: u32,
+}
+
+fn note_view_before_rollback(
+    player: Query<&Player, With<LocalPlayer>>,
+    mut before: ResMut<ViewBeforeRollback>,
+) {
+    before.mode = player.single().ok().map(|p| p.mode);
+}
+
+/// After a rollback, the view the re-simulation arrived at differs from the
+/// one shown; the camera blends from one to the other.
+fn hand_rollback_to_camera(
+    metrics: Res<PredictionMetrics>,
+    mut before: ResMut<ViewBeforeRollback>,
+    player: Query<&Player, With<LocalPlayer>>,
+    bodies: Bodies,
+    tuning: Res<Tuning>,
+    mut correction: ResMut<crate::client::ViewCorrection>,
+) {
+    if metrics.rollbacks == before.rollbacks {
+        return;
+    }
+    before.rollbacks = metrics.rollbacks;
+    let (Some(old), Ok(new)) = (before.mode, player.single()) else {
+        return;
+    };
+    let view = |mode: Mode| {
+        let frame = mode.body().and_then(|b| bodies.frame(b));
+        mode.world_view(&tuning, frame.as_ref())
+    };
+    let ((old_eye, old_rot), (new_eye, new_rot)) = (view(old), view(new.mode));
+    correction.position += old_eye - new_eye;
+    correction.rotation = (correction.rotation * old_rot * new_rot.inverse()).normalize();
 }
 
 /// The sim counts ticks in lightyear's timeline.

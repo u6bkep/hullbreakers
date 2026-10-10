@@ -148,16 +148,13 @@ impl EventLog {
             .retain(|(t, _)| (1..=LOG_TICKS).contains(&tick.wrapping_sub(*t)));
     }
 
-    pub fn push(&mut self, event: PlayerEvent) {
-        self.entries.push_back((self.tick, event));
+    /// The tick being (or last) recorded.
+    pub fn tick(&self) -> u32 {
+        self.tick
     }
 
-    /// Entries stamped after `tick`.
-    pub fn since(&self, tick: u32) -> impl Iterator<Item = (u32, PlayerEvent)> + '_ {
-        self.entries
-            .iter()
-            .copied()
-            .filter(move |(t, _)| t.wrapping_sub(tick) as i32 > 0)
+    pub fn push(&mut self, event: PlayerEvent) {
+        self.entries.push_back((self.tick, event));
     }
 
     /// The most recent entry, if any.
@@ -192,7 +189,6 @@ mod tests {
                 (11, PlayerEvent::GrappleReleased)
             ]
         );
-        assert_eq!(log.since(10).count(), 1);
     }
 
     #[test]

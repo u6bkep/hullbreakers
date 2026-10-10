@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use lightyear::prelude::client::LocalTimelineSync;
 
 use crate::sim::{SimTick, TICK_HZ};
-use crate::sim::bodies::BodyInertia;
+use crate::sim::bodies::{BodyInertia, PreviousVelocity};
 use crate::sim::frame::BodyFrame;
 use crate::sim::motion::Motion;
 
@@ -92,12 +92,15 @@ pub struct MotionSmoothing {
     rotation: Quat,
 }
 
-/// Client: a body that has just arrived gets velocities (posed from its
-/// motion each tick).
+/// Client: a body that has just arrived becomes a static rigid body (so its
+/// collider belongs to a body, as character queries require, but Avian never
+/// moves it) with velocities, all posed from its motion each tick.
 pub fn prepare_extrapolated(add: On<Add, Motion>, mut commands: Commands) {
     commands.entity(add.entity).insert((
+        RigidBody::Static,
         LinearVelocity::default(),
         AngularVelocity::default(),
+        PreviousVelocity::default(),
         MotionSmoothing {
             rotation: Quat::IDENTITY,
             ..default()
