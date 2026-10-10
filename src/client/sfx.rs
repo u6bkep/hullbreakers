@@ -18,7 +18,7 @@ use super::events::Presented;
 use crate::sim::events::{Detach, PlayerEvent};
 use super::events::EventCursor;
 use super::render::Avatar;
-use super::{LocalInput, LocalPlayer};
+use super::LocalPlayer;
 use crate::sim::player::{Mode, Player, PlayerTelemetry};
 use crate::sim::tuning::Tuning;
 
@@ -235,6 +235,10 @@ pub struct AudioState {
     /// How long the rope has been (nearly) slack; a twang needs real slack first.
     slack_time: f32,
     twang_cooldown: f32,
+    /// Rope length last frame, for how fast cable is running.
+    last_rope_length: Option<f32>,
+    /// Cable speed through the winch (m/s), smoothed.
+    cable_speed: f32,
 }
 
 pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
@@ -499,14 +503,12 @@ pub fn play_continuous_sounds(
     tuning: Res<Tuning>,
     sounds: Res<Sounds>,
     mut state: ResMut<AudioState>,
-    local: Res<LocalInput>,
     player: Single<(&Player, &PlayerTelemetry), With<LocalPlayer>>,
     rocks: Query<(), With<Asteroid>>,
     mut jet: Query<&mut AudioSink, (With<JetpackLoop>, Without<ReelLoop>)>,
     mut reel: Query<&mut AudioSink, (With<ReelLoop>, Without<JetpackLoop>)>,
 ) {
     let (player, telemetry) = *player;
-    let input = &local.0;
     let dt = time.delta_secs();
 
     if let Mode::Booted { body, velocity, .. } = player.mode {
@@ -540,16 +542,26 @@ pub fn play_continuous_sounds(
     }
 
     let tension = player.grapple.map(|g| g.tension).unwrap_or(0.0);
+    // The winch sounds like cable running through it: louder and higher the
+    // faster it winds in or pays out, silent when the cable stops (a stalled
+    // winch under load included).
+    let length = player.grapple.map(|g| g.length);
+    let running = match (state.last_rope_length, length) {
+        (Some(last), Some(now)) if dt > 0.0 => (now - last).abs() / dt,
+        _ => 0.0,
+    };
+    state.last_rope_length = length;
+    // Rope length changes in fixed ticks; smooth over frames between them.
+    state.cable_speed += (running - state.cable_speed) * (1.0 - (-dt * 12.0).exp());
     if let Ok(mut sink) = reel.single_mut() {
-        let reeling = player.grapple.is_some() && input.reel_in;
-        let load = (tension / tuning.reel_force).clamp(0.0, 1.0);
-        let target = if reeling { 0.18 + 0.15 * load } else { 0.0 };
+        const FULL_SPEED: f32 = 20.0;
+        let run = (state.cable_speed / FULL_SPEED).clamp(0.0, 1.5);
+        let target = if run > 0.02 { 0.06 + 0.24 * run.min(1.0) } else { 0.0 };
         let current = sink.volume().to_linear();
         sink.set_volume(Volume::Linear(
             current + (target - current) * (1.0 - (-dt * 20.0).exp()),
         ));
-        // The motor labours under load.
-        sink.set_speed(1.05 - 0.2 * load);
+        sink.set_speed(0.7 + 0.45 * run);
     }
 
     // The rope snapping taut: a twang scaled by the jump in tension. Only
