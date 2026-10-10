@@ -77,3 +77,32 @@ fn predicted_player_walks_on_a_replicated_hull() {
     assert!(feet.z < 3.0, "didn't walk forward: feet {feet}");
 }
 
+
+/// Another player, as a client sees them (replicated, not simulated here),
+/// can be hit by a ray: what grappling them needs.
+#[test]
+fn a_remote_player_can_be_aimed_at() {
+    let (mut app, ship) = client_app();
+    // Not simulated here: no PlayerInput.
+    let remote = app.world_mut().spawn(new_player(ship, 2)).id();
+    app.world_mut().entity_mut(remote).remove::<PlayerInput>();
+    for _ in 0..5 {
+        app.update();
+    }
+    let world = app.world_mut();
+    let others: Vec<Entity> = world
+        .query_filtered::<Entity, With<Player>>()
+        .iter(world)
+        .filter(|e| *e != remote)
+        .collect();
+    let world_players_except = |_: Entity| others.clone();
+    let target = world.get::<Position>(remote).unwrap().0;
+    let mut state = bevy::ecs::system::SystemState::<SpatialQuery>::new(world);
+    let sq = state.get(world).unwrap();
+    let from = target + Vec3::new(3.0, 0.0, 0.0);
+    let filter = SpatialQueryFilter::default().with_excluded_entities(
+        world_players_except(remote),
+    );
+    let hit = sq.cast_ray(from, Dir3::NEG_X, 10.0, true, &filter);
+    assert_eq!(hit.map(|h| h.entity), Some(remote), "ray from {from} to {target}: {hit:?}");
+}

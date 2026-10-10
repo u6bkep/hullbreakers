@@ -324,7 +324,7 @@ fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
     let grapples = match (confirmed.grapple, predicted.grapple) {
         (None, None) => false,
         (Some(g0), Some(g1)) => {
-            g0.body != g1.body || far(g0.anchor, g1.anchor, DISTANCE) || (g0.length - g1.length).abs() > DISTANCE
+            g0.target != g1.target || far(g0.anchor, g1.anchor, DISTANCE) || (g0.length - g1.length).abs() > DISTANCE
         }
         _ => true,
     };

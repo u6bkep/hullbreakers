@@ -287,24 +287,61 @@ pub fn draw_gizmos(
     time: Res<Time>,
     tuning: Res<Tuning>,
     local: Res<LocalInput>,
-    player: Single<&Player, With<LocalPlayer>>,
-    transforms: Query<&Transform, Without<PlayerCamera>>,
+    player: Single<(Entity, &Player), With<LocalPlayer>>,
+    others: Query<(Entity, &Player), Without<LocalPlayer>>,
+    transforms: Query<&Transform, (Without<PlayerCamera>, Without<Avatar>)>,
+    avatars: Query<(&Avatar, &Transform)>,
     camera: Single<&Transform, With<PlayerCamera>>,
     mut rope_sag: Local<f32>,
 ) {
-    let player = *player;
+    let (me, player) = *player;
     let input = &local.0;
+    // Our own body's center, as drawn.
+    let own_center = {
+        let frame = player
+            .mode
+            .body()
+            .and_then(|b| transforms.get(b).ok())
+            .map(render_frame);
+        player.mode.world_kinematics(&tuning, frame.as_ref()).0
+    };
+    // Where a rope's far end is drawn: on a body, at another player, or at us.
+    let rope_anchor = |grapple: &Grapple| -> Option<Vec3> {
+        if grapple.target == me {
+            return Some(own_center);
+        }
+        if let Some((_, avatar)) = avatars.iter().find(|(a, _)| a.player == grapple.target) {
+            return Some(avatar.translation);
+        }
+        let body = transforms.get(grapple.target).ok()?;
+        Some(render_frame(body).point_to_world(grapple.anchor))
+    };
+    // Other players' ropes, from their avatars.
+    for (entity, other) in &others {
+        let (Some(grapple), Some((_, avatar))) =
+            (other.grapple, avatars.iter().find(|(a, _)| a.player == entity))
+        else {
+            continue;
+        };
+        if let Some(anchor) = rope_anchor(&grapple) {
+            let hand = avatar.translation + avatar.rotation * Vec3::new(0.25, 0.2, -0.3);
+            draw_rope(
+                &mut gizmos,
+                &tuning,
+                &grapple,
+                false,
+                0.0,
+                hand,
+                anchor,
+                time.elapsed_secs(),
+            );
+        }
+    }
     if player.grapple.is_none() {
         *rope_sag = 0.0;
     }
     if let Some(grapple) = player.grapple {
-        if let Ok(body) = transforms.get(grapple.body) {
-            let frame = BodyFrame {
-                position: body.translation,
-                rotation: body.rotation,
-                ..BodyFrame::IDENTITY
-            };
-            let anchor = frame.point_to_world(grapple.anchor);
+        if let Some(anchor) = rope_anchor(&grapple) {
             let hand = camera.translation + camera.rotation * Vec3::new(0.25, -0.25, -0.4);
             // Slack is measured from the body center, as the sim does; the
             // hand is only where the rope is drawn from.

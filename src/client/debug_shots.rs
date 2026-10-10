@@ -221,7 +221,7 @@ pub fn run_shot_script(
             pitch: 0.0,
         };
         player.grapple = Some(Grapple {
-            body: ship_entity,
+            target: ship_entity,
             anchor,
             length: position.distance(anchor_w) + slack,
             tension: 0.0,

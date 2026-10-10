@@ -24,7 +24,7 @@ pub fn hud(
     mut tuning: ResMut<Tuning>,
     mut panel: ResMut<PanelState>,
     captured: Res<MouseCaptured>,
-    player: Single<&Player, With<LocalPlayer>>,
+    player: Single<(Entity, &Player), With<LocalPlayer>>,
     bodies: Bodies,
     names: Query<&Name>,
     events: Res<EventCursor>,
@@ -33,6 +33,7 @@ pub fn hud(
     spatial: SpatialQuery,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
+    let (own, player) = *player;
 
     // Crosshair.
     let center = ctx.content_rect().center();
@@ -59,7 +60,8 @@ pub fn hud(
                 dir,
                 tuning.grapple_range,
                 true,
-                &SpatialQueryFilter::default(),
+                // Other players can be grappled; we can't.
+                &SpatialQueryFilter::default().with_excluded_entities([own]),
             )
         });
     if let Some(hit) = in_range {
@@ -132,7 +134,7 @@ pub fn hud(
                     "rope {:>5.1} m  tension {:>6.0} N  → {}",
                     g.length,
                     g.tension,
-                    name_of(Some(g.body))
+                    name_of(Some(g.target))
                 )));
             }
             ui.label(text(events.last_text.clone()));

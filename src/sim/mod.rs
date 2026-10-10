@@ -29,6 +29,15 @@ pub fn advance_tick(mut tick: ResMut<SimTick>) {
     tick.0 = tick.0.wrapping_add(1);
 }
 
+/// Collision layers. Players' capsules are only for aiming at (grappling a
+/// teammate); world geometry is everything else.
+#[derive(PhysicsLayer, Clone, Copy, Debug, Default)]
+pub enum Layer {
+    #[default]
+    World,
+    Players,
+}
+
 /// Visual material class of a collider. The sim only tags; the client decides
 /// what it looks like.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -63,6 +72,7 @@ impl Plugin for SimSharedPlugin {
         }
         app.add_message::<ship::ShipCommand>()
             .init_resource::<SimTick>()
+            .add_observer(player::add_player_hull)
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid);
     }
@@ -85,9 +95,12 @@ impl Plugin for PlayerSimPlugin {
         )
         .add_systems(
             FixedPostUpdate,
-            player::player_tick
-                .in_set(SimSystems::Players)
-                .after(PhysicsSystems::Last),
+            (
+                player::player_tick
+                    .in_set(SimSystems::Players)
+                    .after(PhysicsSystems::Last),
+                player::pose_player_hulls.after(SimSystems::Players),
+            ),
         );
     }
 }
@@ -158,7 +171,7 @@ fn update_pins(
 ) {
     let wanted: Vec<Entity> = players
         .iter()
-        .flat_map(|p| [p.mode.body(), p.grapple.map(|g| g.body)])
+        .flat_map(|p| [p.mode.body(), p.grapple.map(|g| g.target)])
         .flatten()
         .filter(|e| rocks.contains(*e))
         .collect();

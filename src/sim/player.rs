@@ -20,9 +20,9 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::SimTick;
-use super::bodies::Bodies;
+use super::bodies::{Bodies, BodyInertia};
 use super::events::{Detach, EventLog, PlayerEvent};
-use super::frame::BodyFrame;
+use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
 use super::rope::{RopeEnd, solve_rope};
 use super::tuning::Tuning;
@@ -160,8 +160,10 @@ impl Mode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Grapple {
-    pub body: Entity,
-    /// Anchor point in the body's local coordinates.
+    /// What the hook is in: a body, or another player.
+    pub target: Entity,
+    /// Where: in the body's local coordinates (a player is held by the
+    /// center of their body, so zero).
     pub anchor: Vec3,
     pub length: f32,
     /// Last solved rope tension in newtons, for display.
@@ -192,7 +194,7 @@ impl MapEntities for Player {
             *body = mapper.get_mapped(*body);
         }
         if let Some(grapple) = &mut self.grapple {
-            grapple.body = mapper.get_mapped(grapple.body);
+            grapple.target = mapper.get_mapped(grapple.target);
         }
         if let Some(body) = &mut self.reference_body {
             *body = mapper.get_mapped(*body);
@@ -218,6 +220,47 @@ pub struct PlayerTelemetry {
 /// The mode at the start of the most recent tick, for render interpolation.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PreviousMode(pub Mode);
+
+/// Gives every player a capsule that rays can hit (so others can grapple
+/// them) but that nothing collides with or moves against.
+pub fn add_player_hull(
+    add: On<Add, Player>,
+    tuning: Res<Tuning>,
+    mut commands: Commands,
+) {
+    commands
+        .entity(add.entity)
+        .insert((
+            capsule(&tuning),
+            Sensor,
+            CollisionLayers::new(super::Layer::Players, LayerMask::NONE),
+        ))
+        // Avian scales a collider by its entity's transform. A replicated
+        // player on a network client has none (and Avian's transform sync is
+        // off there), which leaves the capsule at zero scale: unhittable.
+        .insert_if_new(Transform::default());
+}
+
+/// Keeps each player's capsule where the player is.
+pub fn pose_player_hulls(
+    tuning: Res<Tuning>,
+    bodies: Bodies,
+    // Players aren't bodies: disjoint from what `Bodies` reads.
+    mut players: Query<(&Player, &mut Position, &mut Rotation), Without<BodyInertia>>,
+) {
+    for (player, mut position, mut rotation) in &mut players {
+        let frame = player.mode.body().and_then(|b| bodies.frame(b));
+        let (center, _) = player.mode.world_kinematics(&tuning, frame.as_ref());
+        let axis = match player.mode {
+            Mode::Eva { orientation, .. } => orientation,
+            Mode::Booted { up, .. } => {
+                frame.map_or(Quat::IDENTITY, |f| f.rotation) * Quat::from_rotation_arc(Vec3::Y, up)
+            }
+        };
+        position.0 = center;
+        rotation.0 = axis;
+    }
+}
 
 /// Spawns the one local player of a game without a network.
 pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::ship::Ship>>) {
@@ -381,8 +424,239 @@ struct TickContext<'a, 'w, 's> {
     dt: f32,
     delta: Duration,
     mas: &'a MoveAndSlide<'w, 's>,
+    /// For moving through the world: other players are not in the way.
     filter: SpatialQueryFilter,
+    /// Every player, as something a rope can hold.
+    players: &'a [PlayerPoint],
 }
+
+/// A player as something a rope can be tied to: where the center of their
+/// body is and how it moves.
+#[derive(Clone, Copy, Debug)]
+struct PlayerPoint {
+    entity: Entity,
+    position: Vec3,
+    velocity: Vec3,
+}
+
+/// A rope's far end on a body, this tick.
+#[derive(Clone, Copy, Debug)]
+struct FarEnd {
+    body: Entity,
+    frame: BodyFrame,
+    mass: BodyMass,
+    point: Vec3,
+}
+
+impl FarEnd {
+    fn velocity(&self) -> Vec3 {
+        self.frame.point_velocity(self.point)
+    }
+
+    fn inverse_mass(&self, dir: Vec3) -> f32 {
+        self.mass.inverse_effective_mass(&self.frame, self.point, dir)
+    }
+}
+
+/// The far end of a rope tied to a body (`None` for a rope to a player,
+/// which [`player_rope`] solves).
+fn far_end(bodies: &Bodies, grapple: &Grapple) -> Option<FarEnd> {
+    let frame = bodies.frame(grapple.target)?;
+    Some(FarEnd {
+        body: grapple.target,
+        frame,
+        mass: bodies.mass(grapple.target)?,
+        point: frame.point_to_world(grapple.anchor),
+    })
+}
+
+/// Where a rope's far end is and how it moves, whatever it's tied to.
+fn rope_point(ctx: &TickContext, bodies: &Bodies, grapple: &Grapple) -> Option<(Vec3, Vec3)> {
+    if let Some(p) = ctx.players.iter().find(|p| p.entity == grapple.target) {
+        return Some((p.position, p.velocity));
+    }
+    far_end(bodies, grapple).map(|end| (end.point, end.velocity()))
+}
+
+/// One end of a rope between two players: a player, free or held by boots.
+#[derive(Clone, Copy, Debug)]
+struct RopeHolder {
+    center: Vec3,
+    velocity: Vec3,
+    /// When booted: the body underfoot, the feet in the world, and the
+    /// surface normal in the world.
+    boots: Option<(Entity, BodyFrame, BodyMass, Vec3, Vec3)>,
+}
+
+impl RopeHolder {
+    fn of(player: &Player, bodies: &Bodies, t: &Tuning) -> Option<Self> {
+        let boots = match player.mode {
+            Mode::Booted { body, feet, up, .. } => {
+                let frame = bodies.frame(body)?;
+                Some((
+                    body,
+                    frame,
+                    bodies.mass(body)?,
+                    frame.point_to_world(feet),
+                    frame.dir_to_world(up),
+                ))
+            }
+            Mode::Eva { .. } => None,
+        };
+        let (center, velocity) = player
+            .mode
+            .world_kinematics(t, boots.as_ref().map(|b| &b.1));
+        Some(Self {
+            center,
+            velocity,
+            boots,
+        })
+    }
+
+    /// How hard the rope can move this end along `dir`: a free player by
+    /// their own mass; a booted one by the body they're stuck to.
+    fn inverse_mass(&self, held: bool, t: &Tuning, dir: Vec3) -> f32 {
+        match self.boots {
+            Some((_, frame, mass, feet, _)) if held => mass.inverse_effective_mass(&frame, feet, dir),
+            _ => 1.0 / t.player_mass,
+        }
+    }
+
+    /// Whether `force` on this player beats their boots' grip.
+    fn breaks_grip(&self, force: Vec3, t: &Tuning) -> bool {
+        let Some((.., up)) = self.boots else {
+            return true;
+        };
+        let peel = force.dot(up);
+        let drag = (force - up * peel).length();
+        peel > t.player_mass * t.adhesion_accel || drag > t.player_mass * t.shear_accel
+    }
+}
+
+/// Applies a rope impulse to a player: a free player's velocity changes; a
+/// held one passes it to the body underfoot; one whose grip it broke is
+/// yanked off.
+fn receive_rope(
+    player: &mut Player,
+    holder: &RopeHolder,
+    held: bool,
+    impulse: Vec3,
+    bodies: &mut Bodies,
+    ctx: &TickContext,
+) {
+    let t = ctx.tuning;
+    match (player.mode, holder.boots) {
+        (Mode::Eva { .. }, _) => {
+            if let Mode::Eva { velocity, .. } = &mut player.mode {
+                *velocity += impulse / t.player_mass;
+            }
+        }
+        (Mode::Booted { .. }, Some((body, _, _, feet_w, _))) if held => {
+            bodies.apply_impulse(body, impulse, feet_w);
+        }
+        (
+            Mode::Booted {
+                feet,
+                up,
+                velocity,
+                orientation,
+                pitch,
+                ..
+            },
+            Some((_, frame, ..)),
+        ) => {
+            let kick = frame.dir_to_local(impulse) / t.player_mass;
+            player.mode = booted_to_eva(&frame, feet, up, velocity + kick, orientation, pitch, t);
+            player.detach_timer = t.detach_cooldown;
+            player.emit(PlayerEvent::Detached(Detach::Yanked(impulse.length() / ctx.dt)));
+        }
+        _ => {}
+    }
+}
+
+/// Solves `a`'s rope to another player, changing both at once (the other
+/// only if it is simulated here). A booted end is first held by its boots
+/// (the body underfoot takes the pull); if the pull breaks their grip, the
+/// rope is re-solved with that player free and they're yanked off.
+fn player_rope(
+    ctx: &TickContext,
+    bodies: &mut Bodies,
+    players: &mut Query<PlayerQuery>,
+    a: Entity,
+    cmd: &TickInput,
+) {
+    let t = ctx.tuning;
+    let Ok((_, player_a, ..)) = players.get(a) else { return };
+    let Some(mut grapple) = player_a.grapple else { return };
+    let b = grapple.target;
+    let Ok([(_, mut pa, ..), (_, mut pb, input_b, ..)]) = players.get_many_mut([a, b]) else {
+        return;
+    };
+    let b_simulated = input_b.is_some();
+    let (Some(ha), Some(hb)) = (RopeHolder::of(&pa, bodies, t), RopeHolder::of(&pb, bodies, t))
+    else {
+        return;
+    };
+    let distance = ha.center.distance(hb.center);
+    let (max_impulse, winch) = reel(&mut grapple, cmd, ctx, distance);
+    take_in_slack(&mut grapple, winch, distance);
+    let dir = (hb.center - ha.center).normalize_or_zero();
+    let (mut held_a, mut held_b) = (ha.boots.is_some(), hb.boots.is_some());
+    grapple.tension = 0.0;
+    let mut snapped = false;
+    loop {
+        let Some(imp) = solve_rope(
+            RopeEnd {
+                position: ha.center,
+                velocity: ha.velocity,
+                inverse_mass: ha.inverse_mass(held_a, t, dir),
+            },
+            RopeEnd {
+                position: hb.center,
+                velocity: hb.velocity,
+                inverse_mass: hb.inverse_mass(held_b, t, dir),
+            },
+            grapple.length,
+            ctx.dt,
+            t.rope_stiffness,
+            max_impulse,
+            winch,
+        ) else {
+            break;
+        };
+        let on_a = imp.direction * imp.magnitude;
+        if held_a && ha.breaks_grip(on_a / ctx.dt, t) {
+            held_a = false;
+            continue;
+        }
+        if held_b && hb.breaks_grip(-on_a / ctx.dt, t) {
+            held_b = false;
+            continue;
+        }
+        grapple.tension = imp.magnitude / ctx.dt;
+        receive_rope(&mut pa, &ha, held_a, on_a, bodies, ctx);
+        if b_simulated {
+            receive_rope(&mut pb, &hb, held_b, -on_a, bodies, ctx);
+        }
+        snapped = imp.clamped && winch.is_none();
+        break;
+    }
+    pa.grapple = if snapped {
+        pa.emit(PlayerEvent::RopeSnapped);
+        None
+    } else {
+        Some(grapple)
+    };
+}
+
+type PlayerQuery = (
+    Entity,
+    &'static mut Player,
+    Option<&'static PlayerInput>,
+    Option<&'static mut PreviousMode>,
+    Option<&'static mut PlayerTelemetry>,
+);
+
 
 pub fn player_tick(
     time: Res<Time>,
@@ -390,24 +664,40 @@ pub fn player_tick(
     tuning: Res<Tuning>,
     mas: MoveAndSlide,
     mut bodies: Bodies,
-    mut players: Query<(
-        &mut Player,
-        &PlayerInput,
-        &mut PreviousMode,
-        &mut PlayerTelemetry,
-    )>,
+    mut players: Query<PlayerQuery>,
 ) {
+    // Every player, simulated here or not, can be aimed at and tied to.
+    let points: Vec<PlayerPoint> = players
+        .iter()
+        .map(|(entity, player, ..)| {
+            let frame = player.mode.body().and_then(|b| bodies.frame(b));
+            let (position, velocity) = player.mode.world_kinematics(&tuning, frame.as_ref());
+            PlayerPoint {
+                entity,
+                position,
+                velocity,
+            }
+        })
+        .collect();
     let ctx = TickContext {
         tuning: &tuning,
         dt: time.delta_secs(),
         delta: time.delta(),
         mas: &mas,
-        filter: SpatialQueryFilter::default(),
+        filter: SpatialQueryFilter::from_mask(super::Layer::World),
+        players: &points,
     };
     if ctx.dt <= 0.0 {
         return;
     }
-    for (mut player, input, mut previous, mut telemetry) in &mut players {
+    // Input first, for every player simulated here (only players with input
+    // here are): look, toggles, firing the grapple.
+    let mut commands: Vec<(Entity, TickInput)> = Vec::new();
+    for (entity, mut player, input, previous, telemetry) in &mut players {
+        let (Some(input), Some(mut previous), Some(mut telemetry)) = (input, previous, telemetry)
+        else {
+            continue;
+        };
         let player = &mut *player;
         player.events.begin_tick(tick.0);
         let cmd = player.input.advance(input);
@@ -428,26 +718,48 @@ pub fn player_tick(
         previous.0 = player.mode;
         if cmd.grapple {
             if player.grapple.take().is_none() {
-                fire_grapple(&ctx, &bodies, player);
+                fire_grapple(&ctx, &bodies, entity, player);
             } else {
                 player.emit(PlayerEvent::GrappleReleased);
             }
         }
         if cmd.set_reference {
-            match aim(&ctx, &bodies, player, REFERENCE_RANGE) {
-                Some((body, _, distance)) => {
-                    player.reference_body = Some(body);
-                    player.emit(PlayerEvent::ReferenceSet { distance });
+            // Only bodies serve as reference frames; the aim sees through players.
+            match aim(&ctx, &bodies, entity, player, REFERENCE_RANGE, false) {
+                Some(hit) => {
+                    player.reference_body = Some(hit.target);
+                    player.emit(PlayerEvent::ReferenceSet {
+                        distance: hit.distance,
+                    });
                 }
                 None => player.emit(PlayerEvent::NoReferenceTarget),
             }
         }
         if player
             .grapple
-            .is_some_and(|g| bodies.frame(g.body).is_none())
+            .is_some_and(|g| rope_point(&ctx, &bodies, &g).is_none())
         {
             player.grapple = None;
         }
+        commands.push((entity, cmd));
+    }
+    // Ropes between players act on both ends at once, before anyone moves.
+    for (entity, cmd) in &commands {
+        let tied_to_player = players
+            .get(*entity)
+            .ok()
+            .and_then(|(_, p, ..)| p.grapple)
+            .is_some_and(|g| points.iter().any(|p| p.entity == g.target));
+        if tied_to_player {
+            player_rope(&ctx, &mut bodies, &mut players, *entity, cmd);
+        }
+    }
+    // Then everyone moves (ropes to bodies are solved as part of moving).
+    for (entity, cmd) in commands {
+        let Ok((_, mut player, _, _, Some(mut telemetry))) = players.get_mut(entity) else {
+            continue;
+        };
+        let player = &mut *player;
         match player.mode {
             Mode::Booted { .. } => booted_tick(&ctx, &mut bodies, player, &cmd),
             Mode::Eva { .. } => telemetry.thrust = eva_tick(&ctx, &mut bodies, player, &cmd),
@@ -458,40 +770,84 @@ pub fn player_tick(
 /// How far away a body can be picked as the reference frame.
 const REFERENCE_RANGE: f32 = 2000.0;
 
-/// The body under the crosshair: (body, world hit point, distance).
+/// What the crosshair is on.
+struct AimHit {
+    /// A body, or another player.
+    target: Entity,
+    /// For a body, the hit point in its coordinates; `None` for a player.
+    anchor: Option<Vec3>,
+    /// Where the rope attaches, in the world: the hit point on a body, or
+    /// the center of a player.
+    point: Vec3,
+    distance: f32,
+}
+
+/// The body or player under the crosshair.
 fn aim(
     ctx: &TickContext,
     bodies: &Bodies,
+    entity: Entity,
     player: &Player,
     range: f32,
-) -> Option<(Entity, Vec3, f32)> {
+    // Whether other players can be hit, or are seen through.
+    players: bool,
+) -> Option<AimHit> {
     let frame = player.mode.body().and_then(|b| bodies.frame(b));
     let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
     let dir = Dir3::new(view * Vec3::NEG_Z).ok()?;
+    // Bodies (and other players, if wanted), never ourselves.
+    let filter = if players {
+        SpatialQueryFilter::default()
+    } else {
+        SpatialQueryFilter::from_mask(super::Layer::World)
+    }
+    .with_excluded_entities([entity]);
     let hit = ctx
         .mas
         .spatial_query
-        .cast_ray(eye, dir, range, true, &ctx.filter)?;
+        .cast_ray(eye, dir, range, true, &filter)?;
+    if let Some(other) = ctx.players.iter().find(|p| p.entity == hit.entity) {
+        return Some(AimHit {
+            target: hit.entity,
+            anchor: None,
+            point: other.position,
+            distance: hit.distance,
+        });
+    }
     let body = bodies.body_of_collider(hit.entity)?;
-    Some((body, eye + dir * hit.distance, hit.distance))
+    let point = eye + dir * hit.distance;
+    Some(AimHit {
+        target: body,
+        anchor: Some(bodies.frame(body)?.point_to_local(point)),
+        point,
+        distance: hit.distance,
+    })
 }
 
-fn fire_grapple(ctx: &TickContext, bodies: &Bodies, player: &mut Player) {
-    let Some((body, point, distance)) = aim(ctx, bodies, player, ctx.tuning.grapple_range) else {
+fn fire_grapple(ctx: &TickContext, bodies: &Bodies, entity: Entity, player: &mut Player) {
+    let Some(hit) = aim(ctx, bodies, entity, player, ctx.tuning.grapple_range, true) else {
         player.emit(PlayerEvent::GrappleMissed);
         return;
     };
-    let Some(body_frame) = bodies.frame(body) else {
-        return;
-    };
+    // The rope runs from the center of our body (as the rope solver
+    // measures it), not the eye the shot was aimed from: born exactly as
+    // long as that, it starts neither slack nor stretched.
+    let own = player.mode.body().and_then(|b| bodies.frame(b));
+    let (center, _) = player.mode.world_kinematics(ctx.tuning, own.as_ref());
+    let length = center.distance(hit.point);
     player.grapple = Some(Grapple {
-        body,
-        anchor: body_frame.point_to_local(point),
-        length: distance,
+        target: hit.target,
+        anchor: hit.anchor.unwrap_or(Vec3::ZERO),
+        length,
         tension: 0.0,
     });
-    player.reference_body = Some(body);
-    player.emit(PlayerEvent::GrappleAttached { distance, body });
+    if hit.anchor.is_some() {
+        player.reference_body = Some(hit.target);
+    }
+    player.emit(PlayerEvent::GrappleAttached {
+        distance: length,
+        body: hit.target,
+    });
 }
 
 /// Applies reel input: returns the impulse limit and, while reeling, the
@@ -591,7 +947,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     if let Some(mut grapple) = player.grapple {
         let center_l = feet + up * (t.capsule_height / 2.0);
         let center_w = frame.point_to_world(center_l);
-        if grapple.body == body {
+        if grapple.target == body {
             // Anchored to the body we stand on: the rope just pays out.
             let anchor_w = frame.point_to_world(grapple.anchor);
             grapple.length = grapple
@@ -599,12 +955,8 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                 .max(anchor_w.distance(center_w))
                 .min(t.grapple_range);
             grapple.tension = 0.0;
-        } else if let (Some(anchor_frame), Some(anchor_mass), Some(own_mass)) = (
-            bodies.frame(grapple.body),
-            bodies.mass(grapple.body),
-            bodies.mass(body),
-        ) {
-            let anchor_w = anchor_frame.point_to_world(grapple.anchor);
+        } else if let (Some(end), Some(own_mass)) = (far_end(bodies, &grapple), bodies.mass(body)) {
+            let anchor_w = end.point;
             let (max_impulse, winch) = reel(&mut grapple, cmd, ctx, anchor_w.distance(center_w));
             take_in_slack(&mut grapple, winch, anchor_w.distance(center_w));
             let dir = (anchor_w - center_w).normalize_or_zero();
@@ -616,8 +968,8 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
             };
             let anchor_end = RopeEnd {
                 position: anchor_w,
-                velocity: anchor_frame.point_velocity(anchor_w),
-                inverse_mass: anchor_mass.inverse_effective_mass(&anchor_frame, anchor_w, dir),
+                velocity: end.velocity(),
+                inverse_mass: end.inverse_mass(dir),
             };
             grapple.tension = 0.0;
             if let Some(imp) = solve_rope(
@@ -646,7 +998,7 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
                     player.grapple = None;
                     player.emit(PlayerEvent::RopeSnapped);
                 }
-                bodies.apply_impulse(grapple.body, -imp.direction * imp.magnitude, anchor_w);
+                bodies.apply_impulse(end.body, -imp.direction * imp.magnitude, anchor_w);
                 bodies.apply_impulse(body, imp.direction * imp.magnitude, feet_w);
             }
         }
@@ -905,12 +1257,10 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
         })
         .unwrap_or(Vec3::ZERO);
     // Reeling in: (anchor point, anchor velocity) of the rope being wound.
-    let reeling_to = player.grapple.filter(|_| cmd.reel_in).and_then(|g| {
-        bodies.frame(g.body).map(|f| {
-            let anchor = f.point_to_world(g.anchor);
-            (anchor, f.point_velocity(anchor))
-        })
-    });
+    let reeling_to = player
+        .grapple
+        .filter(|_| cmd.reel_in)
+        .and_then(|g| rope_point(ctx, bodies, &g));
     let swinging = !cmd.reel_in && player.grapple.is_some_and(|g| g.tension > 0.0);
     let thrust_dv = if cmd.brake {
         (reference_velocity - velocity).clamp_length_max(t.brake_accel * ctx.dt)
@@ -936,8 +1286,8 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
 
     // Rope.
     if let Some(mut grapple) = player.grapple {
-        if let (Some(frame), Some(mass)) = (bodies.frame(grapple.body), bodies.mass(grapple.body)) {
-            let anchor_w = frame.point_to_world(grapple.anchor);
+        if let Some(end) = far_end(bodies, &grapple) {
+            let anchor_w = end.point;
             let (max_impulse, winch) = reel(&mut grapple, cmd, ctx, anchor_w.distance(position));
             take_in_slack(&mut grapple, winch, anchor_w.distance(position));
             let dir = (anchor_w - position).normalize_or_zero();
@@ -948,8 +1298,8 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
             };
             let anchor_end = RopeEnd {
                 position: anchor_w,
-                velocity: frame.point_velocity(anchor_w),
-                inverse_mass: mass.inverse_effective_mass(&frame, anchor_w, dir),
+                velocity: end.velocity(),
+                inverse_mass: end.inverse_mass(dir),
             };
             grapple.tension = 0.0;
             let mut snapped = false;
@@ -964,7 +1314,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
             ) {
                 grapple.tension = imp.magnitude / ctx.dt;
                 velocity += imp.direction * imp.magnitude * inverse_mass;
-                bodies.apply_impulse(grapple.body, -imp.direction * imp.magnitude, anchor_w);
+                bodies.apply_impulse(end.body, -imp.direction * imp.magnitude, anchor_w);
                 // A force-limited winch saturating is normal; a rope is not.
                 snapped = imp.clamped && winch.is_none();
             }

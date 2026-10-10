@@ -400,7 +400,7 @@ pub fn play_remote_sounds(
                     // Heard where the hook struck the body.
                     let anchor = player
                         .grapple
-                        .filter(|g| g.body == body)
+                        .filter(|g| g.target == body)
                         .and_then(|g| Some(poses.get(body).ok()?.transform_point(g.anchor)))
                         .unwrap_or(position);
                     play_at(&mut commands, &sounds.grapple_attach, 0.6, pitch, anchor);
