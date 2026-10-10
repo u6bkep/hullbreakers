@@ -12,7 +12,7 @@ use super::events::Presented;
 use super::sfx::STEP_LENGTH;
 use crate::sim::events::{Detach, PlayerEvent};
 use crate::sim::frame::BodyFrame;
-use crate::sim::input::PlayerInput;
+use super::{LocalInput, LocalPlayer};
 use crate::sim::player::{Mode, Player, PlayerTelemetry, PreviousMode};
 use crate::sim::tuning::Tuning;
 
@@ -50,7 +50,7 @@ pub fn spawn_camera(mut commands: Commands, tuning: Res<Tuning>) {
 }
 
 /// Pose-only frame from a body's interpolated render transform.
-fn render_frame(transform: &Transform) -> BodyFrame {
+pub(crate) fn render_frame(transform: &Transform) -> BodyFrame {
     BodyFrame {
         position: transform.translation,
         rotation: transform.rotation,
@@ -91,17 +91,21 @@ pub fn update_camera(
     fixed: Res<Time<Fixed>>,
     tuning: Res<Tuning>,
     mut events: MessageReader<Presented>,
-    player: Single<(&Player, &PreviousMode, &PlayerInput, &PlayerTelemetry)>,
+    local: Res<LocalInput>,
+    player: Single<(&Player, Option<&PreviousMode>, &PlayerTelemetry), With<LocalPlayer>>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
     camera: Single<(&mut Transform, &mut CameraSmoothing, &mut Projection), With<PlayerCamera>>,
 ) {
-    let (player, previous, input, telemetry) = *player;
+    let (player, previous, telemetry) = *player;
+    let input = &local.0;
     let (mut cam_transform, mut smooth, mut projection) = camera.into_inner();
     let alpha = fixed.overstep_fraction();
 
     // Apply look input the sim hasn't consumed yet, for zero-latency aim.
     let mut current = player.mode;
-    let mut prior = previous.0;
+    // Where the sim recorded the previous tick (an authority), interpolate
+    // between ticks; a replicated player is already interpolated.
+    let mut prior = previous.map_or(player.mode, |p| p.0);
     let pending_look = player.input.pending_look(input);
     current.apply_look(pending_look, 0.0);
     prior.apply_look(pending_look, 0.0);

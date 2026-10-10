@@ -10,10 +10,12 @@
 
 use std::f32::consts::PI;
 
+use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// A button press counter. Wraps; only differences matter.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 pub struct Press(u8);
 
 impl Press {
@@ -28,7 +30,7 @@ impl Press {
 }
 
 /// Button presses, as counters.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 pub struct Presses {
     pub jump: Press,
     pub toggle_boots: Press,
@@ -40,7 +42,7 @@ pub struct Presses {
 
 /// The player's input, written by whoever drives the player (the local input
 /// layer, a network, a test) and only read by the simulation.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect, Serialize, Deserialize)]
 pub struct PlayerInput {
     /// Total mouse look in radians, x = yaw right, y = pitch down, each
     /// wrapped to [-LOOK_WRAP/2, LOOK_WRAP/2). Only its change between ticks
@@ -57,6 +59,11 @@ pub struct PlayerInput {
     pub presses: Presses,
 }
 
+/// Input names no entities; required to send it over the network.
+impl MapEntities for PlayerInput {
+    fn map_entities<M: EntityMapper>(&mut self, _mapper: &mut M) {}
+}
+
 impl PlayerInput {
     /// Adds mouse look (radians), keeping the total wrapped.
     pub fn add_look(&mut self, delta: Vec2) {
@@ -69,7 +76,7 @@ impl PlayerInput {
 }
 
 /// How much of the input the simulation has applied. Part of player state.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct InputCursor {
     look: Vec2,
     presses: Presses,

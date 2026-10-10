@@ -133,7 +133,7 @@ pub fn run_shot_script(
     time: Res<Time>,
     mut script: ResMut<ShotScript>,
     mut commands: Commands,
-    mut player: Single<&mut Player>,
+    mut player: Single<&mut Player, With<super::LocalPlayer>>,
     ship: Single<(Entity, &Transform), With<Ship>>,
     mut exit: MessageWriter<AppExit>,
 ) {

@@ -26,7 +26,10 @@ fn app_configured(tuning: Tuning, asteroids: bool) -> App {
     ));
     app.add_plugins(PhysicsPlugins::default());
     app.insert_resource(tuning);
-    app.add_plugins(SimPlugin { asteroids });
+    app.add_plugins(SimPlugin {
+        asteroids,
+        local_player: true,
+    });
     app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         1.0 / 60.0,
     )));
@@ -675,22 +678,7 @@ fn without_assist_momentum_is_kept() {
 #[test]
 fn riding_a_rock_out_of_the_field_keeps_rock_and_field_around_you() {
     use space_game::sim::asteroids::Asteroid;
-    let mut app = App::new();
-    app.add_plugins((
-        MinimalPlugins,
-        TransformPlugin,
-        AssetPlugin::default(),
-        bevy::mesh::MeshPlugin,
-    ));
-    app.add_plugins(PhysicsPlugins::default());
-    app.insert_resource(Tuning::default());
-    app.add_plugins(SimPlugin { asteroids: true });
-    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
-        1.0 / 60.0,
-    )));
-    app.finish();
-    app.cleanup();
-    ticks(&mut app, 3);
+    let mut app = app_configured(Tuning::default(), true);
     let (rock, radius) = {
         let w = app.world_mut();
         let mut q = w.query::<(Entity, &Asteroid, &Position)>();
@@ -888,14 +876,12 @@ fn assist_matches_the_surface_up_close() {
 /// Walks over a faceted rock and returns the largest per-tick turn of `up`
 /// (ignoring deliberate relocations) and the total turn.
 fn walk_faceted_rock(tuning: Tuning) -> (f32, f32) {
-    use rand::SeedableRng;
     let mut app = app_with(tuning);
     assist_off(&mut app);
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
     let rock = app
         .world_mut()
         .spawn((
-            space_game::sim::asteroids::asteroid_collider(&mut rng, 6.0),
+            space_game::sim::asteroids::asteroid_collider(7, 6.0),
             ColliderDensity(space_game::sim::asteroids::ROCK_DENSITY),
             RigidBody::Dynamic,
             SleepingDisabled,

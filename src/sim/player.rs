@@ -15,7 +15,9 @@ use std::time::Duration;
 
 use avian3d::character_controller::move_and_slide::DepenetrationConfig;
 use avian3d::prelude::*;
+use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use super::SimTick;
 use super::bodies::Bodies;
@@ -34,7 +36,7 @@ const BODY_FOLLOW_RATE: f32 = 3.0;
 /// Fraction of the capsule (from the bottom) that counts as "feet".
 const FEET_REGION: f32 = 0.3;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Mode {
     /// World-space. `position` is the capsule center; `orientation` is the
     /// body (capsule axis = local Y); the view is `orientation * pitch`.
@@ -156,7 +158,7 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Grapple {
     pub body: Entity,
     /// Anchor point in the body's local coordinates.
@@ -167,7 +169,8 @@ pub struct Grapple {
 }
 
 /// Everything about a player that the simulation carries from tick to tick.
-#[derive(Component, Clone, Debug, PartialEq)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[component(map_entities)]
 pub struct Player {
     pub mode: Mode,
     pub boots_on: bool,
@@ -183,6 +186,21 @@ pub struct Player {
     pub events: EventLog,
 }
 
+impl MapEntities for Player {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        if let Mode::Booted { body, .. } = &mut self.mode {
+            *body = mapper.get_mapped(*body);
+        }
+        if let Some(grapple) = &mut self.grapple {
+            grapple.body = mapper.get_mapped(grapple.body);
+        }
+        if let Some(body) = &mut self.reference_body {
+            *body = mapper.get_mapped(*body);
+        }
+        self.events.map_entities(mapper);
+    }
+}
+
 impl Player {
     fn emit(&mut self, event: PlayerEvent) {
         self.events.push(event);
@@ -191,7 +209,7 @@ impl Player {
 
 /// Per-tick outputs derived from the simulation, for presentation. Not state:
 /// recomputed every tick.
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlayerTelemetry {
     /// Jetpack output as a fraction of base thrust (boost > 1).
     pub thrust: f32,
@@ -201,23 +219,32 @@ pub struct PlayerTelemetry {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PreviousMode(pub Mode);
 
+/// Spawns the one local player of a game without a network.
 pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::ship::Ship>>) {
+    commands.spawn(new_player(*ship, 0));
+}
+
+/// A player standing on `ship`'s deck. Players are spread across the deck by
+/// `index` so they don't spawn inside each other.
+pub fn new_player(ship: Entity, index: u32) -> impl Bundle {
+    let column = [0.0, 1.2, -1.2, 2.4][index as usize % 4];
+    let row = (index / 4) as f32;
     let mode = Mode::Booted {
-        body: *ship,
-        feet: Vec3::new(0.0, SKIN, 5.0),
+        body: ship,
+        feet: Vec3::new(column, SKIN, 5.0 + row * 1.5),
         up: Vec3::Y,
         velocity: Vec3::ZERO,
         orientation: Quat::IDENTITY,
         pitch: 0.0,
     };
-    commands.spawn((
-        Name::new("Player"),
+    (
+        Name::new(format!("Player {}", index + 1)),
         Player {
             mode,
             boots_on: true,
             flight_assist: true,
             grapple: None,
-            reference_body: Some(*ship),
+            reference_body: Some(ship),
             detach_timer: 0.0,
             input: InputCursor::default(),
             events: EventLog::default(),
@@ -225,7 +252,7 @@ pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::shi
         PreviousMode(mode),
         PlayerInput::default(),
         PlayerTelemetry::default(),
-    ));
+    )
 }
 
 fn capsule(t: &Tuning) -> Collider {

@@ -6,6 +6,7 @@ use bevy_egui::{EguiContexts, egui};
 use avian3d::prelude::{ColliderAabb, SpatialQuery, SpatialQueryFilter};
 
 use super::camera::PlayerCamera;
+use super::LocalPlayer;
 use super::events::EventCursor;
 use super::input::MouseCaptured;
 use crate::sim::bodies::Bodies;
@@ -23,7 +24,7 @@ pub fn hud(
     mut tuning: ResMut<Tuning>,
     mut panel: ResMut<PanelState>,
     captured: Res<MouseCaptured>,
-    player: Single<&Player>,
+    player: Single<&Player, With<LocalPlayer>>,
     bodies: Bodies,
     names: Query<&Name>,
     events: Res<EventCursor>,
@@ -215,7 +216,7 @@ const REFERENCE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 190, 70);
 pub fn reference_overlay(
     mut contexts: EguiContexts,
     tuning: Res<Tuning>,
-    player: Single<&Player>,
+    player: Single<&Player, With<LocalPlayer>>,
     bodies: Bodies,
     names: Query<&Name>,
     aabbs: Query<&ColliderAabb>,

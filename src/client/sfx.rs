@@ -13,7 +13,7 @@ use rand_chacha::ChaCha8Rng;
 use crate::sim::asteroids::Asteroid;
 use super::events::Presented;
 use crate::sim::events::{Detach, PlayerEvent};
-use crate::sim::input::PlayerInput;
+use super::{LocalInput, LocalPlayer};
 use crate::sim::player::{Mode, Player, PlayerTelemetry};
 use crate::sim::tuning::Tuning;
 
@@ -376,12 +376,14 @@ pub fn play_continuous_sounds(
     tuning: Res<Tuning>,
     sounds: Res<Sounds>,
     mut state: ResMut<AudioState>,
-    player: Single<(&Player, &PlayerInput, &PlayerTelemetry)>,
+    local: Res<LocalInput>,
+    player: Single<(&Player, &PlayerTelemetry), With<LocalPlayer>>,
     rocks: Query<(), With<Asteroid>>,
     mut jet: Query<&mut AudioSink, (With<JetpackLoop>, Without<ReelLoop>)>,
     mut reel: Query<&mut AudioSink, (With<ReelLoop>, Without<JetpackLoop>)>,
 ) {
-    let (player, input, telemetry) = *player;
+    let (player, telemetry) = *player;
+    let input = &local.0;
     let dt = time.delta_secs();
 
     if let Mode::Booted { body, velocity, .. } = player.mode {

@@ -9,6 +9,7 @@ edition = "2024"
 [dependencies]
 bevy = { version = "0.19.1", features = ["wayland", "wav"] }
 avian3d = "0.7.0"
+lightyear = { version = "0.30.1", features = ["netcode", "udp", "input_native", "avian3d", "frame_interpolation"] }
 bevy_egui = "0.42.0"
 noise = "0.9.0"
 rand = "0.9"

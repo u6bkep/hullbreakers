@@ -8,6 +8,7 @@
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use super::bodies::PreviousVelocity;
 use super::tuning::Tuning;
@@ -103,11 +104,32 @@ pub struct HullPart {
     pub size: Vec3,
 }
 
+/// The ship's structure. Its geometry is built from the layout wherever the
+/// component appears (see [`build_hull`]), so replicating this is replicating
+/// the hull.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShipHull;
+
+pub fn spawn_ship(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Ship"),
+        Ship::default(),
+        ShipHull,
+        RigidBody::Kinematic,
+        SleepingDisabled,
+        PreviousVelocity::default(),
+        Position::default(),
+        Rotation::default(),
+    ));
+}
+
+/// Gives a new [`ShipHull`] its collider and visual parts.
+///
 /// The ship's collision is one compound collider on the body entity itself.
 /// Avian only re-syncs *child* collider poses at the start of each physics
 /// step, so child colliders would be queried a tick stale (v·dt off) by the
 /// player controller, which runs after the step.
-pub fn spawn_ship(mut commands: Commands) {
+pub fn build_hull(add: On<Add, ShipHull>, mut commands: Commands) {
     let layout = hull_layout();
     let collider = Collider::compound(
         layout
@@ -122,16 +144,10 @@ pub fn spawn_ship(mut commands: Commands) {
             .collect(),
     );
     commands
-        .spawn((
-            Name::new("Ship"),
-            Ship::default(),
-            RigidBody::Kinematic,
-            collider,
-            SleepingDisabled,
-            PreviousVelocity::default(),
-            Transform::default(),
-            Visibility::default(),
-        ))
+        .entity(add.entity)
+        .insert((collider, Visibility::default()))
+        // A replicated hull may not have its pose yet.
+        .insert_if_new(Transform::default())
         .with_children(|ship| {
             for (i, b) in layout.into_iter().enumerate() {
                 ship.spawn((

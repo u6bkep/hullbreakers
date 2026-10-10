@@ -4,7 +4,9 @@
 # user's seat: no DRM master, no libinput, its own Wayland socket.
 #
 #   tools/hl start [WxH]        start headless sway (default 1280x720)
-#   tools/hl game [args...]     launch target/debug/space_game inside it
+#   tools/hl game [args...]     launch target/debug/space_game inside it (again for
+#                               more instances; they tile side by side; logs game-N.log)
+#   tools/hl focus <title>      focus the window whose title contains <title>
 #   tools/hl key <keys...>      tap keys (w a s d q e f v x r t l space tab shift ctrl esc 0-9)
 #   tools/hl down <key> / up <key>   hold / release a key
 #   tools/hl look <dx> <dy> [steps] [ms]   relative mouse motion, optionally spread out
@@ -69,19 +71,25 @@ EOF
 game)
     load
     shift
+    n=$(grep -c '^GAME_PID' "$STATE/env" || true)
+    log="$STATE/game.log"
+    [[ "$n" -gt 0 ]] && log="$STATE/game-$((n + 1)).log"
+    windows() { swaymsg -s "$SWAYSOCK" -t get_tree | grep -c '"name": "space-game' || true; }
+    before=$(windows)
     (
         unset DISPLAY
         cd "$ROOT"
-        exec ./target/debug/space_game "$@" >"$STATE/game.log" 2>&1
+        exec ./target/debug/space_game "$@" >"$log" 2>&1
     ) &
     echo "GAME_PID=$!" >>"$STATE/env"
     # Wait for the window to map.
     for _ in $(seq 100); do
-        swaymsg -s "$SWAYSOCK" -t get_tree | grep -q '"app_id": "space_game"\|"name": "space-game"' && break
+        [[ "$(windows)" -gt "$before" ]] && break
         sleep 0.1
     done
-    echo "hl: game started (log: $STATE/game.log)"
+    echo "hl: game started (log: $log)"
     ;;
+focus) load; swaymsg -s "$SWAYSOCK" "[title=\"$2\"] focus" >/dev/null ;;
 key) load; shift; for k in "$@"; do input "tap $k"; done ;;
 down) load; input "key $2 down" ;;
 up) load; input "key $2 up" ;;
@@ -97,7 +105,9 @@ stop)
     if [[ -f "$STATE/env" ]]; then
         # shellcheck disable=SC1091
         source "$STATE/env"
-        [[ -n "${GAME_PID:-}" ]] && kill "$GAME_PID" 2>/dev/null || true
+        for pid in $(grep '^GAME_PID=' "$STATE/env" | cut -d= -f2); do
+            kill "$pid" 2>/dev/null || true
+        done
         [[ -n "${INPUT_PID:-}" ]] && kill "$INPUT_PID" 2>/dev/null || true
         kill "$SWAY_PID" 2>/dev/null || true
         rm -f "$STATE/env"

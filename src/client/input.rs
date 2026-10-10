@@ -20,7 +20,7 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
-use crate::sim::input::PlayerInput;
+use super::LocalInput;
 use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::Tuning;
 
@@ -56,12 +56,10 @@ pub fn read_input(
     motion: Res<AccumulatedMouseMotion>,
     captured: Res<MouseCaptured>,
     tuning: Res<Tuning>,
-    mut inputs: Query<&mut PlayerInput>,
+    mut local: ResMut<LocalInput>,
     mut ship_orders: MessageWriter<ShipCommand>,
 ) {
-    let Ok(mut cmd) = inputs.single_mut() else {
-        return;
-    };
+    let cmd = &mut local.0;
     if !captured.0 {
         cmd.movement = Vec3::ZERO;
         cmd.roll = 0.0;

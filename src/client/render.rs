@@ -10,11 +10,11 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use super::camera::PlayerCamera;
+use super::camera::{PlayerCamera, render_frame};
+use super::{LocalInput, LocalPlayer};
 use crate::sim::SimMaterial;
 use crate::sim::asteroids::FIELD_DIRECTION;
 use crate::sim::frame::BodyFrame;
-use crate::sim::input::PlayerInput;
 use crate::sim::player::{Grapple, Mode, Player};
 use crate::sim::ship::HullPart;
 use crate::sim::tuning::Tuning;
@@ -147,10 +147,8 @@ pub fn setup_lighting(mut commands: Commands) {
 }
 
 /// Interior lights ride along with the ship.
-pub fn setup_ship_lights(
-    mut commands: Commands,
-    ship: Single<Entity, With<crate::sim::ship::Ship>>,
-) {
+pub fn add_ship_lights(add: On<Add, crate::sim::ship::ShipHull>, mut commands: Commands) {
+    let ship = add.entity;
     for z in [-10.0, -4.0, 5.0, 11.0] {
         let light = commands
             .spawn((
@@ -163,7 +161,7 @@ pub fn setup_ship_lights(
                 Transform::from_xyz(0.0, 2.7, z),
             ))
             .id();
-        commands.entity(*ship).add_child(light);
+        commands.entity(ship).add_child(light);
     }
 }
 
@@ -288,12 +286,14 @@ pub fn draw_gizmos(
     mut gizmos: Gizmos,
     time: Res<Time>,
     tuning: Res<Tuning>,
-    player: Single<(&Player, &PlayerInput)>,
+    local: Res<LocalInput>,
+    player: Single<&Player, With<LocalPlayer>>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
     camera: Single<&Transform, With<PlayerCamera>>,
     mut rope_sag: Local<f32>,
 ) {
-    let (player, input) = *player;
+    let player = *player;
+    let input = &local.0;
     if player.grapple.is_none() {
         *rope_sag = 0.0;
     }
@@ -438,4 +438,89 @@ fn draw_rope(
         }
     }
     gizmos.sphere(Isometry3d::from_translation(anchor), 0.08, color);
+}
+
+/// The visible body of another player.
+#[derive(Component)]
+pub struct Avatar {
+    player: Entity,
+}
+
+/// Keeps a capsule (with a visor showing where they look) on every other
+/// player, placed in the rendered frame of the body they stand on.
+pub fn update_avatars(
+    tuning: Res<Tuning>,
+    players: Query<(Entity, &Player), Without<LocalPlayer>>,
+    mut avatars: Query<(Entity, &Avatar, &mut Transform)>,
+    transforms: Query<&Transform, Without<Avatar>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+) {
+    let pose = |player: &Player| -> Option<Transform> {
+        let half = tuning.capsule_height / 2.0;
+        let (center, rotation) = match player.mode {
+            Mode::Eva {
+                position,
+                orientation,
+                ..
+            } => (position, orientation),
+            Mode::Booted {
+                body,
+                feet,
+                up,
+                orientation,
+                ..
+            } => {
+                let frame = render_frame(transforms.get(body).ok()?);
+                (
+                    frame.point_to_world(feet + up * half),
+                    frame.rotation * orientation,
+                )
+            }
+        };
+        Some(Transform::from_translation(center).with_rotation(rotation))
+    };
+    let mut seen = Vec::new();
+    for (entity, avatar, mut transform) in &mut avatars {
+        match players.get(avatar.player).ok().and_then(|(_, p)| pose(p)) {
+            Some(pose) => {
+                *transform = pose;
+                seen.push(avatar.player);
+            }
+            None if players.contains(avatar.player) => seen.push(avatar.player),
+            None => commands.entity(entity).despawn(),
+        }
+    }
+    for (entity, player) in &players {
+        if seen.contains(&entity) {
+            continue;
+        }
+        let Some(pose) = pose(player) else { continue };
+        let suit = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.85, 0.85, 0.8),
+            perceptual_roughness: 0.6,
+            ..default()
+        });
+        let visor = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.9, 0.6, 0.1),
+            emissive: LinearRgba::rgb(0.6, 0.35, 0.05),
+            ..default()
+        });
+        let length = (tuning.capsule_height - 2.0 * tuning.capsule_radius).max(0.01);
+        let eye = tuning.eye_height - tuning.capsule_height / 2.0;
+        commands
+            .spawn((
+                Name::new("Avatar"),
+                Avatar { player: entity },
+                Mesh3d(meshes.add(Capsule3d::new(tuning.capsule_radius, length))),
+                MeshMaterial3d(suit),
+                pose,
+            ))
+            .with_child((
+                Mesh3d(meshes.add(Cuboid::new(0.4, 0.15, 0.1))),
+                MeshMaterial3d(visor),
+                Transform::from_xyz(0.0, eye, -tuning.capsule_radius),
+            ));
+    }
 }

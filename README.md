@@ -3,10 +3,16 @@
 First-person movement sandbox for a boarding-combat roguelite. Bevy 0.19 + Avian 0.7.
 
 ```
-cargo run              # play
-cargo test             # headless movement tests
-SPACE_GAME_SHOTS=dir cargo run   # scripted screenshot tour, then exit
+cargo run                                # host a game and play (UDP port 5888)
+cargo run -- --connect 192.168.1.20      # join a host (HOST[:PORT])
+cargo run -- --server [--port 5888]      # dedicated headless server
+cargo test                               # headless movement tests
+SPACE_GAME_SHOTS=dir cargo run           # scripted screenshot tour, then exit
 ```
+
+Co-op is host-authoritative: the host (or server) simulates everything and
+replicates it. Its tuning is authoritative too; each player keeps their own
+camera and debug settings.
 
 ### Headless harness (for agents and CI)
 
@@ -24,6 +30,11 @@ tools/hl click left             # grapple
 tools/hl shot /tmp/frame.png
 tools/hl stop
 ```
+
+Run `tools/hl game` again (e.g. `tools/hl game --connect 127.0.0.1`) for more
+instances; sway tiles them side by side (`tools/hl start 2560x720` gives each
+a 1280-wide half). `tools/hl focus <title>` picks which one gets input; the
+client's title is `space-game — HOST:PORT`.
 
 ## Controls
 
@@ -60,7 +71,16 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     The client presents each one once (`client/events.rs`).
   - Time-dependent behaviour (ship wobble, lurch) derives from `SimTick`.
     Orders to the ship arrive as `ShipCommand` messages.
-- `src/client/` is input, camera, greybox rendering, the HUD, and the tuning panel.
+- `src/client/` is input, camera, greybox rendering, the HUD, and the tuning
+  panel. It presents the `LocalPlayer` and writes only `LocalInput`.
+- `src/net/` is lightyear: `--host` (listen server, the default), `--connect`,
+  `--server`. Replicated state is the sim's own: generating components that
+  every peer expands locally (`ShipHull` builds the hull, `Asteroid { seed }`
+  the rock's shape), body poses and velocities, and `Player` state, whose
+  event log carries what happened. Clients currently interpolate everything,
+  their own player included. Measured cost: ~400 KB/s to each client for the
+  300-rock field at 20 Hz, which is what the planned extrapolated-body policy
+  is for.
 - **Reference frames** (`sim/frame.rs`): a booted player is simulated in the
   local coordinates of the body underfoot, so a rolling ship is a stable floor.
   Boot adhesion and shear are checked against the body's acceleration at the
@@ -74,8 +94,8 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   spatial queries, not a rigid body. EVA contacts exchange impulses with rocks
   using their real mass and inertia.
 - Camera: the eye is placed relative to the body's interpolated transform (no
-  jitter against the deck); sim discontinuities (landing, edge wraps) are hidden
-  with a decaying pose offset.
+  jitter against the deck); events that relocate the view (landing, edge
+  wraps) are smoothed with a decaying pose offset.
 
 ## Feedback
 

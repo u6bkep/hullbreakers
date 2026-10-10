@@ -1,6 +1,6 @@
 //! Client layer: input, camera, rendering, debug UI. Reads sim state, writes
-//! only [`crate::sim::input::PlayerInput`] and [`crate::sim::ship::ShipCommand`]
-//! (plus debug actions).
+//! only [`LocalInput`] and [`crate::sim::ship::ShipCommand`] (plus debug
+//! actions). Which player is local is the network layer's business.
 
 pub mod camera;
 pub mod debug_shots;
@@ -14,6 +14,13 @@ use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
+pub use crate::net::{LocalInput, LocalPlayer};
+
+/// `Update` systems that present the local player's state. Whatever delivers
+/// that state (a network's interpolation) must run before this set.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Present;
+
 pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
@@ -25,6 +32,7 @@ impl Plugin for ClientPlugin {
             .add_message::<events::Presented>()
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
+            .add_observer(render::add_ship_lights)
             .add_systems(PreStartup, render::setup_materials)
             .add_systems(
                 Startup,
@@ -34,7 +42,6 @@ impl Plugin for ClientPlugin {
                     render::setup_starfield,
                     render::setup_dust,
                     sfx::setup_sounds,
-                    render::setup_ship_lights.after(crate::sim::ship::spawn_ship),
                 ),
             )
             .add_systems(
@@ -46,11 +53,14 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 PostUpdate,
                 (
+                    render::update_avatars,
                     camera::update_camera,
                     render::follow_starfield,
                     render::update_dust,
                 )
                     .chain()
+                    // After body poses are written to their transforms.
+                    .after(avian3d::prelude::PhysicsSystems::Writeback)
                     .before(TransformSystems::Propagate),
             )
             .add_systems(
@@ -61,7 +71,8 @@ impl Plugin for ClientPlugin {
                     events::present_events,
                     (sfx::play_event_sounds, camera::camera_fx_events)
                         .after(events::present_events),
-                ),
+                )
+                    .in_set(Present),
             )
             .add_systems(EguiPrimaryContextPass, (hud::reference_overlay, hud::hud));
         if let Some(script) = debug_shots::shot_script_from_env() {

@@ -45,33 +45,51 @@ pub enum SimSystems {
     RecordVelocities,
     /// Script-driven bodies set their velocities and the field is maintained.
     Drive,
+    /// Players are simulated, in `FixedPostUpdate` after the physics step.
+    Players,
 }
 
-pub struct SimPlugin {
-    /// Spawn the asteroid field. Tests turn it off for a quiet ship.
-    pub asteroids: bool,
-}
+/// What every peer needs to make sense of the world, authoritative or not:
+/// tuning, and the observers that build bodies (hulls, rocks) from their
+/// generating components.
+pub struct SimSharedPlugin;
 
-impl Default for SimPlugin {
-    fn default() -> Self {
-        Self { asteroids: true }
-    }
-}
-
-impl Plugin for SimPlugin {
+impl Plugin for SimSharedPlugin {
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<tuning::Tuning>() {
             let tuning = tuning::Tuning::load_or_default(std::path::Path::new(tuning::TUNING_PATH));
             app.insert_resource(tuning);
         }
+        app.add_message::<ship::ShipCommand>()
+            .add_observer(ship::build_hull)
+            .add_observer(asteroids::shape_asteroid);
+    }
+}
+
+/// The authoritative simulation.
+pub struct SimPlugin {
+    /// Spawn the asteroid field. Tests turn it off for a quiet ship.
+    pub asteroids: bool,
+    /// Spawn a single local player at startup. A server spawns players as
+    /// they connect instead.
+    pub local_player: bool,
+}
+
+impl Default for SimPlugin {
+    fn default() -> Self {
+        Self {
+            asteroids: true,
+            local_player: true,
+        }
+    }
+}
+
+impl Plugin for SimPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(SimSharedPlugin);
         if self.asteroids {
             app.init_resource::<asteroids::FieldInterest>()
-                .add_systems(
-                    Startup,
-                    asteroids::spawn_field
-                        .after(ship::spawn_ship)
-                        .before(player::spawn_player),
-                )
+                .add_systems(Startup, asteroids::spawn_field.after(ship::spawn_ship))
                 .add_systems(
                     FixedUpdate,
                     (
@@ -84,11 +102,20 @@ impl Plugin for SimPlugin {
                         .in_set(SimSystems::Drive),
                 );
         }
-        app.init_resource::<SimTick>()
-            .add_message::<ship::ShipCommand>()
-            .insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
+        if self.local_player {
+            app.add_systems(
+                Startup,
+                player::spawn_player
+                    .after(ship::spawn_ship)
+                    .after(asteroids::spawn_field),
+            );
+        }
+        // Bevy's default fixed clock is 64 Hz. A network layer must use the
+        // same rate for its ticks.
+        app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
+            .init_resource::<SimTick>()
             .insert_resource(Gravity(Vec3::ZERO))
-            .add_systems(Startup, (ship::spawn_ship, player::spawn_player).chain())
+            .add_systems(Startup, ship::spawn_ship)
             .configure_sets(
                 FixedUpdate,
                 (SimSystems::RecordVelocities, SimSystems::Drive).chain(),
@@ -103,7 +130,9 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 FixedPostUpdate,
-                player::player_tick.after(PhysicsSystems::Last),
+                player::player_tick
+                    .in_set(SimSystems::Players)
+                    .after(PhysicsSystems::Last),
             );
     }
 }

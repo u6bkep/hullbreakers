@@ -125,7 +125,27 @@ tuning! {
     }
 }
 
+/// Sections that are each player's own preference rather than part of the
+/// shared simulation.
+const LOCAL_SECTIONS: [&str; 2] = ["Camera", "Debug"];
+
 impl Tuning {
+    /// Takes every simulation setting from the host's tuning, keeping this
+    /// player's own preferences (camera, debug).
+    pub fn adopt_shared(&mut self, host: &Tuning) {
+        let mut host = host.clone();
+        for (mine, theirs) in self.float_fields().into_iter().zip(host.float_fields()) {
+            if !LOCAL_SECTIONS.contains(&mine.section) {
+                *mine.value = *theirs.value;
+            }
+        }
+        for (mine, theirs) in self.bool_fields().into_iter().zip(host.bool_fields()) {
+            if !LOCAL_SECTIONS.contains(&mine.section) {
+                *mine.value = *theirs.value;
+            }
+        }
+    }
+
     pub fn load_or_default(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(text) => ron::from_str(&text).unwrap_or_else(|err| {

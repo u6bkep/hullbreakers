@@ -10,6 +10,7 @@
 
 use bevy::prelude::*;
 
+use super::LocalPlayer;
 use crate::sim::events::PlayerEvent;
 use crate::sim::player::Player;
 
@@ -26,7 +27,7 @@ pub struct EventCursor {
 }
 
 pub fn present_events(
-    player: Single<&Player>,
+    player: Single<&Player, With<LocalPlayer>>,
     mut cursor: ResMut<EventCursor>,
     mut presented: MessageWriter<Presented>,
 ) {

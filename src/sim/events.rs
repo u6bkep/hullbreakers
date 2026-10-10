@@ -9,14 +9,16 @@
 
 use std::collections::VecDeque;
 
+use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// How long entries stay in the log, in ticks. Readers must look at least
 /// this often.
 pub const LOG_TICKS: u32 = 120;
 
 /// Why the boots let go.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Detach {
     Jumped,
     BootsOff,
@@ -26,7 +28,7 @@ pub enum Detach {
     Yanked(f32),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PlayerEvent {
     Detached(Detach),
     /// Boots caught a surface; relative speed in m/s.
@@ -101,9 +103,37 @@ impl PlayerEvent {
     }
 }
 
+impl MapEntities for PlayerEvent {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        match self {
+            PlayerEvent::Landed { body, .. }
+            | PlayerEvent::Impact { body, .. }
+            | PlayerEvent::SurfaceChanged { body }
+            | PlayerEvent::BodyChanged { body }
+            | PlayerEvent::GrappleAttached { body, .. } => *body = mapper.get_mapped(*body),
+            PlayerEvent::Detached(_)
+            | PlayerEvent::GrappleMissed
+            | PlayerEvent::GrappleReleased
+            | PlayerEvent::RopeSnapped
+            | PlayerEvent::BootsToggled(_)
+            | PlayerEvent::AssistToggled(_)
+            | PlayerEvent::ReferenceSet { .. }
+            | PlayerEvent::NoReferenceTarget => {}
+        }
+    }
+}
+
+impl MapEntities for EventLog {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        for (_, event) in &mut self.entries {
+            event.map_entities(mapper);
+        }
+    }
+}
+
 /// The recent events of one player, oldest first, each stamped with the tick
 /// it happened on.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EventLog {
     tick: u32,
     entries: VecDeque<(u32, PlayerEvent)>,
