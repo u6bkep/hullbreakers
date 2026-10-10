@@ -76,11 +76,20 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 - `src/net/` is lightyear: `--host` (listen server, the default), `--connect`,
   `--server`. Replicated state is the sim's own: generating components that
   every peer expands locally (`ShipHull` builds the hull, `Asteroid { seed }`
-  the rock's shape), body poses and velocities, and `Player` state, whose
-  event log carries what happened. Clients currently interpolate everything,
-  their own player included. Measured cost: ~400 KB/s to each client for the
-  300-rock field at 20 Hz, which is what the planned extrapolated-body policy
-  is for.
+  the rock's shape), each body's `Motion`, and `Player` state, whose event
+  log carries what happened. Players are interpolated (a client's own player
+  included, until prediction lands).
+- **Extrapolated bodies** (`sim/motion.rs`, `net/extrapolate.rs`): a body is
+  sent as its free flight at a tick (center of mass, rotation, velocities),
+  which every peer evaluates at its own tick, so clients see bodies where
+  they are now. The authority re-sends a body's motion only when the body
+  strays from it by more than a centimeter (a collision, an impulse, the
+  ship's scripted manoeuvres); clients blend over the correction. Rocks get
+  isotropic inertia so free tumbling is torque-free and exactly predictable.
+  Measured: ~16 KB/s to one client (was ~400 KB/s streaming poses), about 3
+  motion updates/s for the whole field.
+- **Body mass** (`BodyInertia`) is derived from the collider identically on
+  every peer, so clients have real reference frames without simulating.
 - **Reference frames** (`sim/frame.rs`): a booted player is simulated in the
   local coordinates of the body underfoot, so a rolling ship is a stable floor.
   Boot adhesion and shear are checked against the body's acceleration at the

@@ -16,6 +16,11 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 pub use crate::net::{LocalInput, LocalPlayer};
 
+/// `PostUpdate` systems that write body transforms for this frame (when
+/// Avian's interpolation doesn't). The camera follows them.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BodyPoses;
+
 /// `Update` systems that present the local player's state. Whatever delivers
 /// that state (a network's interpolation) must run before this set.
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
@@ -60,7 +65,7 @@ impl Plugin for ClientPlugin {
                 )
                     .chain()
                     // After body poses are written to their transforms.
-                    .after(avian3d::prelude::PhysicsSystems::Writeback)
+                    .after(BodyPoses)
                     .before(TransformSystems::Propagate),
             )
             .add_systems(

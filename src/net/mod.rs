@@ -16,8 +16,6 @@ use core::time::Duration;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
-use lightyear::avian3d::plugin::{AvianReplicationMode, LightyearAvianPlugin};
-use lightyear::frame_interpolation::{FrameInterpolate, FrameInterpolationPlugin};
 use lightyear::netcode::NetcodeServer;
 use lightyear::prelude::client::*;
 use lightyear::prelude::input::native::*;
@@ -30,7 +28,10 @@ use crate::sim::input::PlayerInput;
 use crate::sim::player::{Mode, Player, PlayerTelemetry, new_player};
 use crate::sim::ship::{Ship, ShipHull};
 use crate::sim::tuning::Tuning;
-use crate::sim::{SimPlugin, SimSharedPlugin, SimSystems, TICK_HZ};
+use crate::sim::motion::Motion;
+use crate::sim::{SimPlugin, SimSharedPlugin, SimSystems, SimTick, TICK_HZ};
+
+mod extrapolate;
 
 pub const DEFAULT_PORT: u16 = 5888;
 const PROTOCOL_ID: u64 = 0x5ace_9a3e;
@@ -95,54 +96,70 @@ impl Plugin for NetPlugin {
                 tick_duration: tick,
             });
         }
-        app.add_plugins(ProtocolPlugin)
-            .add_plugins(LightyearAvianPlugin {
-                replication_mode: AvianReplicationMode::Position {
-                    sync_to_transform: false,
-                },
-                ..default()
-            })
-            // Lightyear owns Position -> Transform sync and render
-            // interpolation (see `FrameInterpolate`).
-            .add_plugins(
-                PhysicsPlugins::default()
-                    .build()
-                    .disable::<PhysicsTransformPlugin>()
-                    .disable::<PhysicsInterpolationPlugin>(),
-            );
+        app.add_plugins(ProtocolPlugin);
+        // Ticks are lightyear's on every peer, so a body's motion means the
+        // same thing everywhere.
+        app.add_systems(
+            FixedFirst,
+            follow_network_tick
+                .after(lightyear::prelude::TimelineSystems::IncrementLocal)
+                .after(crate::sim::advance_tick),
+        );
 
         if mode.is_authority() {
-            app.add_plugins(SimPlugin {
-                asteroids: true,
-                local_player: false,
-            })
+            // A host draws its own bodies between ticks; a server draws nothing.
+            let physics = if mode.plays() {
+                PhysicsPlugins::default().set(PhysicsInterpolationPlugin::interpolate_all())
+            } else {
+                PhysicsPlugins::default().build()
+            };
+            app.add_plugins((
+                physics,
+                SimPlugin {
+                    asteroids: true,
+                    local_player: false,
+                },
+            ))
             .insert_resource(ReplicationMetadata::new(SEND_INTERVAL))
             .add_observer(on_link)
-            .add_observer(replicate_ship)
-            .add_observer(replicate_asteroid)
+            .add_observer(replicate_body::<Ship>)
+            .add_observer(replicate_body::<Asteroid>)
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players))
             .add_systems(
                 FixedUpdate,
                 apply_network_input.before(SimSystems::RecordVelocities),
+            )
+            .add_systems(
+                FixedPostUpdate,
+                extrapolate::track_motion.after(SimSystems::Players),
             );
         } else {
-            app.add_plugins(SimSharedPlugin)
-                .add_observer(hide_until_posed::<Asteroid>)
-                .add_observer(hide_until_posed::<ShipHull>)
-                .add_systems(
-                    Update,
-                    (
-                        adopt_host_tuning,
-                        show_when_posed
-                            .after(lightyear::prelude::InterpolationSystems::Interpolate),
-                    ),
-                );
+            // Bodies here are posed from their motion, not simulated: Avian
+            // only answers spatial queries, and must not sync Transform back
+            // into Position.
+            app.add_plugins((
+                PhysicsPlugins::default()
+                    .build()
+                    .disable::<PhysicsTransformPlugin>()
+                    .disable::<PhysicsInterpolationPlugin>(),
+                SimSharedPlugin,
+            ))
+            .add_observer(extrapolate::prepare_extrapolated)
+            .add_systems(Update, adopt_host_tuning)
+            .init_resource::<extrapolate::DrawClock>()
+            .add_systems(
+                FixedUpdate,
+                extrapolate::follow_motion.run_if(extrapolate::synced),
+            )
+            .add_systems(
+                PostUpdate,
+                (extrapolate::advance_draw_clock, extrapolate::draw_extrapolated)
+                    .chain()
+                    .in_set(crate::client::BodyPoses),
+            );
         }
         if mode.plays() {
-            if !app.is_plugin_added::<FrameInterpolationPlugin>() {
-                app.add_plugins(FrameInterpolationPlugin);
-            }
             // Required by lightyear's client input pipeline (input history
             // for rollback), even before anything is predicted.
             app.init_resource::<LocalInput>()
@@ -153,11 +170,6 @@ impl Plugin for NetPlugin {
                     write_local_input.in_set(lightyear::prelude::client::input::InputSystems::WriteClientInputs),
                 );
             order_presentation(app);
-            if mode.is_authority() {
-                // The host renders its own authoritative bodies, which move
-                // in fixed ticks; interpolate them between ticks.
-                app.add_observer(frame_interpolate_bodies);
-            }
         }
 
         match mode {
@@ -192,6 +204,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Name>().replicate();
         app.component::<ShipHull>().replicate_once();
         app.component::<Asteroid>().replicate_once();
+        app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();
         app.component::<PlayerTelemetry>().replicate();
         app.component::<Player>()
@@ -301,8 +314,8 @@ fn connect(commands: &mut Commands, server: SocketAddr) {
     commands.trigger(Connect { entity: client });
 }
 
-/// Everything is replicated to every client, and every client but the host's
-/// own interpolates it.
+/// Players are replicated to every client, and every client but the host's
+/// own interpolates them.
 fn to_clients() -> (Replicate, InterpolationTarget) {
     (
         Replicate::to_clients(NetworkTarget::All),
@@ -351,15 +364,14 @@ fn spawn_players(
     }
 }
 
-fn replicate_ship(add: On<Add, Ship>, mut commands: Commands) {
-    // The hull's visual parts are children every peer builds for itself.
-    commands
-        .entity(add.entity)
-        .insert((to_clients(), DisableReplicateHierarchy));
-}
-
-fn replicate_asteroid(add: On<Add, Asteroid>, mut commands: Commands) {
-    commands.entity(add.entity).insert(to_clients());
+/// Bodies reach clients by their motion (see [`extrapolate`]). The ship's
+/// visual parts are children every peer builds for itself.
+fn replicate_body<C: Component>(add: On<Add, C>, mut commands: Commands) {
+    commands.entity(add.entity).insert((
+        Replicate::to_clients(NetworkTarget::All),
+        extrapolate::Extrapolated,
+        DisableReplicateHierarchy,
+    ));
 }
 
 fn spawn_host_tuning(mut commands: Commands, tuning: Res<Tuning>) {
@@ -412,36 +424,9 @@ fn write_local_input(
     }
 }
 
-fn frame_interpolate_bodies(add: On<Add, RigidBody>, mut commands: Commands) {
-    commands.entity(add.entity).insert(FrameInterpolate);
-}
-
-/// A replicated body whose real pose hasn't arrived yet. Its collider gives
-/// it a placeholder pose at the origin (inside the ship) until interpolation
-/// reaches the tick it was spawned on, so it stays hidden until then.
-#[derive(Component)]
-struct AwaitingPose;
-
-fn hide_until_posed<C: Component>(add: On<Add, C>, mut commands: Commands) {
-    commands
-        .entity(add.entity)
-        .insert((AwaitingPose, Visibility::Hidden));
-}
-
-/// Shows bodies once interpolation has written a real pose. Avian's
-/// placeholder is `Vec3::MAX`, replaced by the (absent, so default) Transform
-/// at the origin. Nothing real sits exactly there except the ship at the
-/// start, where the placeholder is also the real pose.
-fn show_when_posed(
-    mut bodies: Query<(Entity, &Position, &mut Visibility, Has<ShipHull>), With<AwaitingPose>>,
-    mut commands: Commands,
-) {
-    for (entity, position, mut visibility, ship) in &mut bodies {
-        if ship || (position.0 != Vec3::ZERO && position.0 != Vec3::MAX) {
-            *visibility = Visibility::Inherited;
-            commands.entity(entity).remove::<AwaitingPose>();
-        }
-    }
+/// The sim counts ticks in lightyear's timeline.
+fn follow_network_tick(timeline: Res<LocalTimeline>, mut tick: ResMut<SimTick>) {
+    tick.0 = timeline.tick().0;
 }
 
 /// Lightyear's interpolation writes the local player's state in `Update`;

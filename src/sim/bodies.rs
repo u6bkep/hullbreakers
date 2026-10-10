@@ -1,4 +1,8 @@
 //! Access to rigid bodies as reference frames, and impulse application.
+//!
+//! A body is anything with a pose, velocities, and [`BodyInertia`]. It need
+//! not be simulated here: on a network client, bodies are posed from their
+//! replicated motion, and `Bodies` treats them exactly the same.
 
 use avian3d::prelude::*;
 use bevy::ecs::system::SystemParam;
@@ -23,15 +27,78 @@ pub fn record_previous_velocity(
     }
 }
 
+/// A body's mass properties, derived from its collider the same way on every
+/// peer (so a network client has them without simulating the body).
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct BodyInertia {
+    /// Zero for bodies impulses can't move (kinematic, static).
+    pub inverse_mass: f32,
+    /// Inverse of the (isotropic) angular inertia; zero when immovable.
+    pub inverse_inertia: f32,
+    /// In body coordinates.
+    pub center_of_mass: Vec3,
+    /// How far the body extends from its center of mass (m).
+    pub reach: f32,
+}
+
+impl BodyInertia {
+    /// A body only scripts move (the ship). It still turns about its center
+    /// of mass, as Avian computes it from the colliders.
+    pub fn immovable(collider: &Collider) -> Self {
+        let center_of_mass = collider.mass_properties(1.0).center_of_mass;
+        Self {
+            inverse_mass: 0.0,
+            inverse_inertia: 0.0,
+            center_of_mass,
+            reach: reach(collider, center_of_mass),
+        }
+    }
+
+    fn dynamic(collider: &Collider, density: f32) -> Self {
+        let props = collider.mass_properties(density);
+        let inertia = props.principal_angular_inertia.element_sum() / 3.0;
+        Self {
+            inverse_mass: 1.0 / props.mass,
+            inverse_inertia: 1.0 / inertia,
+            center_of_mass: props.center_of_mass,
+            reach: reach(collider, props.center_of_mass),
+        }
+    }
+}
+
+/// A bound on the distance from `center` to any point of the collider.
+fn reach(collider: &Collider, center: Vec3) -> f32 {
+    let aabb = collider.aabb(Vec3::ZERO, Quat::IDENTITY);
+    (aabb.max - aabb.min).length() / 2.0 + ((aabb.max + aabb.min) / 2.0 - center).length()
+}
+
+/// Mass properties for a dynamic body: [`BodyInertia`], and the same values
+/// imposed on Avian. Inertia is made isotropic (equal about every axis, the
+/// mean of the collider's principal moments). An isotropic body's spin is
+/// torque-free, so a tumbling rock keeps a constant angular velocity until
+/// something touches it, which makes its motion exactly predictable.
+pub fn dynamic_mass(collider: &Collider, density: f32) -> impl Bundle {
+    let inertia = BodyInertia::dynamic(collider, density);
+    (
+        inertia,
+        Mass(1.0 / inertia.inverse_mass),
+        AngularInertia {
+            principal: Vec3::splat(1.0 / inertia.inverse_inertia),
+            local_frame: Quat::IDENTITY,
+        },
+        CenterOfMass(inertia.center_of_mass),
+        NoAutoMass,
+        NoAutoAngularInertia,
+        NoAutoCenterOfMass,
+    )
+}
+
 type BodyData = (
-    &'static RigidBody,
     &'static Position,
     &'static Rotation,
     &'static mut LinearVelocity,
     &'static mut AngularVelocity,
-    &'static ComputedMass,
-    &'static ComputedAngularInertia,
-    &'static ComputedCenterOfMass,
+    &'static BodyInertia,
     Option<&'static PreviousVelocity>,
 );
 
@@ -49,11 +116,11 @@ impl Bodies<'_, '_> {
     }
 
     pub fn frame(&self, body: Entity) -> Option<BodyFrame> {
-        let (_, pos, rot, lin, ang, _, _, com, _) = self.bodies.get(body).ok()?;
+        let (pos, rot, lin, ang, inertia, _) = self.bodies.get(body).ok()?;
         Some(BodyFrame {
             position: pos.0,
             rotation: rot.0,
-            center_of_mass: pos.0 + rot.0 * com.0,
+            center_of_mass: pos.0 + rot.0 * inertia.center_of_mass,
             linear_velocity: lin.0,
             angular_velocity: ang.0,
         })
@@ -105,13 +172,11 @@ impl Bodies<'_, '_> {
     }
 
     pub fn mass(&self, body: Entity) -> Option<BodyMass> {
-        let (rb, _, rot, _, _, mass, inertia, _, _) = self.bodies.get(body).ok()?;
-        if !rb.is_dynamic() {
-            return Some(BodyMass::INFINITE);
-        }
+        let (.., inertia, _) = self.bodies.get(body).ok()?;
         Some(BodyMass {
-            inverse_mass: mass.inverse(),
-            inverse_inertia: inertia.rotated(rot.0).inverse().to_mat3(),
+            inverse_mass: inertia.inverse_mass,
+            // Isotropic: the same in every orientation.
+            inverse_inertia: Mat3::from_diagonal(Vec3::splat(inertia.inverse_inertia)),
         })
     }
 
@@ -125,7 +190,7 @@ impl Bodies<'_, '_> {
         let Some(frame) = self.frame(body) else {
             return;
         };
-        let Ok((_, _, _, mut lin, mut ang, ..)) = self.bodies.get_mut(body) else {
+        let Ok((_, _, mut lin, mut ang, ..)) = self.bodies.get_mut(body) else {
             return;
         };
         lin.0 += impulse * mass.inverse_mass;

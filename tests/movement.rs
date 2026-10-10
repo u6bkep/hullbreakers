@@ -360,8 +360,11 @@ fn spawn_rock(app: &mut App, position: Vec3, radius: f32, angular: Vec3) -> Enti
     let rock = app
         .world_mut()
         .spawn((
+            space_game::sim::bodies::dynamic_mass(
+                &Collider::sphere(radius),
+                space_game::sim::asteroids::ROCK_DENSITY,
+            ),
             Collider::sphere(radius),
-            ColliderDensity(space_game::sim::asteroids::ROCK_DENSITY),
             RigidBody::Dynamic,
             SleepingDisabled,
             space_game::sim::bodies::PreviousVelocity::default(),
@@ -881,8 +884,11 @@ fn walk_faceted_rock(tuning: Tuning) -> (f32, f32) {
     let rock = app
         .world_mut()
         .spawn((
+            space_game::sim::bodies::dynamic_mass(
+                &space_game::sim::asteroids::asteroid_collider(7, 6.0),
+                space_game::sim::asteroids::ROCK_DENSITY,
+            ),
             space_game::sim::asteroids::asteroid_collider(7, 6.0),
-            ColliderDensity(space_game::sim::asteroids::ROCK_DENSITY),
             RigidBody::Dynamic,
             SleepingDisabled,
             space_game::sim::bodies::PreviousVelocity::default(),
@@ -991,4 +997,58 @@ fn a_press_acts_once_however_often_the_input_is_read() {
         .count();
     assert_eq!(toggles, 1);
     assert!(!player(&mut app).boots_on);
+}
+
+/// A free-tumbling rock (irregular shape, real Avian physics) stays on the
+/// motion sampled from it: nothing needs re-sending until something touches
+/// it. This is what makes extrapolated replication cheap.
+#[test]
+fn free_rock_follows_its_sampled_motion() {
+    use space_game::sim::SimTick;
+    use space_game::sim::bodies::BodyInertia;
+    use space_game::sim::frame::BodyFrame;
+    use space_game::sim::motion::Motion;
+    let mut app = app();
+    let collider = space_game::sim::asteroids::asteroid_collider(11, 8.0);
+    let rock = app
+        .world_mut()
+        .spawn((
+            space_game::sim::bodies::dynamic_mass(
+                &collider,
+                space_game::sim::asteroids::ROCK_DENSITY,
+            ),
+            collider,
+            RigidBody::Dynamic,
+            SleepingDisabled,
+            LinearVelocity(Vec3::new(0.3, -0.2, 15.0)),
+            AngularVelocity(Vec3::new(0.25, -0.1, 0.18)),
+            Position(Vec3::new(40.0, 0.0, 200.0)),
+        ))
+        .id();
+    ticks(&mut app, 2);
+    let state = |app: &mut App| {
+        let w = app.world();
+        let e = w.entity(rock);
+        let inertia = *e.get::<BodyInertia>().unwrap();
+        let frame = BodyFrame {
+            position: e.get::<Position>().unwrap().0,
+            rotation: e.get::<Rotation>().unwrap().0,
+            center_of_mass: e.get::<Position>().unwrap().0
+                + e.get::<Rotation>().unwrap().0 * inertia.center_of_mass,
+            linear_velocity: e.get::<LinearVelocity>().unwrap().0,
+            angular_velocity: e.get::<AngularVelocity>().unwrap().0,
+        };
+        (w.resource::<SimTick>().0, frame, inertia)
+    };
+    let (tick0, frame0, inertia) = state(&mut app);
+    let motion = Motion::sample(tick0, &frame0);
+    ticks(&mut app, 600);
+    let (tick, actual, _) = state(&mut app);
+    let predicted = motion.frame_at(tick, inertia.center_of_mass);
+    let drift = (predicted.center_of_mass - actual.center_of_mass).length();
+    let turn = (predicted.rotation * actual.rotation.inverse())
+        .to_scaled_axis()
+        .length();
+    // At the rock's ~8 m extent, after 10 s.
+    assert!(drift + turn * 8.0 < 0.01, "drift {drift} m, turn {turn} rad");
 }

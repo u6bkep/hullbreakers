@@ -9,6 +9,7 @@ pub mod bodies;
 pub mod events;
 pub mod frame;
 pub mod input;
+pub mod motion;
 pub mod player;
 pub mod rope;
 pub mod ship;
@@ -24,7 +25,7 @@ pub const TICK_HZ: f64 = 60.0;
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SimTick(pub u32);
 
-fn advance_tick(mut tick: ResMut<SimTick>) {
+pub fn advance_tick(mut tick: ResMut<SimTick>) {
     tick.0 = tick.0.wrapping_add(1);
 }
 
@@ -61,6 +62,7 @@ impl Plugin for SimSharedPlugin {
             app.insert_resource(tuning);
         }
         app.add_message::<ship::ShipCommand>()
+            .init_resource::<SimTick>()
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid);
     }
@@ -113,7 +115,6 @@ impl Plugin for SimPlugin {
         // Bevy's default fixed clock is 64 Hz. A network layer must use the
         // same rate for its ticks.
         app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
-            .init_resource::<SimTick>()
             .insert_resource(Gravity(Vec3::ZERO))
             .add_systems(Startup, ship::spawn_ship)
             .configure_sets(

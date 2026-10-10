@@ -10,7 +10,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::bodies::PreviousVelocity;
+use super::bodies::{BodyInertia, PreviousVelocity};
 use super::tuning::Tuning;
 use super::{SimMaterial, SimTick, TICK_HZ};
 
@@ -145,7 +145,7 @@ pub fn build_hull(add: On<Add, ShipHull>, mut commands: Commands) {
     );
     commands
         .entity(add.entity)
-        .insert((collider, Visibility::default()))
+        .insert((BodyInertia::immovable(&collider), collider, Visibility::default()))
         // A replicated hull may not have its pose yet.
         .insert_if_new(Transform::default())
         .with_children(|ship| {

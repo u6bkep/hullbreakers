@@ -8,7 +8,7 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use super::SimMaterial;
-use super::bodies::PreviousVelocity;
+use super::bodies::{PreviousVelocity, dynamic_mass};
 use super::tuning::Tuning;
 
 pub const FIELD_LENGTH: f32 = 800.0;
@@ -49,9 +49,12 @@ pub struct AppliedFieldSpeed(pub f32);
 /// Gives a new [`Asteroid`] its collider.
 pub fn shape_asteroid(add: On<Add, Asteroid>, rocks: Query<&Asteroid>, mut commands: Commands) {
     let rock = rocks.get(add.entity).expect("just added");
-    commands
-        .entity(add.entity)
-        .insert((asteroid_collider(rock.seed, rock.radius), SimMaterial::Rock));
+    let collider = asteroid_collider(rock.seed, rock.radius);
+    commands.entity(add.entity).insert((
+        dynamic_mass(&collider, ROCK_DENSITY),
+        collider,
+        SimMaterial::Rock,
+    ));
 }
 
 /// Builds a lumpy rock as a compound of 1–3 noisy convex lobes.
@@ -188,7 +191,6 @@ fn spawn_rock(
             radius,
             seed: rng.random(),
         },
-        ColliderDensity(ROCK_DENSITY),
         RigidBody::Dynamic,
         SleepingDisabled,
         PreviousVelocity::default(),
