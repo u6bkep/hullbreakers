@@ -10,10 +10,9 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use core::time::Duration;
 
-use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use space_game::client::ClientPlugin;
-use space_game::net::{DEFAULT_PORT, NetMode, NetPlugin};
+use space_game::net::{DEFAULT_PORT, NetMode, NetPlugin, SimulatedLag, add_headless_plugins};
 
 fn main() {
     let mode = match parse_args(std::env::args().skip(1)) {
@@ -25,17 +24,8 @@ fn main() {
     };
     let mut app = App::new();
     if let NetMode::Server { .. } = mode {
-        app.add_plugins((
-            MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
-                1.0 / 120.0,
-            ))),
-            bevy::log::LogPlugin::default(),
-            bevy::state::app::StatesPlugin,
-            TransformPlugin,
-            AssetPlugin::default(),
-            bevy::mesh::MeshPlugin,
-            bevy::scene::ScenePlugin,
-        ));
+        add_headless_plugins(&mut app, Duration::from_secs_f64(1.0 / 120.0));
+        app.add_plugins(bevy::log::LogPlugin::default());
     } else {
         let title = match mode {
             NetMode::Client { server } => format!("space-game — {server}"),
@@ -49,7 +39,11 @@ fn main() {
             ClientPlugin,
         ));
     }
-    app.add_plugins(NetPlugin { mode }).run();
+    app.add_plugins(NetPlugin {
+        mode,
+        lag: SimulatedLag::from_env(),
+    })
+    .run();
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<NetMode, String> {

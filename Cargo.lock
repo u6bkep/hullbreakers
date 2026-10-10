@@ -4767,6 +4767,7 @@ dependencies = [
  "fixed",
  "lightyear_serde",
  "lightyear_utils",
+ "mock_instant",
  "serde",
  "tracing",
 ]
@@ -5478,6 +5479,12 @@ dependencies = [
  "wasi",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "mock_instant"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bb517913cfcfb9eeda59f36020269075a152701a01606c612f547e4890be399"
 
 [[package]]
 name = "moxcms"
@@ -7735,6 +7742,8 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "lightyear",
+ "lightyear_core",
+ "mock_instant",
  "noise",
  "rand 0.9.5",
  "rand_chacha",

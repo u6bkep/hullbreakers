@@ -6,7 +6,7 @@ First-person movement sandbox for a boarding-combat roguelite. Bevy 0.19 + Avian
 cargo run                                # host a game and play (UDP port 5888)
 cargo run -- --connect 192.168.1.20      # join a host (HOST[:PORT])
 cargo run -- --server [--port 5888]      # dedicated headless server
-cargo test                               # headless movement tests
+cargo test                               # movement, client-world and netplay tests
 SPACE_GAME_SHOTS=dir cargo run           # scripted screenshot tour, then exit
 ```
 
@@ -86,8 +86,13 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   back when the server's state differs beyond tolerance (`player_diverged`).
   The camera blends over corrections (`ViewCorrection`). Other players are
   interpolated. `SPACE_GAME_LAG=ms[,loss%]` simulates a bad link on a client;
-  clients log their rollback rate every 10 s. Measured at 100–150 ms: under
-  1 rollback/s walking, wall-walking, flying, grappling and reeling.
+  clients log their rollback rate every 10 s.
+- **Netplay tests** (`tests/netplay.rs`) run a server and a client in one
+  process over loopback UDP with 100 ms simulated latency, on lightyear's
+  mock clock (a few seconds for all of them). They measure rollback rates
+  (walking 0/s, bouncing off rocks one per contact, reeling a small rock in
+  ~2.7/s since the rock's recoil isn't predicted) and check that forcing a
+  rollback on every update changes nothing.
 - **Extrapolated bodies** (`sim/motion.rs`, `net/extrapolate.rs`): a body is
   sent as its free flight at a tick (center of mass, rotation, velocities),
   which every peer evaluates at its own tick, so clients see bodies where

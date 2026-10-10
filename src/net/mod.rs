@@ -79,13 +79,29 @@ impl NetMode {
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HostTuning(pub Tuning);
 
+/// The engine plugins a peer without a window needs (a dedicated server, or
+/// a test client). `frame` paces the main loop when the app runs itself.
+pub fn add_headless_plugins(app: &mut App, frame: Duration) {
+    app.add_plugins((
+        MinimalPlugins.set(bevy::app::ScheduleRunnerPlugin::run_loop(frame)),
+        bevy::state::app::StatesPlugin,
+        TransformPlugin,
+        AssetPlugin::default(),
+        bevy::mesh::MeshPlugin,
+        bevy::scene::ScenePlugin,
+    ));
+}
+
 pub struct NetPlugin {
     pub mode: NetMode,
+    /// Applied to what a client receives.
+    pub lag: Option<SimulatedLag>,
 }
 
 impl Plugin for NetPlugin {
     fn build(&self, app: &mut App) {
         let mode = self.mode;
+        let lag = self.lag;
         let tick = Duration::from_secs_f64(1.0 / TICK_HZ);
         if mode.is_authority() {
             app.add_plugins(ServerPlugins {
@@ -216,7 +232,7 @@ impl Plugin for NetPlugin {
             }
             NetMode::Client { server } => {
                 app.add_systems(Startup, move |mut commands: Commands| {
-                    connect(&mut commands, server);
+                    connect(&mut commands, server, lag);
                 });
             }
         }
@@ -404,7 +420,7 @@ fn start_server(commands: &mut Commands, port: u16) -> Entity {
     server
 }
 
-fn connect(commands: &mut Commands, server: SocketAddr) {
+fn connect(commands: &mut Commands, server: SocketAddr, lag: Option<SimulatedLag>) {
     let auth = Authentication::Manual {
         server_addr: server,
         client_id: rand::random(),
@@ -418,7 +434,7 @@ fn connect(commands: &mut Commands, server: SocketAddr) {
             ReplicationReceiver,
             LocalAddr(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)),
             PeerAddr(server),
-            Link::default().with_conditioner(simulated_lag()),
+            Link::default().with_conditioner(lag.map(SimulatedLag::conditioner)),
             NetcodeClient::new(
                 auth,
                 lightyear::netcode::client_plugin::NetcodeConfig::default(),
@@ -430,20 +446,37 @@ fn connect(commands: &mut Commands, server: SocketAddr) {
     commands.trigger(Connect { entity: client });
 }
 
-/// `SPACE_GAME_LAG=ms[,loss%]` delays (±10% jitter) and drops what a client
-/// receives, to test prediction against a bad link.
-fn simulated_lag() -> Option<RecvLinkConditioner> {
-    let spec = std::env::var("SPACE_GAME_LAG").ok()?;
-    let mut parts = spec.split(',');
-    let ms: u64 = parts.next()?.trim().parse().ok()?;
-    let loss: f32 = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0.0);
-    info!("simulating {ms} ms latency, {loss}% loss on receive");
-    Some(RecvLinkConditioner::new(LinkConditionerConfig {
-        incoming_latency: Duration::from_millis(ms),
-        incoming_jitter: Duration::from_millis(ms / 10),
-        good_loss: loss / 100.0,
-        ..default()
-    }))
+/// A simulated bad link: what a client receives is delayed (±10% jitter)
+/// and some of it lost. For testing prediction.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SimulatedLag {
+    pub latency_ms: u64,
+    pub loss_percent: f32,
+}
+
+impl SimulatedLag {
+    /// From `SPACE_GAME_LAG=ms[,loss%]`.
+    pub fn from_env() -> Option<Self> {
+        let spec = std::env::var("SPACE_GAME_LAG").ok()?;
+        let mut parts = spec.split(',');
+        Some(Self {
+            latency_ms: parts.next()?.trim().parse().ok()?,
+            loss_percent: parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0.0),
+        })
+    }
+
+    fn conditioner(self) -> RecvLinkConditioner {
+        info!(
+            "simulating {} ms latency, {}% loss on receive",
+            self.latency_ms, self.loss_percent
+        );
+        RecvLinkConditioner::new(LinkConditionerConfig {
+            incoming_latency: Duration::from_millis(self.latency_ms),
+            incoming_jitter: Duration::from_millis(self.latency_ms / 10),
+            good_loss: self.loss_percent / 100.0,
+            ..default()
+        })
+    }
 }
 
 /// Client: how often prediction was wrong, every 10 s.
@@ -598,11 +631,16 @@ fn hand_rollback_to_camera(
     player: Query<&Player, With<LocalPlayer>>,
     bodies: Bodies,
     tuning: Res<Tuning>,
-    mut correction: ResMut<crate::client::ViewCorrection>,
+    // Absent in a headless client (tests).
+    correction: Option<ResMut<crate::client::ViewCorrection>>,
 ) {
     if metrics.rollbacks == before.rollbacks {
         return;
     }
+    let Some(mut correction) = correction else {
+        before.rollbacks = metrics.rollbacks;
+        return;
+    };
     before.rollbacks = metrics.rollbacks;
     let (Some(old), Ok(new)) = (before.mode, player.single()) else {
         return;
