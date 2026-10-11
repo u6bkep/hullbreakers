@@ -963,7 +963,7 @@ fn control_under_crosshair(
 /// Distance along a ray (`origin` relative to the box center, `dir` unit) to
 /// where it enters an axis-aligned box of `half` extents; zero if it starts
 /// inside.
-fn ray_box(origin: Vec3, dir: Vec3, half: Vec3) -> Option<f32> {
+pub fn ray_box(origin: Vec3, dir: Vec3, half: Vec3) -> Option<f32> {
     let (mut near, mut far) = (0.0f32, f32::MAX);
     for axis in 0..3 {
         let (o, d, h) = (origin[axis], dir[axis], half[axis]);

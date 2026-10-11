@@ -247,7 +247,7 @@ fn control_prompt(
         .iter()
         .filter_map(|(control, transform, ship)| {
             let frame = bodies.frame(ship.parent())?;
-            let t = ray_box(
+            let t = crate::sim::player::ray_box(
                 frame.point_to_local(eye) - transform.translation,
                 frame.dir_to_local(*dir),
                 control.half_size,
@@ -256,26 +256,6 @@ fn control_prompt(
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, label)| label)
-}
-
-/// Distance along a ray (`origin` relative to the box center, `dir` unit) to
-/// where it enters an axis-aligned box of `half` extents; zero if inside.
-/// The same slab test the sim uses to pick buttons.
-fn ray_box(origin: Vec3, dir: Vec3, half: Vec3) -> Option<f32> {
-    let (mut near, mut far) = (0.0f32, f32::MAX);
-    for axis in 0..3 {
-        let (o, d, h) = (origin[axis], dir[axis], half[axis]);
-        if d.abs() < 1e-9 {
-            if o.abs() > h {
-                return None;
-            }
-            continue;
-        }
-        let (a, b) = ((-h - o) / d, (h - o) / d);
-        near = near.max(a.min(b));
-        far = far.min(a.max(b));
-    }
-    (near <= far).then_some(near)
 }
 
 /// Player position and velocity relative to the reference body, in world axes.
