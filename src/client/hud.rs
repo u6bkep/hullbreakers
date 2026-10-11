@@ -13,7 +13,7 @@ use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
 use crate::sim::mission::{Mission, Phase, ScenarioKind};
 use crate::sim::player::{CONTROL_REACH, Mode, Player};
-use crate::sim::ship::{Control, HomeShip, ShipCommand};
+use crate::sim::ship::{Control, HomeShip, HullKind, ShipCommand, ShipHull};
 use crate::sim::{Layer, SimTick, TICK_HZ};
 use crate::sim::tuning::{TUNING_PATH, Tuning};
 
@@ -270,6 +270,77 @@ fn relative_motion(player: &Player, bodies: &Bodies, tuning: &Tuning) -> Option<
         tuning.match_surface_far,
     )?;
     Some((position, velocity - matched))
+}
+
+/// Every ship, always marked: a diamond with its name and range, or an arrow
+/// at the screen edge when it's off screen, so nobody loses the fight (or
+/// the way home) among the rocks. The ship you're standing on isn't marked.
+pub fn ship_markers(
+    mut contexts: EguiContexts,
+    player: Single<&Player, With<LocalPlayer>>,
+    ships: Query<(Entity, &ShipHull, &Transform, &Visibility)>,
+    camera: Single<(&Camera, &Transform), With<PlayerCamera>>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let (camera, cam) = *camera;
+    let global = GlobalTransform::from(*cam);
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Background,
+        egui::Id::new("ship markers"),
+    ));
+    let screen = ctx.content_rect();
+    let font = egui::FontId::monospace(13.0);
+    for (entity, hull, transform, visibility) in &ships {
+        if player.mode.body() == Some(entity) || *visibility == Visibility::Hidden {
+            continue;
+        }
+        let (name, color) = match hull.0 {
+            HullKind::Home => ("SHIP", egui::Color32::from_rgb(110, 230, 160)),
+            HullKind::Raider => ("RAIDER", egui::Color32::from_rgb(255, 95, 80)),
+        };
+        // The middle of the hull.
+        let center = transform.translation + transform.rotation * Vec3::new(0.0, 1.5, 0.0);
+        let offset = center - cam.translation;
+        let label = format!("{name}  {:.0} m", offset.length());
+        let local = cam.rotation.inverse() * offset;
+        let on_screen = (local.z < -0.1)
+            .then(|| camera.world_to_viewport(&global, center).ok())
+            .flatten()
+            .map(|p| egui::pos2(p.x, p.y))
+            .filter(|p| screen.shrink(24.0).contains(*p));
+        if let Some(p) = on_screen {
+            let r = 7.0;
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p + egui::vec2(0.0, -r),
+                    p + egui::vec2(r, 0.0),
+                    p + egui::vec2(0.0, r),
+                    p + egui::vec2(-r, 0.0),
+                ],
+                egui::Stroke::new(2.0, color),
+            ));
+            painter.text(p + egui::vec2(0.0, -r - 3.0), egui::Align2::CENTER_BOTTOM, label, font.clone(), color);
+        } else {
+            // At the edge of the screen, toward it.
+            let dir = egui::vec2(local.x, -local.y).normalized();
+            let half = screen.size() / 2.0 - egui::vec2(28.0, 28.0);
+            let scale = (half.x / dir.x.abs().max(1e-3)).min(half.y / dir.y.abs().max(1e-3));
+            let tip = screen.center() + dir * scale;
+            let side = egui::vec2(-dir.y, dir.x);
+            painter.add(egui::Shape::convex_polygon(
+                vec![tip, tip - dir * 12.0 + side * 7.0, tip - dir * 12.0 - side * 7.0],
+                color,
+                egui::Stroke::NONE,
+            ));
+            let along = |v: f32| match v {
+                v if v > 0.3 => egui::Align::Max,
+                v if v < -0.3 => egui::Align::Min,
+                _ => egui::Align::Center,
+            };
+            painter.text(tip - dir * 18.0, egui::Align2([along(dir.x), along(dir.y)]), label, font.clone(), color);
+        }
+    }
+    Ok(())
 }
 
 const REFERENCE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 190, 70);

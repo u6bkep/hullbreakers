@@ -169,10 +169,45 @@ pub fn spawn_field(commands: &mut Commands, tuning: &Tuning) {
             true,
             (-FIELD_LENGTH / 2.0, FIELD_LENGTH / 2.0),
         );
-        spawn_rock(commands, &mut field, radius, position, tuning.field_speed);
+        let (linear, angular) = drift(&mut field.rng, tuning.field_speed);
+        spawn_rock(commands, &mut field, radius, position, linear, angular);
     }
     commands.insert_resource(field);
     commands.insert_resource(AppliedFieldSpeed(tuning.field_speed));
+}
+
+/// Rocks scattered around a battle, at rest and slowly turning, kept clear
+/// of where the ships fly. Each is placed near one of `near` (points the
+/// ships pass through) so the rocks are where the crew needs handholds;
+/// `clear` says whether a rock of some radius at some point is out of the
+/// ships' way.
+pub fn spawn_battlefield(
+    commands: &mut Commands,
+    near: &[Vec3],
+    count: usize,
+    clear: impl Fn(Vec3, f32) -> bool,
+) {
+    let mut field = FieldRng {
+        rng: ChaCha8Rng::seed_from_u64(0xba77_1e),
+        next: 0,
+    };
+    let mut placed = 0;
+    // Bounded, in case the ships leave little room.
+    for _ in 0..count * 20 {
+        if placed == count {
+            break;
+        }
+        let rng = &mut field.rng;
+        let radius = random_radius(rng);
+        let around = near[rng.random_range(0..near.len())];
+        let position = around + random_unit(rng) * rng.random_range(30.0..260.0);
+        if !clear(position, radius) {
+            continue;
+        }
+        let angular = random_unit(rng) * rng.random_range(0.0..0.2);
+        spawn_rock(commands, &mut field, radius, position, Vec3::ZERO, angular);
+        placed += 1;
+    }
 }
 
 fn spawn_rock(
@@ -180,10 +215,10 @@ fn spawn_rock(
     field: &mut FieldRng,
     radius: f32,
     position: Vec3,
-    field_speed: f32,
+    linear: Vec3,
+    angular: Vec3,
 ) {
     let rng = &mut field.rng;
-    let (linear, angular) = drift(rng, field_speed);
     let rotation = Quat::from_scaled_axis(random_unit(rng) * rng.random_range(0.0..3.14));
     commands.spawn((
         Name::new(format!("Asteroid {}", field.next)),
@@ -283,12 +318,7 @@ pub fn recycle_field(
             }
         }
         commands.entity(entity).despawn();
-        spawn_rock(
-            &mut commands,
-            &mut field,
-            rock.radius,
-            candidate,
-            tuning.field_speed,
-        );
+        let (linear, angular) = drift(&mut field.rng, tuning.field_speed);
+        spawn_rock(&mut commands, &mut field, rock.radius, candidate, linear, angular);
     }
 }

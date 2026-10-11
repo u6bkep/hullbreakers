@@ -97,7 +97,7 @@ impl Plugin for ClientPlugin {
                 )
                     .in_set(Present),
             )
-            .add_systems(EguiPrimaryContextPass, (hud::reference_overlay, hud::hud, hud::mission_hud));
+            .add_systems(EguiPrimaryContextPass, (hud::ship_markers, hud::reference_overlay, hud::hud, hud::mission_hud));
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
                 .add_systems(Update, debug_shots::run_shot_script);

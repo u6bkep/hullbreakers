@@ -113,6 +113,12 @@ live (decided 2026-10-10).
 - Ship-to-ship combat where the guns are slow and boarding is the fast way
   to win (the first scenario).
 
+### Battlefield
+
+- **Rocks as cover.** Beams currently pass through the battlefield's rocks.
+  If rocks blocked beams, a ship could hide behind one, and the crew could
+  rope a rock into the line of fire (or out of it).
+
 ### Talking
 
 - Short-range suit radio, plus clearer audio through shared structure.

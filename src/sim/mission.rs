@@ -325,19 +325,54 @@ pub fn switch_scenario(
     }
 }
 
+/// Rocks around a battle.
+const BATTLE_ROCKS: usize = 320;
+/// How far (m) a rock's surface keeps from where a ship's origin passes: a
+/// ship's half-length and some.
+const SHIP_CLEARANCE: f32 = 40.0;
+/// The ships' paths are sampled every half second for ten minutes when
+/// placing rocks.
+const SAMPLE_TICKS: u32 = TICK_HZ as u32 / 2;
+const BATTLE_SAMPLES: u32 = 1200;
+
 /// Two ships in a duel: ours, and a raider weaving in and out around it.
 /// Returns ours.
 fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32) -> Entity {
     let duel = Duel {
         center: Vec3::ZERO,
-        radius: 250.0,
-        lap: 100.0,
-        bob: 15.0,
+        radius: 300.0,
+        lap: 120.0,
+        bob: 20.0,
         near: tuning.duel_near,
         far: tuning.duel_far,
         pass: tuning.duel_pass_seconds,
-        sweep: 90.0,
+        sweep: 150.0,
     };
+    let (orbit, weave) = (
+        Flight {
+            start: tick,
+            path: Path::Orbit(duel),
+            shaken: true,
+        },
+        Flight {
+            start: tick,
+            path: Path::Weave(duel),
+            shaken: true,
+        },
+    );
+    // Rocks among the fight, for the crew to swing between, clear of
+    // everywhere either ship goes for longer than any fight lasts.
+    let swept: Vec<Vec3> = (0..BATTLE_SAMPLES)
+        .flat_map(|i| {
+            let at = tick + i * SAMPLE_TICKS;
+            [orbit.pose(at, 0.0).0, weave.pose(at, 0.0).0]
+        })
+        .collect();
+    let near: Vec<Vec3> = swept.iter().step_by(7).copied().collect();
+    asteroids::spawn_battlefield(commands, &near, BATTLE_ROCKS, |at, radius| {
+        let keep_out = radius + SHIP_CLEARANCE;
+        swept.iter().all(|p| p.distance_squared(at) > keep_out * keep_out)
+    });
     let flying = |flight: Flight| {
         let frame = flight.frame(tick, Vec3::ZERO);
         (
@@ -355,22 +390,14 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32) -> Entity {
             Name::new("Ship"),
             HomeShip,
             ShipHull(HullKind::Home),
-            flying(Flight {
-                start: tick,
-                path: Path::Orbit(duel),
-                shaken: true,
-            }),
+            flying(orbit),
         ))
         .id();
     let raider = commands
         .spawn((
             Name::new("Raider"),
             ShipHull(HullKind::Raider),
-            flying(Flight {
-                start: tick,
-                path: Path::Weave(duel),
-                shaken: true,
-            }),
+            flying(weave),
             Combatant {
                 target: Some(home),
                 integrity: 1.0,

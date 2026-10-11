@@ -135,9 +135,11 @@ fn the_mission_wall_starts_a_boarding_action() {
     let p = player(&mut app);
     assert_eq!(p.mode.body(), Some(new_home), "not put back aboard");
     assert!(p.events.iter().any(|(_, e)| e == PlayerEvent::Respawned));
-    // Both ships fly their duel.
+    // Both ships fly their duel, among rocks.
     let world = app.world_mut();
     assert_eq!(world.query::<&Flight>().iter(world).count(), 2);
+    let rocks = world.query::<&hullbreakers::sim::asteroids::Asteroid>().iter(world).count();
+    assert!(rocks > 250, "only {rocks} rocks");
 }
 
 #[test]
@@ -284,8 +286,9 @@ fn frame(app: &mut App, ship: Entity) -> hullbreakers::sim::frame::BodyFrame {
 fn a_player_can_cross_to_the_raider() {
     let mut app = app();
     start_boarding(&mut app);
-    // Halfway to the first close pass.
-    ticks(&mut app, 12 * 60);
+    // Coming up on the first close pass (half a pass in).
+    let pass = Tuning::default().duel_pass_seconds;
+    ticks(&mut app, (pass * 0.45 * 60.0) as usize);
     let raider = ship_of(&mut app, HullKind::Raider).unwrap();
     let home = home(&mut app);
     let ours = frame(&mut app, home);
