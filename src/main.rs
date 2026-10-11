@@ -6,12 +6,16 @@
 //! space_game --server            host without playing (headless)
 //! space_game --port PORT         port to host on (default 5888)
 //! ```
+//!
+//! `SPACE_GAME_SCENARIO=boarding` starts a host in the boarding action
+//! rather than the asteroid field.
 
 use std::net::{SocketAddr, ToSocketAddrs};
 use core::time::Duration;
 
 use bevy::prelude::*;
 use space_game::client::ClientPlugin;
+use space_game::sim::mission::{Director, ScenarioKind};
 use space_game::net::{DEFAULT_PORT, NetMode, NetPlugin, SimulatedLag, add_headless_plugins};
 
 fn main() {
@@ -42,8 +46,22 @@ fn main() {
     app.add_plugins(NetPlugin {
         mode,
         lag: SimulatedLag::from_env(),
-    })
-    .run();
+    });
+    // `SPACE_GAME_SCENARIO=boarding`: start there instead of the field.
+    if let Ok(name) = std::env::var("SPACE_GAME_SCENARIO") {
+        let kind = match name.as_str() {
+            "field" => ScenarioKind::Field,
+            "boarding" => ScenarioKind::Boarding,
+            other => {
+                eprintln!("space_game: unknown scenario {other:?} (field, boarding)");
+                std::process::exit(2);
+            }
+        };
+        if let Some(mut director) = app.world_mut().get_resource_mut::<Director>() {
+            director.start(kind);
+        }
+    }
+    app.run();
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<NetMode, String> {
