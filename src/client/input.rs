@@ -111,6 +111,7 @@ pub fn read_input(
     {
         if held.started(&bindings, action) {
             cmd.stance = i as u8;
+            cmd.presses.stance.press();
         }
     }
     cmd.add_look(motion.delta * tuning.mouse_sensitivity);

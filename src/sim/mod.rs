@@ -14,6 +14,7 @@ pub mod frame;
 pub mod input;
 pub mod mission;
 pub mod motion;
+pub mod pickups;
 pub mod player;
 pub mod rope;
 pub mod ship;
@@ -204,6 +205,7 @@ impl Plugin for SimPlugin {
                     shots::fly_shots,
                     vitals::beam_burns,
                     vitals::apply_damage,
+                    pickups::remove_taken,
                     vitals::settle_deaths,
                     bots::settle_robot_deaths,
                     mission::handle_presses,

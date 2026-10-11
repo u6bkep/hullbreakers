@@ -234,7 +234,7 @@ fn grappling_and_reeling_a_light_rock() {
     let start = rock_at + rotation * Vec3::new(-15.0, -eye_above_center, 0.0);
     s.teleport(start, Vec3::ZERO, rotation * Vec3::X);
     s.step(60);
-    s.input().0.presses.off.press();
+    s.input().0.presses.main.press();
     s.step(30);
     let grappled = s.local_player().unwrap().grapple.is_some();
     s.input().0.reel_in = true;
@@ -316,10 +316,21 @@ fn shooting_is_predicted() {
     use hullbreakers::sim::events::PlayerEvent;
     let (_guard, mut s) = session(100);
     s.step(60);
+    // Armed as at the weapons locker. (The locker arms a player in their
+    // own simulation, which on a client is its prediction; so both copies.)
+    for world in [s.server.world_mut(), s.client.world_mut()] {
+        for mut p in world.query::<&mut Player>().iter_mut(world) {
+            p.loadout.arm_fully();
+        }
+    }
+    s.step(60);
+    s.input().0.stance = 0;
+    s.input().0.presses.stance.press();
     s.input().0.main.held = true;
     let firing = s.rollback_rate(120);
     s.input().0.main.held = false;
     s.input().0.stance = 2;
+    s.input().0.presses.stance.press();
     s.input().0.presses.reload.press();
     let switching = s.rollback_rate(120);
     s.input().0.main.held = true;

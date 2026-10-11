@@ -75,6 +75,7 @@ impl Plugin for ClientPlugin {
                     camera::spawn_camera,
                     render::setup_lighting,
                     render::setup_dust,
+                    render::setup_pickup_look,
                     weapons_fx::setup_weapon_fx,
                     sfx::setup_sounds,
                 ),
@@ -89,6 +90,7 @@ impl Plugin for ClientPlugin {
                 PostUpdate,
                 (
                     render::update_avatars,
+                    render::draw_pickups,
                     animate::rig_robots,
                     animate::animate_robots,
                     camera::update_camera,

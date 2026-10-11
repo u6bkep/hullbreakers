@@ -969,7 +969,7 @@ enum ButtonStyle {
 impl ButtonStyle {
     fn of(action: ControlAction) -> Self {
         match action {
-            ControlAction::Scenario(_) => ButtonStyle::Go,
+            ControlAction::Scenario(_) | ControlAction::Armory => ButtonStyle::Go,
             ControlAction::Lurch => ButtonStyle::Hazard,
             ControlAction::DisableShields => ButtonStyle::Danger,
         }

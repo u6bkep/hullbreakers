@@ -26,7 +26,9 @@ use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
 use super::combat::{Beams, beam_shove};
 use super::bots::{BodyTuning, Robot, tuning_of};
-use super::weapons::{Loadout, ShotOut};
+use super::pickups::{PICKUP_HALF, Pickup};
+use super::ship::ControlAction;
+use super::weapons::{Gun, Loadout, ShotOut};
 use super::rope::{RopeEnd, solve_rope};
 use super::ship::Control;
 use super::tuning::Tuning;
@@ -222,9 +224,9 @@ impl Player {
         self.grapple = None;
         self.reference_body = Some(ship);
         self.detach_timer = 0.0;
-        // A fresh kit. (What was carried before stays behind, once there's
-        // anything to pick up.)
-        self.loadout = Loadout::default();
+        // The base kit: guns are in the weapons locker (and whatever was
+        // carried before was left where it was dropped).
+        self.loadout = Loadout::base();
         self.emit(PlayerEvent::Respawned);
     }
 
@@ -367,7 +369,7 @@ pub fn new_player(ship: Entity, index: u32) -> impl Bundle {
             grapple: None,
             reference_body: Some(ship),
             detach_timer: 0.0,
-            loadout: Loadout::default(),
+            loadout: Loadout::base(),
             input: InputCursor::default(),
             events: EventLog::default(),
         },
@@ -511,6 +513,9 @@ struct TickContext<'a, 'w, 's> {
     players: &'a [PlayerPoint],
     /// Every button on every ship.
     controls: &'a [ControlPoint],
+    /// Everything lying about to pick up: where, how it's turned, and what's
+    /// in it.
+    pickups: &'a [(Entity, Vec3, Quat, Vec<Gun>)],
     /// Every laser beam firing this tick.
     beams: &'a Beams,
 }
@@ -776,6 +781,7 @@ pub fn player_tick(
     mut bodies: Bodies,
     mut players: Query<PlayerQuery>,
     controls: Query<(&Control, &Transform, &ChildOf)>,
+    pickups: Query<(Entity, &Pickup)>,
 ) {
     let controls: Vec<ControlPoint> = controls
         .iter()
@@ -783,6 +789,13 @@ pub fn player_tick(
             body: ship.parent(),
             control: *control,
             center: transform.translation,
+        })
+        .collect();
+    let pickups: Vec<(Entity, Vec3, Quat, Vec<Gun>)> = pickups
+        .iter()
+        .filter_map(|(entity, p)| {
+            let (at, turn) = p.sim_pose(&bodies, tick.0)?;
+            Some((entity, at, turn, p.guns.clone()))
         })
         .collect();
     // Every player, simulated here or not, can be aimed at and tied to.
@@ -806,6 +819,7 @@ pub fn player_tick(
         filter: SpatialQueryFilter::from_mask(super::Layer::World),
         players: &points,
         controls: &controls,
+        pickups: &pickups,
         beams: &beams,
     };
     if ctx.dt <= 0.0 {
@@ -843,13 +857,28 @@ pub fn player_tick(
         // Recorded after look so the camera interpolates movement only; look
         // is applied immediately (see `update_camera`).
         previous.0 = player.mode;
-        if cmd.interact
-            && let Some(control) = control_under_crosshair(&ctx, &bodies, entity, player)
-        {
-            player.emit(PlayerEvent::Pressed {
-                body: control.body,
-                action: control.control.action,
-            });
+        if cmd.interact {
+            // The nearest of a button or a pickup under the crosshair.
+            let control = control_under_crosshair(&ctx, &bodies, entity, player);
+            let pickup = pickup_under_crosshair(&ctx, &bodies, entity, player);
+            match (control, pickup) {
+                (Some((t, control)), pickup) if pickup.is_none_or(|(u, _)| t <= u) => {
+                    // The weapons locker arms whoever opens it, at once.
+                    if control.control.action == ControlAction::Armory {
+                        player.loadout.arm_fully();
+                    }
+                    player.emit(PlayerEvent::Pressed {
+                        body: control.body,
+                        action: control.control.action,
+                    });
+                }
+                (_, Some((_, i))) => {
+                    let (pickup, _, _, guns) = &ctx.pickups[i];
+                    player.loadout.take(guns);
+                    player.emit(PlayerEvent::PickedUp { pickup: *pickup });
+                }
+                _ => {}
+            }
         }
         let hands = player.loadout.tick(&cmd, ctx.dt);
         if hands.grapple_trigger {
@@ -973,12 +1002,33 @@ fn aim(
 
 /// The button under the crosshair, if one is within reach and nothing is in
 /// front of it.
+/// The pickup under the crosshair within reach, if nothing's in front of
+/// it: how far, and which (an index into the context's pickups).
+fn pickup_under_crosshair(ctx: &TickContext, bodies: &Bodies, entity: Entity, player: &Player) -> Option<(f32, usize)> {
+    let frame = player.mode.body().and_then(|b| bodies.frame(b));
+    let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
+    let dir = view * Vec3::NEG_Z;
+    let blocked = ctx
+        .mas
+        .spatial_query
+        .cast_ray(eye, Dir3::new(dir).ok()?, CONTROL_REACH, true, &ctx.filter.clone().with_excluded_entities([entity]))
+        .map_or(f32::MAX, |hit| hit.distance + 0.25);
+    ctx.pickups
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_, at, turn, _))| {
+            let t = ray_box(turn.inverse() * (eye - *at), turn.inverse() * dir, PICKUP_HALF)?;
+            (t <= CONTROL_REACH && t <= blocked).then_some((t, i))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+}
+
 fn control_under_crosshair(
     ctx: &TickContext,
     bodies: &Bodies,
     entity: Entity,
     player: &Player,
-) -> Option<ControlPoint> {
+) -> Option<(f32, ControlPoint)> {
     let frame = player.mode.body().and_then(|b| bodies.frame(b));
     let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
     let dir = view * Vec3::NEG_Z;
@@ -1001,7 +1051,6 @@ fn control_under_crosshair(
             (t <= CONTROL_REACH && t <= blocked).then_some((t, *c))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, c)| c)
 }
 
 /// Distance along a ray (`origin` relative to the box center, `dir` unit) to

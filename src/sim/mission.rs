@@ -167,6 +167,8 @@ pub fn handle_presses(
                 ControlAction::Lurch => {
                     orders.write(ShipCommand::Lurch);
                 }
+                // The player's own simulation armed them already.
+                ControlAction::Armory => {}
                 ControlAction::DisableShields => {
                     if let Ok(mut ship) = ships.get_mut(body)
                         && ship.shield
@@ -282,7 +284,14 @@ pub fn switch_scenario(
     mut commands: Commands,
     old_world: Query<
         Entity,
-        Or<(With<ShipHull>, With<Asteroid>, With<Debris>, With<GalleryAnchor>, With<Robot>)>,
+        Or<(
+            With<ShipHull>,
+            With<Asteroid>,
+            With<Debris>,
+            With<GalleryAnchor>,
+            With<Robot>,
+            With<super::pickups::Pickup>,
+        )>,
     >,
     homes: Query<(), With<HomeShip>>,
     mut mission: Single<&mut Mission>,

@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::SimTick;
 use super::events::PlayerEvent;
 use super::bots::Robot;
-use super::player::{DeckSlot, Player};
+use super::pickups::{PICKUP_HALF, Pickup};
+use super::player::{DeckSlot, Mode, Player};
 use super::ship::HomeShip;
 use super::tuning::Tuning;
 
@@ -142,9 +143,11 @@ pub fn apply_damage(
 /// Authority: a player out of health dies, and comes back aboard the home
 /// ship. (If there is no home ship just now, they wait for one.)
 pub fn settle_deaths(
+    tick: Res<SimTick>,
     tuning: Res<Tuning>,
     home: Option<Single<Entity, With<HomeShip>>>,
     mut players: Query<(&mut Player, &mut Vitals, &DeckSlot)>,
+    mut commands: Commands,
 ) {
     let Some(home) = home else {
         return;
@@ -152,6 +155,25 @@ pub fn settle_deaths(
     for (mut player, mut vitals, slot) in &mut players {
         if vitals.health > 0.0 {
             continue;
+        }
+        // What they carried stays where they fell: on the deck under them,
+        // or adrift on their last velocity.
+        let guns = player.loadout.carried();
+        if !guns.is_empty() {
+            let (body, at, velocity) = match player.mode {
+                Mode::Booted { body, feet, up, .. } => (Some(body), feet + up * PICKUP_HALF.y, Vec3::ZERO),
+                Mode::Eva { position, velocity, .. } => (None, position, velocity),
+            };
+            commands.spawn((
+                Name::new("Dropped kit"),
+                Pickup {
+                    body,
+                    at,
+                    velocity,
+                    since: tick.0,
+                    guns,
+                },
+            ));
         }
         player.events.push(PlayerEvent::Died);
         player.respawn(*home, slot.0);

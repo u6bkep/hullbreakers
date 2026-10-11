@@ -11,6 +11,7 @@ use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
 use super::input::MouseCaptured;
 use crate::sim::bots::{Robot, SpawnRobots};
+use crate::sim::pickups::{PICKUP_HALF, Pickup};
 use crate::sim::vitals::{Hit, HitLog, Vitals};
 use crate::sim::weapons::{Hand, Slot};
 use crate::sim::bodies::Bodies;
@@ -41,6 +42,7 @@ pub fn hud(
     camera: Single<&Transform, With<PlayerCamera>>,
     spatial: SpatialQuery,
     controls: Query<(&Control, &Transform, &ChildOf)>,
+    pickups: Query<(&Pickup, &Transform)>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let (own, player) = *player;
@@ -75,7 +77,7 @@ pub fn hud(
             )
         });
     // A button under the crosshair wins over the grapple readout.
-    let prompt = control_prompt(&camera, own, &spatial, &bodies, &controls);
+    let prompt = control_prompt(&camera, own, &spatial, &bodies, &controls, &pickups);
     if let Some(label) = prompt {
         let cyan = INK;
         painter.circle_stroke(center, 11.0, egui::Stroke::new(1.5, cyan));
@@ -244,7 +246,8 @@ fn control_prompt(
     spatial: &SpatialQuery,
     bodies: &Bodies,
     controls: &Query<(&Control, &Transform, &ChildOf)>,
-) -> Option<&'static str> {
+    pickups: &Query<(&Pickup, &Transform)>,
+) -> Option<String> {
     let dir = Dir3::new(camera.rotation * Vec3::NEG_Z).ok()?;
     let eye = camera.translation;
     let blocked = spatial
@@ -256,17 +259,25 @@ fn control_prompt(
             &SpatialQueryFilter::from_mask(Layer::World).with_excluded_entities([own]),
         )
         .map_or(f32::MAX, |hit| hit.distance + 0.15);
-    controls
-        .iter()
-        .filter_map(|(control, transform, ship)| {
-            let frame = bodies.frame(ship.parent())?;
-            let t = crate::sim::player::ray_box(
-                frame.point_to_local(eye) - transform.translation,
-                frame.dir_to_local(*dir),
-                control.half_size,
-            )?;
-            (t <= CONTROL_REACH && t <= blocked).then_some((t, control.action.label()))
-        })
+    let buttons = controls.iter().filter_map(|(control, transform, ship)| {
+        let frame = bodies.frame(ship.parent())?;
+        let t = crate::sim::player::ray_box(
+            frame.point_to_local(eye) - transform.translation,
+            frame.dir_to_local(*dir),
+            control.half_size,
+        )?;
+        (t <= CONTROL_REACH && t <= blocked).then(|| (t, control.action.label().to_string()))
+    });
+    // Pickups sit in the open, a little further than a wall behind them.
+    let blocked = blocked + 0.1;
+    let cases = pickups.iter().filter_map(|(pickup, transform)| {
+        let turn = transform.rotation.inverse();
+        let t = crate::sim::player::ray_box(turn * (eye - transform.translation), turn * *dir, PICKUP_HALF)?;
+        let names: Vec<&str> = pickup.guns.iter().map(|g| g.kind.stats().name).collect();
+        (t <= CONTROL_REACH && t <= blocked).then(|| (t, format!("Pick up: {}", names.join(", "))))
+    });
+    buttons
+        .chain(cases)
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, label)| label)
 }
@@ -773,7 +784,8 @@ pub fn loadout_hud(
         Slot::Gun(i) => loadout
             .guns
             .get(i as usize)
-            .map_or("?".into(), |g| g.kind.stats().name.to_string()),
+            .filter(|g| g.carried)
+            .map_or("—".into(), |g| g.kind.stats().name.to_string()),
     };
     let mut y = screen.max.y - 24.0;
     let x = screen.max.x - 16.0;

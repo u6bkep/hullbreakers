@@ -175,6 +175,7 @@ pub fn new_robot(kind: Robot, mode: Mode, home: Entity, post: Vec3, base: &Tunin
             reserve: u16::MAX,
             ..Gun::full(kind.gun())
         }],
+        current: 0,
         stances: [Stance {
             main: gun,
             off: Slot::Empty,

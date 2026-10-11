@@ -42,6 +42,8 @@ pub struct Presses {
     pub reload: Press,
     pub reload_main: Press,
     pub reload_off: Press,
+    /// A stance key (which one is [`PlayerInput::stance`]).
+    pub stance: Press,
     /// Press the control under the crosshair.
     pub interact: Press,
     /// Make the body under the crosshair the reference frame.
@@ -67,7 +69,8 @@ pub struct PlayerInput {
     /// What's held on each hand's buttons.
     pub main: HandHeld,
     pub off: HandHeld,
-    /// The stance asked for (0-based).
+    /// The stance last asked for (0-based); it's taken up when
+    /// `presses.stance` counts a new press.
     pub stance: u8,
     pub presses: Presses,
 }
@@ -133,6 +136,7 @@ pub struct TickInput {
     pub reload_main: bool,
     pub reload_off: bool,
     pub stance: u8,
+    pub stance_pressed: bool,
     pub interact: bool,
     pub set_reference: bool,
 }
@@ -183,6 +187,7 @@ impl InputCursor {
             reload_main: p.reload_main.since(seen.reload_main),
             reload_off: p.reload_off.since(seen.reload_off),
             stance: input.stance,
+            stance_pressed: p.stance.since(seen.stance),
             interact: p.interact.since(seen.interact),
             set_reference: p.set_reference.since(seen.set_reference),
         };

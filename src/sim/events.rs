@@ -78,6 +78,10 @@ pub enum PlayerEvent {
     BeamHit,
     /// Ran out of health (a respawn follows).
     Died,
+    /// Took what was in a pickup.
+    PickedUp {
+        pickup: Entity,
+    },
     /// A shot left a gun: from `origin` (the eye), at `velocity`.
     Fired {
         hand: Hand,
@@ -131,6 +135,7 @@ impl PlayerEvent {
             PlayerEvent::BeamHit => "caught in a laser beam".into(),
             PlayerEvent::Died => "killed".into(),
             PlayerEvent::Fired { .. } => return None,
+            PlayerEvent::PickedUp { .. } => "picked up".into(),
         })
     }
 }
@@ -144,6 +149,7 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::BodyChanged { body }
             | PlayerEvent::GrappleAttached { body, .. }
             | PlayerEvent::Pressed { body, .. } => *body = mapper.get_mapped(*body),
+            PlayerEvent::PickedUp { pickup } => *pickup = mapper.get_mapped(*pickup),
             PlayerEvent::Detached(_)
             | PlayerEvent::GrappleMissed
             | PlayerEvent::GrappleReleased

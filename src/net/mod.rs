@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sim::asteroids::Asteroid;
 use crate::sim::bots::Robot;
+use crate::sim::pickups::Pickup;
 use crate::sim::combat::Combatant;
 use crate::sim::vitals::{HitLog, Vitals};
 use crate::sim::flight::Flight;
@@ -157,6 +158,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_mission)
             .add_observer(replicate_gallery)
             .add_observer(replicate_robot)
+            .add_observer(replicate_pickup)
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players))
             .add_systems(
@@ -265,6 +267,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
         app.component::<Robot>().replicate_once();
+        app.component::<Pickup>().replicate();
         app.component::<Flight>().replicate();
         app.component::<Combatant>().replicate();
         app.component::<Vitals>().replicate();
@@ -611,6 +614,13 @@ fn replicate_robot(add: On<Add, Robot>, mut commands: Commands) {
         Replicate::to_clients(NetworkTarget::All),
         InterpolationTarget::to_clients(NetworkTarget::AllExcept([HOST_PEER].into_iter().collect())),
     ));
+}
+
+/// Pickups reach clients as their description (see `sim::pickups`).
+fn replicate_pickup(add: On<Add, Pickup>, mut commands: Commands) {
+    commands
+        .entity(add.entity)
+        .insert(Replicate::to_clients(NetworkTarget::All));
 }
 
 fn spawn_host_tuning(mut commands: Commands, tuning: Res<Tuning>) {

@@ -64,7 +64,11 @@ fn eva_at(position: Vec3) -> Mode {
 fn float_shooter(app: &mut App) -> Entity {
     let me = shooter(app);
     set_mode(app, me, eva_at(Vec3::new(0.0, 0.0, 200.0)));
-    app.world_mut().get_mut::<Player>(me).unwrap().flight_assist = false;
+    let mut player = app.world_mut().get_mut::<Player>(me).unwrap();
+    player.flight_assist = false;
+    // Armed, SMG in hand, as from the weapons locker.
+    player.loadout.arm_fully();
+    player.loadout.current = 0;
     me
 }
 
@@ -117,6 +121,7 @@ fn bullets_hurt_the_other_side_and_pass_through_our_own() {
     let robot = spawn_target(&mut app, Team::Robots, Vec3::new(0.0, eye, 175.0));
     // The rifle, braced (stance 3): two shots.
     app.world_mut().get_mut::<PlayerInput>(me).unwrap().stance = 2;
+    app.world_mut().get_mut::<PlayerInput>(me).unwrap().presses.stance.press();
     ticks(&mut app, 30);
     hold_trigger(&mut app, me, true);
     ticks(&mut app, 10);
@@ -166,6 +171,7 @@ fn shoot_gunner(facing_away: bool) -> (usize, usize) {
     let at = Vec3::new(0.0, eye, 185.0) - facing * Vec3::new(spot.x, spot.y, 0.0);
     still_gunner(&mut app, at, facing);
     app.world_mut().get_mut::<PlayerInput>(me).unwrap().stance = 2;
+    app.world_mut().get_mut::<PlayerInput>(me).unwrap().presses.stance.press();
     ticks(&mut app, 30);
     hold_trigger(&mut app, me, true);
     ticks(&mut app, 10);

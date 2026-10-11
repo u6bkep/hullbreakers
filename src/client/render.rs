@@ -573,3 +573,60 @@ pub fn update_avatars(
     }
 }
 
+
+/// A pickup's case: drawn where its description puts it, interpolated
+/// with the body it lies on.
+#[derive(Resource)]
+pub struct PickupLook {
+    case: Handle<Mesh>,
+    band: Handle<Mesh>,
+    metal: Handle<StandardMaterial>,
+    glow: Handle<StandardMaterial>,
+}
+
+pub fn setup_pickup_look(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    use crate::sim::pickups::PICKUP_HALF;
+    commands.insert_resource(PickupLook {
+        case: meshes.add(Cuboid::from_size(PICKUP_HALF * 2.0)),
+        band: meshes.add(Cuboid::from_size(Vec3::new(PICKUP_HALF.x * 2.05, 0.05, PICKUP_HALF.z * 2.05))),
+        metal: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.25, 0.27, 0.3),
+            metallic: 0.8,
+            perceptual_roughness: 0.4,
+            ..default()
+        }),
+        // A supply colour of our own: a warm green, like the mission wall.
+        glow: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.2, 0.9, 0.5),
+            emissive: LinearRgba::rgb(0.6, 3.0, 1.4),
+            ..default()
+        }),
+    });
+}
+
+pub fn draw_pickups(
+    mut commands: Commands,
+    look: Res<PickupLook>,
+    tick: Res<crate::sim::SimTick>,
+    bodies: Query<&Transform, Without<crate::sim::pickups::Pickup>>,
+    mut pickups: Query<(Entity, &crate::sim::pickups::Pickup, Option<&mut Transform>)>,
+) {
+    for (entity, pickup, transform) in &mut pickups {
+        let frame = pickup.body.and_then(|b| bodies.get(b).ok()).map(|t| (t.translation, t.rotation));
+        let Some((at, turn)) = pickup.pose(frame, tick.0, 0.0) else { continue };
+        let pose = Transform::from_translation(at).with_rotation(turn);
+        match transform {
+            Some(mut t) => *t = pose,
+            None => {
+                commands
+                    .entity(entity)
+                    .insert((pose, Visibility::default(), Mesh3d(look.case.clone()), MeshMaterial3d(look.metal.clone())))
+                    .with_child((Mesh3d(look.band.clone()), MeshMaterial3d(look.glow.clone()), Transform::default()));
+            }
+        }
+    }
+}

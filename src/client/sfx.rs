@@ -759,6 +759,11 @@ pub fn play_event_sounds(
             }
             // The suit gives out: an alarm, then the respawn's warp.
             PlayerEvent::Died => play(&mut commands, &sounds.warning, 1.0, 0.7),
+            // Gear clattering into place.
+            PlayerEvent::PickedUp { .. } => {
+                play(&mut commands, &sounds.button, 0.7, pitch * 0.8);
+                play(&mut commands, &sounds.grapple_attach, 0.5, pitch * 0.7);
+            }
             PlayerEvent::Fired { gun, .. } => {
                 let sound = match gun {
                     GunKind::Smg | GunKind::SwarmerSprayer => &sounds.shot_smg,

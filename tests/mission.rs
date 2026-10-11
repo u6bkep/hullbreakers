@@ -368,7 +368,7 @@ fn a_player_can_cross_to_the_carrier() {
     {
         let world = app.world_mut();
         let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
-        input.presses.off.press();
+        input.presses.main.press();
     }
     ticks(&mut app, 1);
     let grapple = player(&mut app).grapple.expect("missed the carrier");
@@ -451,4 +451,51 @@ fn the_carriers_gunners_stand_at_their_posts() {
     for mode in gunners {
         assert!(matches!(mode, Mode::Booted { up, .. } if up.y > 0.99), "{mode:?}");
     }
+}
+
+#[test]
+fn the_weapons_locker_arms_you() {
+    let mut app = app();
+    let ship = home(&mut app);
+    assert!(player(&mut app).loadout.carried().is_empty(), "started armed");
+    // In the aft hold, facing the locker on the starboard wall.
+    let feet = Vec3::new(2.4, 0.01, 9.0);
+    let locker = Vec3::new(3.54, 1.5, 9.0);
+    stand(&mut app, ship, feet, locker - (feet + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    assert_eq!(player(&mut app).loadout.carried().len(), 2);
+}
+
+#[test]
+fn the_dead_leave_their_guns_where_they_fell() {
+    use hullbreakers::sim::pickups::Pickup;
+    let mut app = app();
+    let ship = home(&mut app);
+    // Armed, on the deck aft.
+    set_player(&mut app, |p| p.loadout.arm_fully());
+    let feet = Vec3::new(0.0, 0.01, 10.0);
+    stand(&mut app, ship, feet, Vec3::NEG_Z);
+    {
+        let world = app.world_mut();
+        let mut v = world.query_filtered::<&mut Vitals, Without<Robot>>().single_mut(world).unwrap();
+        *v = Vitals { health: 0.0, since_hurt: 0.0 };
+    }
+    ticks(&mut app, 2);
+    assert!(player(&mut app).loadout.carried().is_empty(), "respawned armed");
+    let pickups = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<&Pickup>().iter(world).cloned().collect::<Vec<_>>()
+    };
+    let dropped = pickups(&mut app);
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(dropped[0].guns.len(), 2);
+    assert_eq!(dropped[0].body, Some(ship));
+    // Back to it, looking at it: take them.
+    let stand_at = Vec3::new(0.0, 0.01, 8.5);
+    stand(&mut app, ship, stand_at, dropped[0].at - (stand_at + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    assert_eq!(player(&mut app).loadout.carried().len(), 2, "didn't pick them up");
+    assert!(pickups(&mut app).is_empty(), "the case is still there");
 }

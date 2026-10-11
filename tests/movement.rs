@@ -338,7 +338,7 @@ fn grapple_reels_player_in() {
             pitch: 0.0,
         },
     );
-    command(&mut app, |c| c.presses.off.press());
+    command(&mut app, |c| c.presses.main.press());
     ticks(&mut app, 1);
     let grapple = player(&mut app)
         .grapple
@@ -773,7 +773,7 @@ fn assisted_reel_with_swing_is_smooth_and_arrives_gently() {
             pitch: 0.0,
         },
     );
-    command(&mut app, |c| c.presses.off.press());
+    command(&mut app, |c| c.presses.main.press());
     ticks(&mut app, 1);
     let anchor_local = player(&mut app).grapple.expect("hit the stern").anchor;
     command(&mut app, |c| c.reel_in = true);
@@ -962,7 +962,7 @@ fn simulation_is_deterministic() {
             (30, |c| c.add_look(Vec2::new(0.4, -0.2))),
             (20, |c| c.presses.jump.press()),
             (60, |c| c.movement = Vec3::new(0.0, 0.5, 1.0)),
-            (5, |c| c.presses.off.press()),
+            (5, |c| c.presses.main.press()),
             (90, |c| c.reel_in = true),
         ];
         for (n, f) in script {

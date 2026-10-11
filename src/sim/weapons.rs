@@ -104,10 +104,13 @@ impl GunKind {
     }
 }
 
-/// A gun a player carries.
+/// One of a player's gun slots, and whether its gun is being carried.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gun {
     pub kind: GunKind,
+    /// Whether the player has this gun (the slot stays when they don't, so
+    /// stances keep pointing at the same kinds of gun).
+    pub carried: bool,
     pub mag: u16,
     pub reserve: u16,
 }
@@ -117,8 +120,19 @@ impl Gun {
         let s = kind.stats();
         Gun {
             kind,
+            carried: true,
             mag: s.mag,
             reserve: s.reserve,
+        }
+    }
+
+    /// The slot, without the gun.
+    pub fn none(kind: GunKind) -> Gun {
+        Gun {
+            carried: false,
+            mag: 0,
+            reserve: 0,
+            ..Gun::full(kind)
         }
     }
 }
@@ -195,8 +209,50 @@ pub struct Loadout {
     pub shots: u32,
 }
 
+impl Loadout {
+    /// What the crew start (and respawn) with: the suit and its grapple,
+    /// in the grapple stance. Guns come from the ship's weapons locker.
+    pub fn base() -> Loadout {
+        let mut l = Loadout::default();
+        for gun in &mut l.guns {
+            *gun = Gun::none(gun.kind);
+        }
+        l.current = 3;
+        l
+    }
+
+    /// The weapons locker: every gun carried, every mag and reserve full.
+    pub fn arm_fully(&mut self) {
+        for gun in &mut self.guns {
+            *gun = Gun::full(gun.kind);
+        }
+    }
+
+    /// The guns carried, for leaving behind on death (with what's left in
+    /// them).
+    pub fn carried(&self) -> Vec<Gun> {
+        self.guns.iter().copied().filter(|g| g.carried && g.mag + g.reserve > 0).collect()
+    }
+
+    /// Picks up `guns`: a gun not carried is taken as it is; one already
+    /// carried just gives up its ammo.
+    pub fn take(&mut self, guns: &[Gun]) {
+        for found in guns {
+            let Some(slot) = self.guns.iter_mut().find(|g| g.kind == found.kind) else {
+                continue;
+            };
+            if slot.carried {
+                slot.reserve = slot.reserve.saturating_add(found.mag).saturating_add(found.reserve);
+            } else {
+                *slot = *found;
+                slot.carried = true;
+            }
+        }
+    }
+}
+
 impl Default for Loadout {
-    /// The starting kit: an SMG and a rifle.
+    /// The full kit: an SMG and a rifle.
     ///
     /// 1. SMG and grapple; 2. rifle and grapple; 3. rifle, braced;
     /// 4. grapple alone, on the primary button.
@@ -247,22 +303,24 @@ impl Loadout {
     }
 
     pub fn gun(&self, hand: Hand) -> Option<&Gun> {
-        match self.stance().slot(hand) {
-            Slot::Gun(i) => self.guns.get(i as usize),
-            _ => None,
-        }
+        self.gun_index(hand).map(|i| &self.guns[i])
     }
 
     fn gun_index(&self, hand: Hand) -> Option<usize> {
         match self.stance().slot(hand) {
-            Slot::Gun(i) if (i as usize) < self.guns.len() => Some(i as usize),
+            Slot::Gun(i) if self.guns.get(i as usize).is_some_and(|g| g.carried) => Some(i as usize),
             _ => None,
         }
     }
 
-    /// Whether a hand's gun is steadied by the other hand.
+    /// Whether a hand's gun is steadied by the other hand (empty, or
+    /// holding a gun slot whose gun isn't carried).
     pub fn braced(&self, hand: Hand) -> bool {
-        self.stance().slot(hand.other()) == Slot::Empty
+        match self.stance().slot(hand.other()) {
+            Slot::Empty => true,
+            Slot::Gun(_) => self.gun_index(hand.other()).is_none(),
+            Slot::Grapple => false,
+        }
     }
 
     fn start_reload(&mut self, hand: Hand) -> bool {
@@ -300,7 +358,7 @@ impl Loadout {
     pub fn tick(&mut self, cmd: &TickInput, dt: f32) -> HandsOut {
         let mut out = HandsOut::default();
         let wanted = cmd.stance.min(STANCES as u8 - 1);
-        if wanted != self.current {
+        if cmd.stance_pressed && wanted != self.current {
             self.current = wanted;
             self.switching = SWITCH_SECONDS;
             self.cancel_reloads();
@@ -475,8 +533,10 @@ mod tests {
         assert!(l.hands[0].reloading.is_some());
         cmd.reload = false;
         cmd.stance = 2;
+        cmd.stance_pressed = true;
         cmd.main.held = true;
         let out = l.tick(&cmd, DT);
+        cmd.stance_pressed = false;
         assert!(l.hands[0].reloading.is_none());
         assert!(out.shots.is_empty(), "fired mid-switch");
         let shots: usize = (0..60).map(|_| l.tick(&cmd, DT).shots.len()).sum();
@@ -515,6 +575,34 @@ mod tests {
     }
 
     #[test]
+    fn the_base_kit_has_no_guns_until_armed() {
+        let mut l = Loadout::base();
+        assert!(l.carried().is_empty());
+        assert!(Hand::BOTH.iter().all(|h| l.gun(*h).is_none()));
+        // Rifle and grapple: the rifle's slot is empty.
+        let mut cmd = holding(true);
+        cmd.stance = 1;
+        cmd.stance_pressed = true;
+        let shots: usize = (0..60).map(|_| l.tick(&cmd, DT).shots.len()).sum();
+        assert_eq!(shots, 0);
+        l.arm_fully();
+        let shots: usize = (0..60).map(|_| l.tick(&cmd, DT).shots.len()).sum();
+        assert!(shots > 0);
+    }
+
+    #[test]
+    fn picking_up_guns_takes_new_ones_and_ammo_from_the_rest() {
+        let mut l = Loadout::base();
+        let mut rifle = Gun::full(GunKind::Rifle);
+        rifle.mag = 5;
+        l.take(&[rifle]);
+        assert!(l.guns[1].carried && l.guns[1].mag == 5);
+        assert!(!l.guns[0].carried);
+        l.take(&[Gun::full(GunKind::Rifle)]);
+        assert_eq!(l.guns[1].reserve, 150 + 30 + 150);
+    }
+
+    #[test]
     fn the_grapple_hand_works_the_rope() {
         let mut l = Loadout::default();
         let mut cmd = TickInput::default();
@@ -524,6 +612,7 @@ mod tests {
         assert!(out.grapple_held && out.grapple_trigger && out.reel_in);
         // Stance 3 has no grapple.
         cmd.stance = 2;
+        cmd.stance_pressed = true;
         let out = l.tick(&cmd, DT);
         assert!(!out.grapple_held && !out.grapple_trigger);
     }

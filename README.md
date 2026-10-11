@@ -34,7 +34,13 @@ world and puts everyone back on the deck. The game starts in the
   as small axes (red +X, green +Y, blue forward). You start floating in
   front of it.
 
-Players carry an SMG and a rifle. Each hand holds one item and a stance
+You start (and respawn) with the base kit: your suit and its grapple. Guns
+are in the **weapons locker** on the starboard wall of our ship's aft hold
+(press it with F for an SMG and a rifle, full; again to top up). Die, and
+what you carried stays where you fell, in a glowing case on the deck (or
+drifting on, if you were in EVA): look at it and press F to take it back.
+
+Armed, players carry an SMG and a rifle. Each hand holds one item and a stance
 (1-4) sets what's in each; a one-handed gun with the other hand empty is
 braced and shoots tighter. Bullets fly at realistic speeds and keep the
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's

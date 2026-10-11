@@ -205,6 +205,8 @@ fn home_layout() -> Vec<HullBox> {
         trim(v(4.3, 1.5, 11.0), v(0.6, 0.4, 3.0)),
         // The mission wall: a panel on the port side of the bridge.
         trim(v(-3.65, 1.5, -7.0), v(0.1, 1.4, 4.4)),
+        // The weapons locker's door, on the starboard wall of the hold.
+        trim(v(3.65, 1.4, 9.0), v(0.1, 2.0, 1.4)),
     ]
 }
 
@@ -318,6 +320,8 @@ pub enum ControlAction {
     Lurch,
     /// Drop this ship's shield.
     DisableShields,
+    /// Take a full set of guns and ammo.
+    Armory,
 }
 
 impl ControlAction {
@@ -327,6 +331,7 @@ impl ControlAction {
             ControlAction::Scenario(kind) => kind.button_label(),
             ControlAction::Lurch => "Lurch (DO NOT PRESS)",
             ControlAction::DisableShields => "Disable shields",
+            ControlAction::Armory => "Weapons locker",
         }
     }
 }
@@ -366,6 +371,8 @@ fn controls(kind: HullKind) -> Vec<(ControlAction, Vec3, Vec3)> {
                 .collect();
             // Lower, and apart from the rest.
             buttons.push((ControlAction::Lurch, v(-3.54, 1.05, -5.4), v(0.06, 0.18, 0.25)));
+            // The weapons locker, on the starboard wall of the aft hold.
+            buttons.push((ControlAction::Armory, v(3.54, 1.5, 9.0), v(0.06, 0.45, 0.5)));
             buttons
         }
         // A big button on top of the bridge console.
