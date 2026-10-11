@@ -260,3 +260,77 @@ fn a_beam_shoves_a_player_out_of_its_way() {
         .count();
     assert_eq!(hits, 1, "one crossing, one hit");
 }
+
+fn frame(app: &mut App, ship: Entity) -> space_game::sim::frame::BodyFrame {
+    let world = app.world();
+    let (p, r, v, w) = (
+        world.get::<Position>(ship).unwrap().0,
+        world.get::<Rotation>(ship).unwrap().0,
+        world.get::<LinearVelocity>(ship).unwrap().0,
+        world.get::<AngularVelocity>(ship).unwrap().0,
+    );
+    space_game::sim::frame::BodyFrame {
+        position: p,
+        rotation: r,
+        center_of_mass: p,
+        linear_velocity: v,
+        angular_velocity: w,
+    }
+}
+
+/// The crossing, as a player would make it: out of the stern on a close
+/// pass, grapple the raider, and reel in to its hull.
+#[test]
+fn a_player_can_cross_to_the_raider() {
+    let mut app = app();
+    start_boarding(&mut app);
+    // Halfway to the first close pass.
+    ticks(&mut app, 12 * 60);
+    let raider = ship_of(&mut app, HullKind::Raider).unwrap();
+    let home = home(&mut app);
+    let ours = frame(&mut app, home);
+    let theirs = frame(&mut app, raider);
+    // Just off our stern, moving with the ship, looking at the raider.
+    let start = ours.point_to_world(Vec3::new(0.0, 1.5, 18.0));
+    let target = theirs.point_to_world(Vec3::new(0.0, 1.5, 0.0));
+    let eye = Tuning::default().eye_height - Tuning::default().capsule_height / 2.0;
+    let orientation = Transform::IDENTITY
+        .looking_to(target - (start + Vec3::Y * eye), Vec3::Y)
+        .rotation;
+    set_player(&mut app, |p| {
+        p.mode = Mode::Eva {
+            position: start,
+            velocity: ours.point_velocity(start),
+            orientation,
+            pitch: 0.0,
+        };
+        p.reference_body = Some(home);
+    });
+    click(&mut app);
+    ticks(&mut app, 1);
+    let grapple = player(&mut app).grapple.expect("missed the raider");
+    assert_eq!(grapple.target, raider);
+    {
+        let world = app.world_mut();
+        let mut input = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
+        input.reel_in = true;
+    }
+    // Reeled in to hang at the hull, nearly at rest relative to it (from
+    // there a player turns feet-first and touches down).
+    for second in 0..10 {
+        ticks(&mut app, 60);
+        let p = player(&mut app);
+        let theirs = frame(&mut app, raider);
+        let Mode::Eva { position, velocity, .. } = p.mode else {
+            panic!("expected EVA: {:?}", p.mode);
+        };
+        let local = theirs.point_to_local(position);
+        let speed = theirs.velocity_to_local(position, velocity).length();
+        // The raider's port or starboard wall is at |x| = 4.
+        if local.x.abs() < 5.5 && local.y.abs() < 4.0 && local.z.abs() < 16.0 && speed < 1.0 {
+            eprintln!("at the raider's hull after {second} s of reeling, {speed:.1} m/s");
+            return;
+        }
+    }
+    panic!("never reached the raider: {:?}", player(&mut app).mode);
+}
