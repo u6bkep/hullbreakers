@@ -141,14 +141,18 @@ for tag, (px, py, pz), (sx, sy, sz), knee in PODS:
     knuckle = ax - POD_R - 0.030          # knuckle centre, |x|
     # Leg: a shoulder joint on the flank, an upper arm rising to a knee above the body line, a
     # forearm dropping to the knuckle the pod swivels in. A light strip runs along the upper arm.
-    body.cylinder("x", (sy, sz), 0.034, (s * 0.095, s * 0.150), mat=BLACK, segments=8)
+    # The joints are bare octagonal pins: a bevel on something this small is under a pixel at
+    # play distance and cost a third of the legs' triangles.
+    body.cylinder("x", (sy, sz), 0.034, (s * 0.095, s * 0.150), mat=BLACK, segments=8, bevel=0)
     body.hull(beam((s * 0.120, sy, sz), knee, 0.020, 0.020, 0.8), mat=DARK)
     body.hull(beam((s * 0.150, sy, sz), knee, 0.006, 0.006, 1.0, lift=0.021), mat=LIGHT, bevel=0.002)
-    body.cylinder("z", knee[:2], 0.024, (knee[2] - 0.022, knee[2] + 0.022), mat=BLACK, segments=8)
+    body.cylinder("z", knee[:2], 0.024, (knee[2] - 0.022, knee[2] + 0.022), mat=BLACK, segments=8, bevel=0)
     body.hull(beam(knee, (s * knuckle, py, pz), 0.017, 0.015, 0.85), mat=DARK)
-    body.cylinder("x", (py, pz), 0.030, (s * (knuckle - 0.022), s * (knuckle + 0.022)), mat=BLACK, segments=8)
+    body.cylinder("x", (py, pz), 0.030, (s * (knuckle - 0.022), s * (knuckle + 0.022)), mat=BLACK, segments=8,
+                  bevel=0)
 
-    pod = a.part(f"thruster_{tag}", body, pivot=(px, py, pz), bevel=0.005, bevel_segments=1)
+    # Unbevelled: the pods are cut octagons, their hard facets catching the light like the shell's.
+    pod = a.part(f"thruster_{tag}", body, pivot=(px, py, pz), bevel=0)
     # Cowl: pointed white nose, dark rear housing; octagonal to match the faceted shell.
     pod.lathe([(0, pz - 0.088), (0.030, pz - 0.064), (POD_R, pz - 0.036), (POD_R, pz + 0.004), (POD_R, pz + 0.044),
                (0.042, pz + 0.054)], axis="z", center=(px, py), mats=[WHITE, WHITE, WHITE, DARK, DARK],
@@ -156,8 +160,8 @@ for tag, (px, py, pz), (sx, sy, sz), knee in PODS:
     # Nozzle bell: dark flare with a dish, a glowing core at the bottom of the dish.
     t0, t1 = pz + 0.040, pz + 0.100
     pod.lathe([(0.034, t0), (0.047, t1), (0.038, t1), (0.029, t1 - 0.020), (0, t1 - 0.020)], axis="z",
-              center=(px, py), mat=DARK, segments=8, bevel=0.002)
-    pod.cylinder("z", (px, py), 0.030, (t1 - 0.028, t1 - 0.014), mat=LIGHT, segments=8, bevel=0.001)
+              center=(px, py), mat=DARK, segments=8)
+    pod.cylinder("z", (px, py), 0.030, (t1 - 0.028, t1 - 0.014), mat=LIGHT, segments=8)
     # Trunnion stub into the knuckle.
     pod.cylinder("x", (py, pz), 0.018, (s * (knuckle + 0.010), s * (ax - POD_R + 0.010)), mat=DARK, segments=8)
     a.socket(f"SOCKET_thrust_{tag}", pod, at=(px, py, t1 - 0.014), forward=(0, 0, 1))

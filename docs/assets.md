@@ -19,7 +19,7 @@ tools/assets/
   build               # the driver: build + verify one asset or all of them
   hb/                 # the library build scripts import
   materials.json      # the material roles
-  kinds.json          # per kind: budget, bevel guide, near distance, bevel segments (the art-style table)
+  kinds.json          # per kind: budget, bevel guide, near distance, detail px, bevel segments (the art-style table)
   verify_glb.py       # the verifier (plain python3, no Blender)
   run_build.py        # Blender entry point the driver uses
 ```
@@ -127,7 +127,7 @@ a = hb.Asset(__file__)        # reads asset.json beside the script; fresh empty 
   attach point.
 - `bevel` is the part's bevel width in metres. It defaults to the kind's `default_bevel`;
   outside the kind's range you get a note, not an error. `bevel=0` gives no bevel.
-- `bevel_segments` defaults to the kind's (1, a chamfer; 2 for handhelds). See
+- `bevel_segments` defaults to the kind's (1, a chamfer, for every kind). See
   "Spending triangles" in art-style.md before raising it.
 - Names: parts are `snake_case`; then `SOCKET_<snake>` and `COL_<snake>`. A duplicate name
   is an error, never a silent `.001`.
@@ -148,11 +148,12 @@ for thin strips and small details).
 | `p.hull(points, mat=)` | The convex hull of `points` (at least 4, not flat). Every face is flat and coplanar sides merge into one face. For wedges, sloped plates and chamfered blocks that a box or prism can't tilt into. |
 
 `segments` (lathe, cylinder): leave it out for a round surface. hb picks the fewest
-segments (even, at least 8) that keep the widest radius within one detail size (a pixel
-at the kind's near distance; see below) of a true circle, or half of one if any of its
-materials is emissive, and its facets always shade smooth. Give it only for a deliberate polygon: then the facets are hard (and bevelled)
-wherever the angle between neighbouring facets is at least `smooth_angle` (avoid an
-exact tie, such as 12 segments at 30°: float rounding decides it).
+segments (even, at least 8) that keep the widest radius within one detail size (see
+below) of a true circle, or half of one if any of its materials is emissive, and its
+facets always shade smooth. Give it only for a deliberate polygon: then the facets are
+hard wherever the angle between neighbouring facets is at least `smooth_angle` (avoid an
+exact tie, such as 12 segments at 30°: float rounding decides it), and those facet seams
+are never bevelled. The end caps and profile steps still are.
 
 Primitives are separate closed shells. They may overlap, but they are never welded or
 booleaned together. There's no boolean operation; build cut-outs from separate pieces.
@@ -166,9 +167,10 @@ Every face is tagged **flat** or **curved** by the primitive that made it:
 - Curved: lathe bands (cylinders and cones), and the side faces of `prism(..., smooth=True)`.
   Use that for an outline that approximates a curve.
 
-The **detail size** is one pixel at the kind's `near` distance (`kinds.json`): `near` ×
-1.27 mm, for the game's 85° vertical field of view at 1440 lines (`hb/asset.py`
-`VIEW_FOV_DEG`, `VIEW_LINES`). The rules in art-style.md "Spending triangles" are built
+The **detail size** is `detail_px` pixels at the kind's `near` distance (`kinds.json`):
+`near` × 1.27 mm × `detail_px`, for the game's 85° vertical field of view at 1440 lines
+(`hb/asset.py` `VIEW_FOV_DEG`, `VIEW_LINES`). `detail_px` is 2 for everything in the
+world (the low-poly lean) and 1 for handhelds. The rules in art-style.md "Spending triangles" are built
 on it, and hb applies them as it goes:
 
 - A bevel width (the part's or a primitive's) under the detail size becomes 0 when the
@@ -181,8 +183,9 @@ Then:
    exactly flat; no angle threshold can leave a shallow chamfer smoothed. Curved surfaces
    stay smooth across edges shallower than `smooth_angle` (30° by default) and are hard
    across sharper ones. The seams between an auto-segment lathe's facets are always
-   smooth, whatever the angle.
-2. **Bevel.** Hard edges sharper than 1° are bevelled. Each primitive gets its own width,
+   smooth, whatever the angle; an explicit-segment lathe's are hard by that angle rule.
+2. **Bevel.** Hard edges sharper than 1° are bevelled, except a deliberate polygon's
+   facet seams. Each primitive gets its own width,
    through bevel weights on a weight-limited Bevel modifier with the part's
    `bevel_segments`. `harden_normals` is on, the outer miter is Arc, and widths clamp
    where they would overlap. An edge buried inside another primitive of the same part
@@ -281,7 +284,9 @@ The driver runs it. A FAIL exits 1; a WARN doesn't.
   washes paint out to pastel. They still aren't a colour reference for Bevy.
 - **The bevel eats narrow steps.** A flat ring or ledge narrower than about twice the
   bevel width disappears (the verifier WARNs). Widen the step or lower that primitive's
-  `bevel=`.
+  `bevel=`. On a faceted lathe it can be worse: where the unbevelled facet seams meet a
+  clamped step, the step's normals bend and the verifier FAILs. (The Swarmer's 4 mm
+  muzzle step under a 3 mm bevel did, until the two-pixel detail size dropped the bevel.)
 
 ## Known limits
 

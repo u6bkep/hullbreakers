@@ -3,14 +3,17 @@
 The rules every model follows, whoever (or whatever agent) builds it. How
 models are built is in [assets.md](assets.md).
 
-## The look: simple mid-poly
+## The look: simple low-to-mid-poly
 - **Silhouette first.** Things are read at range, against black space, often
   half in shadow. A model has to be recognisable as a dark outline with a few
   lights on it. Big, chunky, distinct masses; nothing thin or fussy.
-- **Clean forms, chamfered edges.** Hard edges get a small bevel so they
-  catch light, flat faces shade exactly flat, and curved parts are smooth
-  with modest segment counts. No greeble noise, no surface clutter to make
-  something look "detailed".
+- **Clean forms, chamfered edges, leaning low-poly.** The main masses get a
+  small chamfer so their edges catch light; small details don't. Flat faces
+  shade exactly flat, curved parts are smooth with few segments, and
+  deliberate polygons show their facets. Up close a model may look faceted;
+  at play distance it must look the same as a finer one (see "Spending
+  triangles"). No greeble noise, no surface clutter to make something look
+  "detailed".
 - **No textures yet.** Materials only (PBR metallic-roughness). Detail comes
   from form, material breaks between parts, and emissive accents.
 - **Emissives carry meaning.** Lights mark function, and are what you see of
@@ -60,71 +63,96 @@ asked for.
 
 ## Budgets (triangles)
 
-| Kind | Triangles | Bevel width | Near | Bevel segments |
-|---|---|---|---|---|
-| Handheld (weapon, tool) | 2k–6k | 2–4 mm | 0.3 m | 2 |
-| Small robot or creature (≤ 1 m) | 3k–8k | 5–10 mm | 2 m | 1 |
-| Large robot (2–4 m) | 5k–12k | 1–3 cm | 3 m | 1 |
-| Prop, console, crate | 0.5k–3k | 5–20 mm | 1.5 m | 1 |
-| Flora cluster | 1k–5k | (organic, none) | 2 m | 1 |
-| Ship module | 5k–30k | 3–15 cm | 5 m | 1 |
+| Kind | Triangles | Bevel width | Near | Detail size | Bevel segments |
+|---|---|---|---|---|---|
+| Handheld (weapon, tool) | 1k–4k | 2–4 mm | 0.3 m | 1 px = 0.4 mm | 1 |
+| Small robot or creature (≤ 1 m) | 2k–5k | 5–10 mm | 2 m | 2 px = 5.1 mm | 1 |
+| Large robot (2–4 m) | 3k–8k | 1–3 cm | 3 m | 2 px = 7.6 mm | 1 |
+| Prop, console, crate | 0.5k–3k | 5–20 mm | 1.5 m | 2 px = 3.8 mm | 1 |
+| Flora cluster | 1k–5k | (organic, none) | 2 m | 2 px = 5.1 mm | 1 |
+| Ship module | 5k–30k | 3–15 cm | 5 m | 2 px = 12.7 mm | 1 |
 
 Bevels scale with the object: a bevel should read as a highlight from the
 distance the object is usually seen from. **Near** is the closest a kind is
 usually seen from (a held weapon's rear is about 0.3 m from the eye); the
 rules below are judged there.
 
-The large-robot budget was 8k–20k until the rules below; the Gunner, unchanged
-in look, went from 19.3k to 8.2k under them. The other kinds have no asset that
-measures them yet, so their numbers are unchanged.
+The budgets have come down twice, each time from measuring the models in them,
+not from a target:
+
+| Asset | Before the rules | One-pixel rules (1a31409) | Low-poly lean |
+|---|---|---|---|
+| Gunner (large robot) | 19,320 | 8,172 | 5,272 |
+| Swarmer (small robot) | 7,810 | 6,762 | 3,558 |
+| SMG (handheld) | 3,852 | 3,756 | 1,772 |
+
+Props, flora and ship modules have no asset yet, so their budgets are
+unchanged; lower them when the first ones are measured.
 
 ## Spending triangles
 
-Triangles go where they can be seen. The game shows everything at an 85°
-vertical field of view, so at 1440 lines **one pixel at distance d is
-d × 1.27 mm** (3.8 mm at a large robot's 3 m near; 2.5 mm at a small robot's
-2 m; 0.4 mm for a weapon in first person). That pixel at the kind's near distance
-is its **detail size**, and the rules follow from it. hb applies all of them;
-the numbers live in `tools/assets/kinds.json`.
+Triangles go where they can be seen, and **the style leans low-poly**: we
+accept a more faceted look up close in exchange for fewer triangles, as long
+as every model still reads cleanly and nothing changes at play distance
+(10–15 m for enemies). Hard facets are part of the look, not a defect to
+smooth over.
 
-Measured on the Gunner before the rules (19,320 triangles): the unbevelled
-shapes were 4,416 of them; the bevels were the other 14,904, and the second
-bevel segment alone was 8,912. Small things cost as much as big ones: a 2 cm
-vent slat took 108 triangles, the same as the torso's core box.
+The game shows everything at an 85° vertical field of view, so at 1440 lines
+**one pixel at distance d is d × 1.27 mm**. A kind's **detail size** is a
+number of pixels at its near distance: **two** for everything in the world,
+**one** for handhelds, which are held in front of the camera all game. That
+is 7.6 mm on a large robot, 5.1 mm on a small one, and 0.4 mm on a weapon in
+first person. The rules follow from it. hb applies all of them; the numbers
+live in `tools/assets/kinds.json`.
 
-1. **Chamfer, don't round.** One bevel segment is the default (two for
-   handhelds). A 2-segment arc costs about 2.5× a chamfer's triangles and only
-   differs where the bevel is several pixels wide: a 12 mm bevel is 3 px at 3 m
-   and less than 1 px at 12 m. On the Gunner it was 46% of the model; renders
-   at 12 m differ by barely more than render noise, at 35 m by less, and at
-   3 m only the highlight inside the chamfers changes. On a first-person weapon the bevels
-   are 4–10 px wide all game and an arc catches highlights a chamfer doesn't, so
-   handhelds keep 2.
-2. **No bevel narrower than the detail size.** A bevel under one pixel at the
-   near distance is never seen, but costs as much as a visible one. hb drops it
-   (the edge stays hard, so the face still shades flat). Small lights, strips
-   and lens rims usually fall here; a bevel authored below it is silently dropped.
+1. **Chamfer, don't round.** One bevel segment for every kind. A 2-segment arc
+   costs about 2.5× a chamfer's triangles and only differs where the bevel is
+   several pixels wide. On the Gunner it was 46% of the model. Handhelds kept
+   2 until the low-poly lean; dropping it halved the SMG (3,756 → 1,772). At
+   0.5 m the two can't be told apart. At 0.3 m the rear edges show a crisp
+   chamfer band where there was a rolled highlight.
+2. **No bevel narrower than the detail size.** hb drops it, and the edge stays
+   hard, so the face still shades flat. With the two-pixel detail size this
+   takes the bevels off small things on world objects, such as bolts, slats,
+   strips, lens rims and grille bars. On a large robot it takes everything under
+   7.6 mm: a vent slat now costs 12 triangles instead of 44, and a bolt 28
+   instead of 60. The main masses keep their chamfers (the Gunner's are
+   12–14 mm). A bevel authored below the detail size is silently dropped, so
+   don't author a main-body bevel just under it; if a part should be
+   unbevelled, say `bevel=0`.
 3. **Round things get their segment count from their radius.** Leave
-   `segments` out of a lathe or cylinder: hb picks the fewest (even, at least 8)
-   that keep the silhouette within one pixel of a true circle at the near
-   distance, or half a pixel if it glows, because a lit edge against a dark one
-   shows its corners. On a large robot a bolt of 3 cm radius gets 8,
-   a knuckle of 9 cm 12, and the Gunner's 6.6 cm eye lens 14. Those facets always shade smooth. Give `segments`
-   only for a deliberate polygon, such as the Swarmer's octagonal pods.
-4. **Hidden edges aren't bevelled.** An edge buried inside another primitive
+   `segments` out of a lathe or cylinder. hb picks the fewest (even, at least
+   8) that keep the silhouette within the detail size of a true circle, or
+   half of it if it glows, because a lit edge against a dark one shows its
+   corners. On a large robot a knuckle of 9 cm gets 8, the Gunner's 6.6 cm eye
+   lens 10, and its 14 cm weak-spot core 14. Those facets always shade smooth.
+   Give `segments` only for a deliberate polygon, such as the Swarmer's
+   octagonal pods.
+4. **A deliberate polygon's facet seams aren't bevelled.** When a lathe has
+   explicit `segments` and its facets meet at `smooth_angle` or more, the seams
+   between them are hard edges with no bevel. Its end caps and profile steps
+   are still bevelled. The hard facet is the look; a chamfer along each one
+   cost more than the rest of the lathe. This rule alone took the Swarmer from
+   6,762 to 4,990, and its facets now shade exactly flat (the chamfers had bent
+   them).
+5. **Hidden edges aren't bevelled.** An edge buried inside another primitive
    of the same part, deeper than its own bevel, is left unbevelled
-   automatically, as long as every bevelled edge at both its ends is buried
-   too (where a bevelled and an unbevelled edge meet, Blender bends the
-   normals). In practice that means a whole buried primitive, or a buried end
-   ring of a cylinder (its smooth seams separate it from the rest); a box half
-   sunk into another keeps all its bevels. Parts move, so only the part's own
-   primitives count. This one is small (184 triangles on the Gunner) but free.
+   automatically. This only happens when every bevelled edge at both its ends
+   is buried too, because where a bevelled and an unbevelled edge meet,
+   Blender bends the normals. In practice that means a whole buried primitive,
+   or a buried end ring of a cylinder (its smooth seams separate it from the
+   rest); a box half sunk into another keeps all its bevels. Parts move, so
+   only the part's own primitives count. An edge hidden by *another* part,
+   such as a knuckle's end inside its parent's fork plates, is the builder's
+   call: give that primitive `bevel=0`.
 
-What these rules don't cover, and are still the builder's call: how many
-primitives a detail needs (a 3-box vent costs three boxes), and deliberate
-faceting. A hard facet seam is bevelled like any hard edge, so a faceted lathe
-pays a bevel along every segment: the Swarmer's faceted lathes are 4.9k of its
-6.8k triangles, 3.2k of that in bevels.
+What these rules don't cover is still the builder's call:
+- how many primitives a detail needs (a 3-box vent costs three boxes);
+- how finely a profile is stepped. The Gunner's fork lobes went from 30° to
+  45° steps, about 200 triangles across six joints, invisible past 3 m.
+
+Bevelled stays the default for the main masses. Their chamfers are what
+catch the light at play distance.
 
 ## Lighting the models are judged under
 The game is mostly dark: one sun, a dim fill from the sky, suit headlamps, and

@@ -30,6 +30,7 @@ from . import _state, materials
 from .space import matrix_to_blender, to_blender
 
 BEVEL_MIN_ANGLE = math.radians(1.0)
+SEAM_SMOOTH, SEAM_FACET = 1, 2                 # hb_seam edge values: a round lathe's seam, a polygon's
 
 
 class ExportError(RuntimeError):
@@ -62,7 +63,9 @@ def _part_mesh(part, world_b, mat_cache, palette):
             f.smooth = True
             faces.append(f)
         for i, j in pr.seams:
-            bm.edges.get((vs[i], vs[j]))[seam_l] = 1
+            bm.edges.get((vs[i], vs[j]))[seam_l] = SEAM_SMOOTH
+        for i, j in pr.facets:
+            bm.edges.get((vs[i], vs[j]))[seam_l] = SEAM_FACET
         bmesh.ops.recalc_face_normals(bm, faces=faces)
         shells.append((vs, faces))
     bm.normal_update()
@@ -79,10 +82,10 @@ def _part_mesh(part, world_b, mat_cache, palette):
             raise ExportError(f"{part.name}: an edge has {len(lf)} faces; primitives must be closed shells")
         f1, f2 = lf
         ang = e.calc_face_angle(0.0)
-        if e[seam_l] or (not f1[flat_l] and not f2[flat_l] and ang < min(f1[sm_l], f2[sm_l])):
+        if e[seam_l] == SEAM_SMOOTH or (not f1[flat_l] and not f2[flat_l] and ang < min(f1[sm_l], f2[sm_l])):
             continue                           # smooth across a curved surface
         e.smooth = False                       # hard edge
-        if widest > 0 and ang > BEVEL_MIN_ANGLE:
+        if widest > 0 and ang > BEVEL_MIN_ANGLE and e[seam_l] != SEAM_FACET:
             e[bw] = min(f1[bev_l], f2[bev_l]) / widest
     if widest > 0 and len(shells) > 1:
         part.asset._buried_edges += _unbevel_buried(bm, bw, widest, shells)
@@ -377,7 +380,8 @@ def export(asset):
             print(f"hb:   {node.name:20s} {t:6d} tris{'  (collider)' if node.kind == 'collider' else ''}")
     lo, hi = asset.kind_spec["tris"]
     print(f"hb:   {'TOTAL':20s} {total:6d} tris (budget {lo}-{hi})")
-    print(f"hb:   detail {asset.detail * 1000:.1f} mm (1 px at {asset.kind_spec['near']} m): {asset._dropped_bevels}"
+    print(f"hb:   detail {asset.detail * 1000:.1f} mm ({asset.kind_spec['detail_px']:g} px at {asset.kind_spec['near']} m):"
+          f" {asset._dropped_bevels}"
           f" primitive bevels under it dropped; {asset._buried_edges} buried edges not bevelled")
     _state.exported = glb_path
 

@@ -12,7 +12,8 @@ from .space import frame, vec3
 # The view the triangle rules are judged at (docs/art-style.md, "Spending triangles"):
 # the game's vertical field of view (tuning.ron fov_deg) on a 1440-line screen. One pixel
 # at distance d is d * PX_PER_M metres. Each kind's `near` (kinds.json) is the closest it is
-# usually seen from; a pixel there is the kind's smallest visible detail.
+# usually seen from, and its `detail_px` how many pixels there the smallest detail worth
+# geometry spans (2 for things in the world, 1 for things held in front of the camera).
 VIEW_FOV_DEG = 85.0
 VIEW_LINES = 1440
 PX_PER_M = 2.0 * math.tan(math.radians(VIEW_FOV_DEG) / 2.0) / VIEW_LINES
@@ -60,15 +61,15 @@ class Part(Node):
         b = self.bevel if bevel is None else float(bevel)
         if b < 0:
             raise ValueError(f"{self.name}: bevel {b} is negative")
-        if 0 < b < self.asset.detail:          # under a pixel at the kind's near distance
+        if 0 < b < self.asset.detail:          # under the kind's detail size
             self.asset._dropped_bevels += 1
             return 0.0
         return b
 
     def _segments(self, segments, profile, mats):
-        """Explicit segments, or the fewest that keep the widest radius round to within a
-        pixel at the kind's near distance (half a pixel if it glows: a lit edge against a
-        dark one shows its corners). Returns (segments, smooth_seams)."""
+        """Explicit segments, or the fewest that keep the widest radius round to within the
+        detail size (half of it if it glows: a lit edge against a dark one shows its corners).
+        Returns (segments, smooth_seams)."""
         if segments is not None:
             return int(segments), False
         try:
@@ -160,9 +161,9 @@ class Asset:
         self.kind = self.sidecar["kind"]
         self.kind_spec = V.load_kinds()[self.kind]
         self.palette = self.sidecar.get("palette", {})
-        # The smallest detail worth geometry: one pixel at the kind's near distance. Bevels
-        # narrower than this are dropped; auto lathes keep their silhouette within it.
-        self.detail = self.kind_spec["near"] * PX_PER_M
+        # The smallest detail worth geometry: detail_px pixels at the kind's near distance.
+        # Bevels narrower than this are dropped; auto lathes keep their silhouette within it.
+        self.detail = self.kind_spec["near"] * PX_PER_M * self.kind_spec["detail_px"]
         self._dropped_bevels = 0
         self._buried_edges = 0
         self.nodes = {}

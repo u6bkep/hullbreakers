@@ -16,7 +16,7 @@ from .space import axis_index, vec3
 
 
 class Prim:
-    __slots__ = ("kind", "verts", "faces", "bevel", "smooth_angle", "seams")
+    __slots__ = ("kind", "verts", "faces", "bevel", "smooth_angle", "seams", "facets")
 
     def __init__(self, kind, bevel, smooth_angle):
         self.kind = kind
@@ -25,6 +25,7 @@ class Prim:
         self.bevel = bevel
         self.smooth_angle = smooth_angle
         self.seams = []        # vertex index pairs: edges that stay smooth whatever their angle
+        self.facets = []       # vertex index pairs: a deliberate polygon's seams; hard by angle, never bevelled
 
     def v(self, p):
         self.verts.append(Vector(p))
@@ -159,7 +160,9 @@ def lathe(profile, axis, center, mats, segments, bevel, smooth_angle, smooth_sea
     steps) are flat; the rest (cylinders, cones) are curved.
     smooth_seams: the edges running along the profile between neighbouring segments of a
     curved band stay smooth whatever their angle (a round surface); otherwise they are
-    hard where the facet angle 360/segments reaches smooth_angle (a faceted one).
+    hard where the facet angle 360/segments reaches smooth_angle (a faceted one), and
+    those facet seams are never bevelled: the hard edge itself is the low-poly look, and
+    a bevel along every facet would cost more than the rest of the lathe.
     """
     a = axis_index(axis)
     o1, o2 = _others(a)
@@ -228,8 +231,9 @@ def lathe(profile, axis, center, mats, segments, bevel, smooth_angle, smooth_sea
                 pr.face((ra[k], ra[kn], rb[0]), flat, mats[i])
             else:
                 pr.face((ra[k], ra[kn], rb[kn], rb[k]), flat, mats[i])
-            if smooth_seams and not flat:
-                pr.seams.append((ra[k] if len(ra) > 1 else ra[0], rb[k] if len(rb) > 1 else rb[0]))
+            if not flat:
+                edge = (ra[k] if len(ra) > 1 else ra[0], rb[k] if len(rb) > 1 else rb[0])
+                (pr.seams if smooth_seams else pr.facets).append(edge)
     if cap_start is not None:
         pr.face(rings[0], True, cap_start)
     if cap_end is not None:

@@ -1058,7 +1058,7 @@
    ]
   },
   "thruster_fl": {
-   "bevel": 0.005,
+   "bevel": 0.0,
    "flat_planes": [
     [
      -1.0,
@@ -1111,7 +1111,7 @@
    ]
   },
   "thruster_fr": {
-   "bevel": 0.005,
+   "bevel": 0.0,
    "flat_planes": [
     [
      -1.0,
@@ -1164,7 +1164,7 @@
    ]
   },
   "thruster_rl": {
-   "bevel": 0.005,
+   "bevel": 0.0,
    "flat_planes": [
     [
      -1.0,
@@ -1217,7 +1217,7 @@
    ]
   },
   "thruster_rr": {
-   "bevel": 0.005,
+   "bevel": 0.0,
    "flat_planes": [
     [
      -1.0,

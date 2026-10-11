@@ -47,14 +47,14 @@ def clevis(part, xc, piv, toward, r, length, inner, outer, bolt_r, mat=DARK):
     tz, ty = tz / n, ty / n
     phi = math.atan2(ty, tz)
     pts = []
-    for k in range(7):                     # lobe: the half circle facing away from the parent
-        th = phi + math.pi / 2 + k * math.pi / 6
+    for k in range(5):                     # lobe: the half circle facing away from the parent, in 45 deg steps
+        th = phi + math.pi / 2 + k * math.pi / 4
         pts.append((piv[0] + r * math.cos(th), piv[1] + r * math.sin(th)))
     pz, py = pts[-1][0] - piv[0], pts[-1][1] - piv[1]
     pts.append((piv[0] + pz + tz * length, piv[1] + py + ty * length))
     pts.append((piv[0] - pz + tz * length, piv[1] - py + ty * length))
     for sgn in (-1, 1):
-        part.prism(pts, span=(xc + sgn * inner, xc + sgn * outer), mat=mat, smooth=True, smooth_angle=40)
+        part.prism(pts, span=(xc + sgn * inner, xc + sgn * outer), mat=mat, smooth=True, smooth_angle=50)
     part.cylinder("x", (piv[1], piv[0]), bolt_r, (xc - outer - 0.014, xc + outer + 0.014), mat=BARE,
                   bevel=0.004)
 
@@ -144,7 +144,7 @@ for side, s in SIDES:
     x = s * AX
     up = a.part(f"upper_arm_{side}", torso, pivot=(x, SHOULDER_Y, 0), bevel=0.012, smooth_angle=SMOOTH)
     up.cylinder("x", (SHOULDER_Y, 0), 0.078, sorted((s * 0.37, s * 0.51)), mat=DARK,
-                bevel=0.008)                                                    # shoulder knuckle
+                bevel=0)                                                        # shoulder knuckle (ends hidden)
     up.prism([(-0.16, 1.50), (-0.175, 1.62), (-0.11, 1.72), (0.09, 1.72), (0.155, 1.64), (0.145, 1.50)],
              span=sorted((s * 0.345, s * 0.555)), mat=ACCENT)                   # pauldron
     up.cylinder("x", (SHOULDER_Y + 0.025, -0.01), 0.042, sorted((s * 0.545, s * 0.57)), mat=BARE,
@@ -218,7 +218,7 @@ for side, s in SIDES:
 
     shin = a.part(f"shin_{side}", thigh, pivot=(x, KNEE[0], KNEE[1]), bevel=0.012, smooth_angle=SMOOTH)
     shin.cylinder("x", (KNEE[0], KNEE[1]), 0.068, (x - 0.064, x + 0.064), mat=DARK,
-                  bevel=0.008)                                                  # knee knuckle
+                  bevel=0)                                                      # knee knuckle (ends hidden)
     shin.prism([(-0.115, 0.635), (-0.16, 0.60), (-0.165, 0.505), (-0.13, 0.455), (-0.09, 0.465), (-0.09, 0.63)],
                span=(x - 0.068, x + 0.068), mat=ACCENT, bevel=0.008)            # knee cap
     shin.box((x - 0.05, 0.22, -0.065), (x + 0.05, 0.52, 0.06), mat=DARK)

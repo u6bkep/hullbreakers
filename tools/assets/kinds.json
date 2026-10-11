@@ -4,18 +4,19 @@
     "tris: [min, max] render triangles (colliders excluded). Over max fails the verifier;",
     "under min is a warning. bevel: [min, max] metres, a guide for main-body edges;",
     "default_bevel is what a part gets when it doesn't say. near: metres, the closest the kind is",
-    "usually seen from; one pixel there (85 deg vertical FOV, 1440 lines: near * 1.27 mm) is the",
-    "smallest detail hb builds: narrower bevels are dropped and auto lathe segments keep the",
-    "silhouette within it. bevel_segments: what a part gets when it doesn't say; 1 is a chamfer,",
-    "2 rounds it (at about 2.5x the bevel's triangles), only worth it where bevels are several",
-    "pixels wide all game long: a weapon in first person. Keep this in step with art-style.md."
+    "usually seen from. detail_px: the detail size is this many pixels at near (85 deg vertical",
+    "FOV, 1440 lines: near * 1.27 mm per pixel), the smallest detail hb builds: narrower bevels",
+    "are dropped and auto lathe segments keep the silhouette within it. 2 for things in the world",
+    "(the low-poly lean), 1 for things held in front of the camera. bevel_segments: what a part",
+    "gets when it doesn't say: 1, a chamfer, for every kind. 2 rounds it; dropping it halved the",
+    "SMG (3756 -> 1772) for a difference only seen inside 0.5 m. Keep this in step with art-style.md."
   ],
   "kinds": {
-    "handheld":    {"doc": "Handheld (weapon, tool)",          "tris": [2000, 6000],  "bevel": [0.002, 0.004], "default_bevel": 0.003, "near": 0.3, "bevel_segments": 2},
-    "small_robot": {"doc": "Small robot or creature (<= 1 m)", "tris": [3000, 8000],  "bevel": [0.005, 0.010], "default_bevel": 0.007, "near": 2.0, "bevel_segments": 1},
-    "large_robot": {"doc": "Large robot (2-4 m)",              "tris": [5000, 12000], "bevel": [0.01, 0.03],   "default_bevel": 0.02, "near": 3.0, "bevel_segments": 1},
-    "prop":        {"doc": "Prop, console, crate",             "tris": [500, 3000],   "bevel": [0.005, 0.02],  "default_bevel": 0.01, "near": 1.5, "bevel_segments": 1},
-    "flora":       {"doc": "Flora cluster (organic, no bevel)", "tris": [1000, 5000], "bevel": [0.0, 0.0],     "default_bevel": 0.0, "near": 2.0, "bevel_segments": 1},
-    "ship_module": {"doc": "Ship module",                      "tris": [5000, 30000], "bevel": [0.03, 0.15],   "default_bevel": 0.06, "near": 5.0, "bevel_segments": 1}
+    "handheld":    {"doc": "Handheld (weapon, tool)",          "tris": [1000, 4000],  "bevel": [0.002, 0.004], "default_bevel": 0.003, "near": 0.3, "detail_px": 1, "bevel_segments": 1},
+    "small_robot": {"doc": "Small robot or creature (<= 1 m)", "tris": [2000, 5000],  "bevel": [0.005, 0.010], "default_bevel": 0.007, "near": 2.0, "detail_px": 2, "bevel_segments": 1},
+    "large_robot": {"doc": "Large robot (2-4 m)",              "tris": [3000, 8000], "bevel": [0.01, 0.03],   "default_bevel": 0.02, "near": 3.0, "detail_px": 2, "bevel_segments": 1},
+    "prop":        {"doc": "Prop, console, crate",             "tris": [500, 3000],   "bevel": [0.005, 0.02],  "default_bevel": 0.01, "near": 1.5, "detail_px": 2, "bevel_segments": 1},
+    "flora":       {"doc": "Flora cluster (organic, no bevel)", "tris": [1000, 5000], "bevel": [0.0, 0.0],     "default_bevel": 0.0, "near": 2.0, "detail_px": 2, "bevel_segments": 1},
+    "ship_module": {"doc": "Ship module",                      "tris": [5000, 30000], "bevel": [0.03, 0.15],   "default_bevel": 0.06, "near": 5.0, "detail_px": 2, "bevel_segments": 1}
   }
 }
