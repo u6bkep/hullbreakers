@@ -92,6 +92,7 @@ impl Plugin for ClientPlugin {
                     sfx::play_remote_sounds,
                     (sfx::play_event_sounds, camera::camera_fx_events)
                         .after(events::present_events),
+                    sfx::play_combat_sounds.after(sfx::play_event_sounds),
                 )
                     .in_set(Present),
             )
