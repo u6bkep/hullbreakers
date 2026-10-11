@@ -14,6 +14,10 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 use crate::sim::asteroids::Asteroid;
+use crate::sim::combat::{Beams, Combatant, TURRETS, beam_on};
+use crate::sim::mission::{Mission, Phase};
+use crate::sim::ship::{HomeShip, HullKind, ShipHull};
+use crate::sim::SimTick;
 use super::events::Presented;
 use crate::sim::events::{Detach, PlayerEvent};
 use super::events::EventCursor;
@@ -180,6 +184,166 @@ impl Synth {
             .collect();
         Self::crossfade_loop(raw, len)
     }
+    /// Heavy electrical drone: mains-hum harmonics (integer Hz, so the loop
+    /// is exact), a slow throb, a thin whine and a low rumble of noise.
+    fn hum_loop(&mut self) -> Vec<f32> {
+        let len = RATE as usize * 2;
+        let amps = [(1, 1.0), (2, 0.7), (3, 0.45), (4, 0.3), (6, 0.2), (8, 0.12)];
+        let rumble = self.noise_loop(2.0, 400.0, 2, 0.5);
+        (0..len)
+            .map(|i| {
+                let t = i as f32 / RATE as f32;
+                let tone: f32 = amps
+                    .iter()
+                    .map(|(h, a)| a * (TAU * 55.0 * *h as f32 * t).sin())
+                    .sum();
+                let throb = 1.0 + 0.2 * (TAU * 7.0 * t).sin();
+                let whine = 0.06 * (TAU * 3300.0 * t).sin() * (1.0 + (TAU * 11.0 * t).sin());
+                (tone * 0.5 * throb).tanh() + whine + rumble[i] * 0.3
+            })
+            .collect()
+    }
+
+    /// Sparse random pops ringing through a hiss: electrical crackle.
+    fn crackle(&mut self, seconds: f32, density: f32, decay_per_sample: f32) -> Vec<f32> {
+        let a = 1.0 - (-TAU * 3000.0 / RATE as f32).exp();
+        let mut lp = 0.0;
+        let mut pop = 0.0f32;
+        let mut out = Self::buffer(seconds);
+        for s in out.iter_mut() {
+            let x = self.noise();
+            lp += a * (x - lp);
+            if self.rng.random_range(0.0..1.0) < density {
+                pop = self.rng.random_range(0.4..1.0);
+            }
+            pop *= decay_per_sample;
+            // Highpassed noise, mostly gated by the pops.
+            *s = (x - lp) * (0.15 + pop * 1.6);
+        }
+        out
+    }
+
+    /// Looping shield sizzle: crackle that never settles.
+    fn sizzle_loop(&mut self) -> Vec<f32> {
+        let len = RATE as usize * 2;
+        let raw = self.crackle(2.5, 0.0012, 0.996);
+        Self::crossfade_loop(raw, len)
+    }
+
+    /// Looping hull grind: low rumble chewed by a 9 Hz stutter and grit.
+    fn grind_loop(&mut self) -> Vec<f32> {
+        let len = RATE as usize * 2;
+        let (a_low, a_grit) = (
+            1.0 - (-TAU * 160.0 / RATE as f32).exp(),
+            1.0 - (-TAU * 420.0 / RATE as f32).exp(),
+        );
+        let (mut l1, mut l2, mut g) = (0.0f32, 0.0f32, 0.0f32);
+        let raw: Vec<f32> = (0..len + len / 4)
+            .map(|i| {
+                let t = i as f32 / RATE as f32;
+                let n = self.noise();
+                l1 += a_low * (n - l1);
+                l2 += a_low * (l1 - l2);
+                g += a_grit * (n - g);
+                let chew = 0.65 + 0.35 * (TAU * 9.0 * t).sin();
+                (l2 * 5.0 + (g * 4.0).tanh() * 0.35) * chew
+            })
+            .collect();
+        Self::crossfade_loop(raw, len)
+    }
+
+    /// Looping alarm klaxon: two rising whoops, silent at both ends of the
+    /// 1.6 s loop.
+    fn klaxon_loop(&mut self) -> Vec<f32> {
+        let whoop = (RATE as f32 * 0.8) as usize;
+        let mut phase = 0.0f32;
+        let one: Vec<f32> = (0..whoop)
+            .map(|i| {
+                let k = i as f32 / whoop as f32;
+                let rise = (k / 0.85).min(1.0);
+                phase += TAU * (420.0 + 340.0 * rise * rise) / RATE as f32;
+                let env = (i as f32 / 200.0).min(1.0) * ((1.0 - k) / 0.08).clamp(0.0, 1.0);
+                ((phase.sin() * 4.0).tanh() * 0.8 + (phase * 2.0).sin() * 0.2) * env
+            })
+            .collect();
+        concat(one.clone(), one)
+    }
+
+    /// Switch-gear press: a thud into a heavy metal ka-chunk.
+    fn button_press(&mut self) -> Vec<f32> {
+        let chunk = mix(self.thud(0.1, 45.0, 900.0, 0.9), self.clank(0.16, 320.0, 55.0, 0.5));
+        let clack = concat(Self::buffer(0.05), self.clank(0.1, 690.0, 80.0, 0.3));
+        mix(chunk, clack)
+    }
+
+    /// Jump/warp: noise and tone swelling upward, then cut off with a thump.
+    fn warp(&mut self) -> Vec<f32> {
+        let mut out = Self::buffer(0.75);
+        let n = out.len() as f32;
+        let (mut lp, mut phase) = (0.0f32, 0.0f32);
+        for (i, s) in out.iter_mut().enumerate() {
+            let k = i as f32 / n;
+            let cutoff = 300.0 + 4700.0 * k * k;
+            lp += (1.0 - (-TAU * cutoff / RATE as f32).exp()) * (self.noise() - lp);
+            phase += TAU * (120.0 + 1300.0 * k * k) / RATE as f32;
+            let env = if k < 0.82 {
+                (k / 0.82).powf(1.5)
+            } else {
+                ((1.0 - k) / 0.18).powi(2)
+            };
+            *s = (lp * 1.6 + phase.sin() * 0.35) * env;
+        }
+        mix(out, concat(Self::buffer(0.6), self.thud(0.2, 20.0, 400.0, 1.0)))
+    }
+
+    /// A blast: a falling sub-bass boom under a noise burst whose lowpass
+    /// closes from `bright` Hz. Low `bright` is the muffled felt-through-
+    /// the-hull version.
+    fn explosion(&mut self, seconds: f32, bright: f32, boom: f32) -> Vec<f32> {
+        let mut out = Self::buffer(seconds);
+        let (mut lp, mut phase) = (0.0f32, 0.0f32);
+        for (i, s) in out.iter_mut().enumerate() {
+            let t = i as f32 / RATE as f32;
+            let cutoff = (bright * (-t * 3.0).exp()).max(90.0);
+            lp += (1.0 - (-TAU * cutoff / RATE as f32).exp()) * (self.noise() - lp);
+            phase += TAU * (28.0 + 80.0 * (-t * 2.5).exp()) / RATE as f32;
+            let attack = (t / 0.003).min(1.0);
+            *s = (lp * 2.5 * (-t * 2.2).exp() + phase.sin() * boom * (-t * 1.6).exp()) * attack;
+        }
+        out
+    }
+
+    /// Structure groaning under load: a wavering low tone with harmonics.
+    fn groan(&mut self) -> Vec<f32> {
+        let mut out = Self::buffer(1.6);
+        let n = out.len() as f32;
+        let mut phase = 0.0f32;
+        for (i, s) in out.iter_mut().enumerate() {
+            let t = i as f32 / RATE as f32;
+            let k = i as f32 / n;
+            phase += TAU * (72.0 - 22.0 * k + 3.0 * (TAU * 5.0 * t).sin()) / RATE as f32;
+            let tone = phase.sin() + 0.5 * (phase * 2.0).sin() + 0.3 * (phase * 3.0).sin();
+            let env = (std::f32::consts::PI * k).sin().powi(2);
+            *s = (tone * 1.2).tanh() * env * (0.75 + 0.25 * (TAU * 13.0 * t).sin());
+        }
+        mix(out, self.thud(1.2, 3.0, 90.0, 0.8))
+    }
+
+    /// A metal creak: a squealing tone wandering in pitch.
+    fn creak(&mut self) -> Vec<f32> {
+        let mut out = Self::buffer(0.6);
+        let n = out.len() as f32;
+        let (mut phase, mut wander) = (0.0f32, 0.0f32);
+        for (i, s) in out.iter_mut().enumerate() {
+            let t = i as f32 / RATE as f32;
+            let k = i as f32 / n;
+            wander += 0.0015 * (self.noise() - wander);
+            phase += TAU * (190.0 + 70.0 * (TAU * 6.0 * t).sin() + 4000.0 * wander) / RATE as f32;
+            let env = (std::f32::consts::PI * k).sin();
+            *s = (phase.sin() * 3.0).tanh() * env * (0.5 + 0.5 * self.noise().abs());
+        }
+        out
+    }
 }
 
 fn normalize(mut samples: Vec<f32>, peak: f32) -> Vec<f32> {
@@ -219,6 +383,29 @@ pub struct Sounds {
     warning: Handle<AudioSource>,
     click_on: Handle<AudioSource>,
     click_off: Handle<AudioSource>,
+    button: Handle<AudioSource>,
+    warp: Handle<AudioSource>,
+    fire_start: Handle<AudioSource>,
+    fire_stop: Handle<AudioSource>,
+    thump_shield: Handle<AudioSource>,
+    thump_hull: Handle<AudioSource>,
+    sizzle_burst: Handle<AudioSource>,
+    blast_close: Handle<AudioSource>,
+    blast_far: Handle<AudioSource>,
+    creak: Handle<AudioSource>,
+    groan: Handle<AudioSource>,
+}
+
+/// Looping combat sounds, faded by [`play_combat_sounds`].
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum CombatLoop {
+    /// Turret `n` firing through your hull.
+    Hum(u8),
+    /// A beam fizzing on the shield.
+    Sizzle,
+    /// A beam grinding into the hull.
+    Grind,
+    Klaxon,
 }
 
 #[derive(Component)]
@@ -284,9 +471,33 @@ pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         )),
         click_on: add(synth.beep(0.05, 1500.0, 0.25)),
         click_off: add(synth.beep(0.05, 900.0, 0.25)),
+        button: add(synth.button_press()),
+        warp: add(synth.warp()),
+        fire_start: add(mix(
+            synth.sweep(0.25, 150.0, 1200.0, 0.3, 0.6),
+            synth.thud(0.2, 15.0, 300.0, 0.7),
+        )),
+        fire_stop: add(synth.sweep(0.5, 600.0, 60.0, 0.15, 0.6)),
+        thump_shield: add(mix(
+            synth.thud(0.25, 14.0, 500.0, 0.8),
+            synth.sweep(0.2, 1500.0, 400.0, 0.7, 0.3),
+        )),
+        thump_hull: add(mix(
+            synth.thud(0.45, 9.0, 260.0, 1.0),
+            synth.clank(0.4, 95.0, 10.0, 0.5),
+        )),
+        sizzle_burst: add(synth.crackle(0.8, 0.004, 0.992)),
+        blast_close: add(synth.explosion(2.6, 3500.0, 1.2)),
+        blast_far: add(synth.explosion(2.2, 150.0, 1.6)),
+        creak: add(synth.creak()),
+        groan: add(synth.groan()),
     };
     let jet = add(synth.noise_loop(2.0, 650.0, 2, 1.0));
     let whine = add(synth.winch_loop());
+    let hum = add(synth.hum_loop());
+    let sizzle = add(synth.sizzle_loop());
+    let grind = add(synth.grind_loop());
+    let klaxon = add(synth.klaxon_loop());
     let looping = |volume: f32| PlaybackSettings {
         mode: PlaybackMode::Loop,
         volume: Volume::Linear(volume),
@@ -294,8 +505,15 @@ pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
     };
     commands.spawn((JetpackLoop, AudioPlayer(jet), looping(0.0)));
     commands.spawn((ReelLoop, AudioPlayer(whine), looping(0.0)));
+    for index in 0..TURRETS {
+        commands.spawn((CombatLoop::Hum(index), AudioPlayer(hum.clone()), looping(0.0)));
+    }
+    commands.spawn((CombatLoop::Sizzle, AudioPlayer(sizzle), looping(0.0)));
+    commands.spawn((CombatLoop::Grind, AudioPlayer(grind), looping(0.0)));
+    commands.spawn((CombatLoop::Klaxon, AudioPlayer(klaxon), looping(0.0)));
     commands.insert_resource(sounds);
     commands.init_resource::<AudioState>();
+    commands.init_resource::<CombatAudio>();
 }
 
 fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, speed: f32) {
@@ -396,6 +614,9 @@ pub fn play_remote_sounds(
                 {
                     play_at(&mut commands, surface(body).0, 0.8, pitch * 0.85, position);
                 }
+                PlayerEvent::Pressed { body, .. } if Some(body) == shared => {
+                    play_at(&mut commands, &sounds.button, 0.8, pitch, position);
+                }
                 PlayerEvent::GrappleAttached { body, .. } if Some(body) == shared => {
                     // Heard where the hook struck the body.
                     let anchor = player
@@ -432,6 +653,7 @@ pub fn play_event_sounds(
     mut commands: Commands,
     mut events: MessageReader<Presented>,
     sounds: Res<Sounds>,
+    mut combat: ResMut<CombatAudio>,
     rocks: Query<(), With<Asteroid>>,
 ) {
     let mut rng = rand::rng();
@@ -457,6 +679,12 @@ pub fn play_event_sounds(
             PlayerEvent::Detached(Detach::RippedOff(_) | Detach::Yanked(_)) => {
                 play(&mut commands, &sounds.release, 0.9, pitch * 0.8);
                 play(&mut commands, &sounds.warning, 0.7, 1.0);
+            }
+            // The ship underfoot blew apart: the blast is right here, through
+            // the plating, and then the boots let go.
+            PlayerEvent::Detached(Detach::Blasted) => {
+                play(&mut commands, &sounds.blast_close, 1.6, pitch);
+                play(&mut commands, &sounds.release, 0.5, pitch * 0.8);
             }
             PlayerEvent::Detached(_) => play(&mut commands, &sounds.release, 0.6, pitch),
             PlayerEvent::SurfaceChanged { body } | PlayerEvent::BodyChanged { body } => {
@@ -492,11 +720,14 @@ pub fn play_event_sounds(
             }
             PlayerEvent::ReferenceSet { .. } => play(&mut commands, &sounds.click_on, 0.5, 1.4),
             PlayerEvent::NoReferenceTarget => play(&mut commands, &sounds.click_off, 0.4, 0.7),
-            PlayerEvent::Pressed { .. } => play(&mut commands, &sounds.click_on, 0.8, 0.6),
-            PlayerEvent::Respawned => {}
+            PlayerEvent::Pressed { .. } => play(&mut commands, &sounds.button, 0.8, pitch),
+            PlayerEvent::Respawned => {
+                combat.respawn_age = 0.0;
+                play(&mut commands, &sounds.warp, 0.7, 1.0);
+            }
             PlayerEvent::BeamHit => {
+                play(&mut commands, &sounds.sizzle_burst, 0.9, pitch);
                 play(&mut commands, &sounds.impact, 1.0, 0.6);
-                play(&mut commands, &sounds.warning, 0.6, 1.3);
             }
         }
     }
@@ -597,6 +828,157 @@ pub fn play_continuous_sounds(
     state.last_tension = tension;
 }
 
+/// Client-side state for the battle sounds.
+#[derive(Resource)]
+pub struct CombatAudio {
+    /// Per turret: whether your ship's beam was firing / hitting last frame.
+    firing: [bool; TURRETS as usize],
+    hit: [bool; TURRETS as usize],
+    /// Ships seen last frame, with their integrity: one that vanishes with
+    /// the mission decided was destroyed.
+    ships: Vec<(Entity, f32)>,
+    /// The body you stood on last frame.
+    body: Option<Entity>,
+    /// Seconds since the last scenario switch (ships vanish then, too).
+    respawn_age: f32,
+    creak_timer: f32,
+}
+
+impl Default for CombatAudio {
+    fn default() -> Self {
+        Self {
+            firing: default(),
+            hit: default(),
+            ships: Vec::new(),
+            body: None,
+            respawn_age: 10.0,
+            creak_timer: 4.0,
+        }
+    }
+}
+
+/// Hull integrity below which our ship starts to groan.
+const CREAK_BELOW: f32 = 0.3;
+
+/// Ship-to-ship battle sounds, all heard through the hull you stand on. The
+/// structure rule: your own ship's turrets hum through it, beams on your
+/// ship thump, sizzle (shield) or grind (hull) through it, and a raider
+/// whose shield is down blares its klaxon through its own deck. Everything
+/// is read from replicated state (combatants, the beams every peer traces,
+/// the tick), so it is the same on a host and on a client.
+///
+/// Destruction: standing on the ship (see the `Blasted` event) is a huge
+/// close blast. Standing on another ship when one is destroyed, you feel a
+/// deep muffled thump through your own hull. In EVA you hear nothing: there
+/// is nothing to carry it.
+#[allow(clippy::too_many_arguments)]
+pub fn play_combat_sounds(
+    mut commands: Commands,
+    time: Res<Time>,
+    tick: Res<SimTick>,
+    beams: Res<Beams>,
+    sounds: Res<Sounds>,
+    mut state: ResMut<CombatAudio>,
+    player: Single<&Player, With<LocalPlayer>>,
+    missions: Query<&Mission>,
+    ships: Query<(Entity, &Combatant, &ShipHull, Has<HomeShip>)>,
+    mut loops: Query<(&CombatLoop, &mut AudioSink)>,
+) {
+    let dt = time.delta_secs();
+    let body = player.mode.body();
+    let mut rng = rand::rng();
+    state.respawn_age += dt;
+
+    // A ship that disappeared because it was destroyed.
+    let decided = missions.single().is_ok_and(|m| m.phase != Phase::Underway);
+    let aboard_a_ship = body.is_some_and(|b| ships.contains(b));
+    for &(ship, integrity) in &state.ships {
+        if ships.contains(ship)
+            || integrity > 0.15
+            || !decided
+            || state.respawn_age < 1.0
+            || state.body == Some(ship)
+            || !aboard_a_ship
+        {
+            continue;
+        }
+        play(&mut commands, &sounds.blast_far, 0.6, rng.random_range(0.9..1.1));
+    }
+    state.ships = ships.iter().map(|(e, c, ..)| (e, c.integrity)).collect();
+    state.body = body;
+
+    let firing_ship = body.is_some_and(|b| beams.0.iter().any(|x| x.shooter == b));
+    let hits: Vec<_> = beams.0.iter().filter(|x| Some(x.target) == body).collect();
+    let (shield_hit, hull_hit) = (
+        hits.iter().any(|x| x.shielded),
+        hits.iter().any(|x| !x.shielded),
+    );
+    for i in 0..TURRETS {
+        let on = beam_on(i, tick.0);
+        let (fire, hit) = (on && firing_ship, on && !hits.is_empty());
+        let pitch = rng.random_range(0.95..1.05);
+        let i = i as usize;
+        if fire != state.firing[i] {
+            let sound = if fire { &sounds.fire_start } else { &sounds.fire_stop };
+            play(&mut commands, sound, if fire { 0.5 } else { 0.35 }, pitch);
+        }
+        if hit && !state.hit[i] {
+            if hull_hit {
+                play(&mut commands, &sounds.thump_hull, 1.0, pitch);
+            } else {
+                play(&mut commands, &sounds.thump_shield, 0.8, pitch);
+            }
+        }
+        (state.firing[i], state.hit[i]) = (fire, hit);
+    }
+
+    // The klaxon: loud on the raider's own deck, a faint suit-radio echo of
+    // it everywhere else.
+    let alarm = ships
+        .iter()
+        .find(|(_, c, h, _)| h.0 == HullKind::Raider && !c.shield)
+        .map(|(e, ..)| e);
+    let klaxon = match alarm {
+        Some(raider) if body == Some(raider) => 0.3,
+        Some(_) => 0.05,
+        None => 0.0,
+    };
+    for (kind, mut sink) in &mut loops {
+        let (target, rate) = match *kind {
+            CombatLoop::Hum(i) => (if state.firing[i as usize] { 0.28 } else { 0.0 }, 30.0),
+            CombatLoop::Sizzle => (if shield_hit { 0.22 } else { 0.0 }, 25.0),
+            CombatLoop::Grind => (if hull_hit { 0.4 } else { 0.0 }, 25.0),
+            CombatLoop::Klaxon => (klaxon, 8.0),
+        };
+        if let CombatLoop::Hum(i) = *kind {
+            // The turrets are a little out of tune with each other.
+            sink.set_speed(1.0 + 0.12 * i as f32);
+        }
+        let current = sink.volume().to_linear();
+        sink.set_volume(Volume::Linear(
+            current + (target - current) * (1.0 - (-dt * rate).exp()),
+        ));
+    }
+
+    // A badly hurt ship groans.
+    let hurt = body
+        .and_then(|b| ships.get(b).ok())
+        .filter(|(_, c, _, home)| *home && c.integrity < CREAK_BELOW);
+    match hurt {
+        Some((_, combatant, ..)) => {
+            state.creak_timer -= dt;
+            if state.creak_timer <= 0.0 {
+                let severity = 1.0 - combatant.integrity / CREAK_BELOW;
+                let volume = 0.25 + 0.4 * severity;
+                let sound = if rng.random_bool(0.4) { &sounds.groan } else { &sounds.creak };
+                play(&mut commands, sound, volume, rng.random_range(0.85..1.15));
+                state.creak_timer = rng.random_range(3.0..9.0) * (1.0 - 0.5 * severity);
+            }
+        }
+        None => state.creak_timer = state.creak_timer.max(2.0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -617,6 +999,10 @@ mod tests {
         for samples in [
             normalize(synth.noise_loop(2.0, 650.0, 2, 1.0), 0.9),
             normalize(synth.winch_loop(), 0.9),
+            normalize(synth.hum_loop(), 0.9),
+            normalize(synth.sizzle_loop(), 0.9),
+            normalize(synth.grind_loop(), 0.9),
+            normalize(synth.klaxon_loop(), 0.9),
         ] {
             let jump = (samples[0] - samples[samples.len() - 1]).abs();
             let typical =
@@ -626,5 +1012,31 @@ mod tests {
                 "loop seam jump {jump} vs typical step {typical}"
             );
         }
+    }
+
+    #[test]
+    fn combat_sounds_are_sane() {
+        let mut synth = Synth {
+            rng: ChaCha8Rng::seed_from_u64(2),
+        };
+        let sounds = [
+            ("button", synth.button_press(), 0.1, 0.5),
+            ("warp", synth.warp(), 0.7, 1.0),
+            ("blast_close", synth.explosion(2.6, 3500.0, 1.2), 2.0, 3.0),
+            ("blast_far", synth.explosion(2.2, 150.0, 1.6), 2.0, 3.0),
+            ("groan", synth.groan(), 1.5, 2.0),
+            ("creak", synth.creak(), 0.5, 1.0),
+            ("sizzle", synth.crackle(0.8, 0.004, 0.992), 0.7, 1.0),
+        ];
+        for (name, samples, min_s, max_s) in sounds {
+            let seconds = samples.len() as f32 / RATE as f32;
+            assert!((min_s..=max_s).contains(&seconds), "{name}: {seconds} s");
+            assert!(samples.iter().all(|s| s.is_finite()), "{name}: non-finite");
+            let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+            assert!(peak > 0.05, "{name}: silent (peak {peak})");
+        }
+        // The klaxon starts and ends in silence, so it loops cleanly.
+        let klaxon = synth.klaxon_loop();
+        assert!(klaxon[0].abs() < 0.01 && klaxon[klaxon.len() - 1].abs() < 0.01);
     }
 }
