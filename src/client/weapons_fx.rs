@@ -38,6 +38,8 @@ pub struct WeaponFxAssets {
     spark: Handle<Mesh>,
     smg: Handle<StandardMaterial>,
     rifle: Handle<StandardMaterial>,
+    /// Robots' tracers: hot red-orange.
+    robot: Handle<StandardMaterial>,
     spark_material: Handle<StandardMaterial>,
 }
 
@@ -68,6 +70,7 @@ pub fn setup_weapon_fx(
         spark: meshes.add(Sphere::new(0.12).mesh().ico(1).unwrap()),
         smg: glow(&mut materials, LinearRgba::rgb(8.0, 5.0, 1.5)),
         rifle: glow(&mut materials, LinearRgba::rgb(4.0, 7.0, 10.0)),
+        robot: glow(&mut materials, LinearRgba::rgb(10.0, 2.5, 1.0)),
         spark_material: glow(&mut materials, LinearRgba::rgb(12.0, 8.0, 3.0)),
     });
 }
@@ -127,6 +130,7 @@ pub fn spawn_tracers(
                 MeshMaterial3d(match gun {
                     GunKind::Smg => assets.smg.clone(),
                     GunKind::Rifle => assets.rifle.clone(),
+                    GunKind::GunnerRifle | GunKind::SwarmerSprayer => assets.robot.clone(),
                 }),
                 Transform::from_translation(start)
                     .looking_at(meet, up)

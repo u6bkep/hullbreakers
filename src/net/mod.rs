@@ -24,6 +24,7 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::sim::asteroids::Asteroid;
+use crate::sim::bots::Robot;
 use crate::sim::combat::Combatant;
 use crate::sim::vitals::Vitals;
 use crate::sim::flight::Flight;
@@ -155,6 +156,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_flight)
             .add_observer(replicate_mission)
             .add_observer(replicate_gallery)
+            .add_observer(replicate_robot)
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players))
             .add_systems(
@@ -262,6 +264,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Asteroid>().replicate_once();
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
+        app.component::<Robot>().replicate_once();
         app.component::<Flight>().replicate();
         app.component::<Combatant>().replicate();
         app.component::<Vitals>().replicate();
@@ -598,6 +601,15 @@ fn replicate_gallery(add: On<Add, GalleryAnchor>, mut commands: Commands) {
     commands
         .entity(add.entity)
         .insert(Replicate::to_clients(NetworkTarget::All));
+}
+
+/// Robots reach clients like other people's players: interpolated, never
+/// predicted. (The host shares the authority's world.)
+fn replicate_robot(add: On<Add, Robot>, mut commands: Commands) {
+    commands.entity(add.entity).insert((
+        Replicate::to_clients(NetworkTarget::All),
+        InterpolationTarget::to_clients(NetworkTarget::AllExcept([HOST_PEER].into_iter().collect())),
+    ));
 }
 
 fn spawn_host_tuning(mut commands: Commands, tuning: Res<Tuning>) {

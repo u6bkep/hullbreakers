@@ -6,11 +6,12 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use hullbreakers::sim::SimPlugin;
+use hullbreakers::sim::bots::Robot;
 use hullbreakers::sim::combat::{Beams, Combatant};
 use hullbreakers::sim::events::{Detach, PlayerEvent};
 use hullbreakers::sim::flight::Flight;
 use hullbreakers::sim::input::PlayerInput;
-use hullbreakers::sim::mission::{Debris, Mission, Phase, ScenarioKind};
+use hullbreakers::sim::mission::{Debris, Director, Mission, Phase, ScenarioKind};
 use hullbreakers::sim::player::{Mode, Player};
 use hullbreakers::sim::ship::{HomeShip, HullKind, ShipHull};
 use hullbreakers::sim::tuning::Tuning;
@@ -33,6 +34,8 @@ fn app() -> App {
     app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         1.0 / 60.0,
     )));
+    // Robots are tested on their own (tests/robots.rs).
+    app.world_mut().resource_mut::<Director>().robots = false;
     app.finish();
     app.cleanup();
     ticks(&mut app, 4);
@@ -47,17 +50,17 @@ fn ticks(app: &mut App, n: usize) {
 
 fn player(app: &mut App) -> Player {
     let world = app.world_mut();
-    world.query::<&Player>().single(world).unwrap().clone()
+    world.query_filtered::<&Player, Without<Robot>>().single(world).unwrap().clone()
 }
 
 fn set_player(app: &mut App, f: impl FnOnce(&mut Player)) {
     let world = app.world_mut();
-    f(&mut world.query::<&mut Player>().single_mut(world).unwrap());
+    f(&mut world.query_filtered::<&mut Player, Without<Robot>>().single_mut(world).unwrap());
 }
 
 fn interact(app: &mut App) {
     let world = app.world_mut();
-    let mut input = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
+    let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
     input.presses.interact.press();
 }
 
@@ -266,7 +269,7 @@ fn a_beam_shoves_a_player_out_of_its_way() {
 
 fn vitals(app: &mut App) -> Vitals {
     let world = app.world_mut();
-    *world.query::<&Vitals>().single(world).unwrap()
+    *world.query_filtered::<&Vitals, Without<Robot>>().single(world).unwrap()
 }
 
 #[test]
@@ -305,7 +308,7 @@ fn health_comes_back_after_a_while_unhurt() {
     let full = Tuning::default().player_health;
     {
         let world = app.world_mut();
-        let mut v = world.query::<&mut Vitals>().single_mut(world).unwrap();
+        let mut v = world.query_filtered::<&mut Vitals, Without<Robot>>().single_mut(world).unwrap();
         v.health = full / 2.0;
         v.since_hurt = 0.0;
     }
@@ -363,7 +366,7 @@ fn a_player_can_cross_to_the_raider() {
     });
     {
         let world = app.world_mut();
-        let mut input = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
+        let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
         input.presses.off.press();
     }
     ticks(&mut app, 1);
@@ -371,7 +374,7 @@ fn a_player_can_cross_to_the_raider() {
     assert_eq!(grapple.target, raider);
     {
         let world = app.world_mut();
-        let mut input = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
+        let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
         input.reel_in = true;
     }
     // Reeled in to hang at the hull, nearly at rest relative to it (from

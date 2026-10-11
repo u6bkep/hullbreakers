@@ -25,6 +25,7 @@ use super::events::{Detach, EventLog, PlayerEvent};
 use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
 use super::combat::{Beams, beam_shove};
+use super::bots::{BodyTuning, Robot, tuning_of};
 use super::weapons::{Loadout, ShotOut};
 use super::rope::{RopeEnd, solve_rope};
 use super::ship::Control;
@@ -286,12 +287,15 @@ pub struct PreviousMode(pub Mode);
 pub fn add_player_hull(
     add: On<Add, Player>,
     tuning: Res<Tuning>,
+    robots: Query<&Robot>,
     mut commands: Commands,
 ) {
+    // A robot's own size (if its kind is known yet; see `bots::add_body_tuning`).
+    let robot = robots.get(add.entity).ok().map(|kind| kind.tuning(&tuning));
     commands
         .entity(add.entity)
         .insert((
-            capsule(&tuning),
+            capsule(robot.as_ref().unwrap_or(&tuning)),
             Sensor,
             CollisionLayers::new(super::Layer::Players, LayerMask::NONE),
         ))
@@ -306,11 +310,11 @@ pub fn pose_player_hulls(
     tuning: Res<Tuning>,
     bodies: Bodies,
     // Players aren't bodies: disjoint from what `Bodies` reads.
-    mut players: Query<(&Player, &mut Position, &mut Rotation), Without<BodyInertia>>,
+    mut players: Query<(&Player, &mut Position, &mut Rotation, Option<&BodyTuning>), Without<BodyInertia>>,
 ) {
-    for (player, mut position, mut rotation) in &mut players {
+    for (player, mut position, mut rotation, own) in &mut players {
         let frame = player.mode.body().and_then(|b| bodies.frame(b));
-        let (center, _) = player.mode.world_kinematics(&tuning, frame.as_ref());
+        let (center, _) = player.mode.world_kinematics(tuning_of(&tuning, own), frame.as_ref());
         let axis = match player.mode {
             Mode::Eva { orientation, .. } => orientation,
             Mode::Booted { up, .. } => {
@@ -373,7 +377,7 @@ pub fn new_player(ship: Entity, index: u32) -> impl Bundle {
     )
 }
 
-fn capsule(t: &Tuning) -> Collider {
+pub fn capsule(t: &Tuning) -> Collider {
     Collider::capsule(
         t.capsule_radius,
         (t.capsule_height - 2.0 * t.capsule_radius).max(0.01),
@@ -494,6 +498,7 @@ fn capsule_fits(ctx: &TickContext, frame: &BodyFrame, feet: Vec3, up: Vec3) -> b
 }
 
 /// Everything a single player tick needs from the world.
+#[derive(Clone)]
 struct TickContext<'a, 'w, 's> {
     tuning: &'a Tuning,
     dt: f32,
@@ -507,6 +512,17 @@ struct TickContext<'a, 'w, 's> {
     controls: &'a [ControlPoint],
     /// Every laser beam firing this tick.
     beams: &'a Beams,
+}
+
+impl<'a, 'w, 's> TickContext<'a, 'w, 's> {
+    /// The same context, for a body with its own tuning.
+    fn with_tuning<'b>(&'b self, tuning: &'b Tuning) -> TickContext<'b, 'w, 's> {
+        TickContext {
+            tuning,
+            filter: self.filter.clone(),
+            ..*self
+        }
+    }
 }
 
 /// A button, where it is on its ship.
@@ -746,6 +762,7 @@ type PlayerQuery = (
     Option<&'static PlayerInput>,
     Option<&'static mut PreviousMode>,
     Option<&'static mut PlayerTelemetry>,
+    Option<&'static BodyTuning>,
 );
 
 
@@ -770,9 +787,9 @@ pub fn player_tick(
     // Every player, simulated here or not, can be aimed at and tied to.
     let points: Vec<PlayerPoint> = players
         .iter()
-        .map(|(entity, player, ..)| {
+        .map(|(entity, player, .., own)| {
             let frame = player.mode.body().and_then(|b| bodies.frame(b));
-            let (position, velocity) = player.mode.world_kinematics(&tuning, frame.as_ref());
+            let (position, velocity) = player.mode.world_kinematics(tuning_of(&tuning, own), frame.as_ref());
             PlayerPoint {
                 entity,
                 position,
@@ -796,10 +813,16 @@ pub fn player_tick(
     // Input first, for every player simulated here (only players with input
     // here are): look, toggles, firing the grapple.
     let mut commands: Vec<(Entity, TickInput)> = Vec::new();
-    for (entity, mut player, input, previous, telemetry) in &mut players {
+    for (entity, mut player, input, previous, telemetry, own) in &mut players {
         let (Some(input), Some(mut previous), Some(mut telemetry)) = (input, previous, telemetry)
         else {
             continue;
+        };
+        // A body built differently (a robot) moves by its own tuning.
+        let own = own.map(|t| t.0.clone());
+        let ctx = match &own {
+            Some(t) => ctx.with_tuning(t),
+            None => ctx.with_tuning(&tuning),
         };
         let player = &mut *player;
         player.events.begin_tick(tick.0);
@@ -814,7 +837,7 @@ pub fn player_tick(
             player.flight_assist = !player.flight_assist;
             player.emit(PlayerEvent::AssistToggled(player.flight_assist));
         }
-        let roll = cmd.roll * tuning.roll_rate_deg.to_radians() * ctx.dt;
+        let roll = cmd.roll * ctx.tuning.roll_rate_deg.to_radians() * ctx.dt;
         player.mode.apply_look(cmd.look, roll);
         // Recorded after look so the camera interpolates movement only; look
         // is applied immediately (see `update_camera`).
@@ -874,8 +897,13 @@ pub fn player_tick(
     }
     // Then everyone moves (ropes to bodies are solved as part of moving).
     for (entity, cmd) in commands {
-        let Ok((_, mut player, _, _, Some(mut telemetry))) = players.get_mut(entity) else {
+        let Ok((_, mut player, _, _, Some(mut telemetry), own)) = players.get_mut(entity) else {
             continue;
+        };
+        let own = own.map(|t| t.0.clone());
+        let ctx = match &own {
+            Some(t) => ctx.with_tuning(t),
+            None => ctx.with_tuning(&tuning),
         };
         let player = &mut *player;
         match player.mode {

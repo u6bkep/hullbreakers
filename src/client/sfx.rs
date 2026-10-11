@@ -746,8 +746,8 @@ pub fn play_event_sounds(
             PlayerEvent::Died => play(&mut commands, &sounds.warning, 1.0, 0.7),
             PlayerEvent::Fired { gun, .. } => {
                 let sound = match gun {
-                    GunKind::Smg => &sounds.shot_smg,
-                    GunKind::Rifle => &sounds.shot_rifle,
+                    GunKind::Smg | GunKind::SwarmerSprayer => &sounds.shot_smg,
+                    GunKind::Rifle | GunKind::GunnerRifle => &sounds.shot_rifle,
                 };
                 play(&mut commands, sound, 0.7, pitch);
             }

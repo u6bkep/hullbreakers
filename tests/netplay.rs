@@ -335,3 +335,29 @@ fn shooting_is_predicted() {
     assert!(fired > 0, "never fired");
     assert!(firing.max(switching).max(rifle) <= 0.5, "shooting mispredicted");
 }
+
+/// The raider's robots reach a client as interpolated players with their
+/// kind and health, and having them about doesn't upset the client's
+/// prediction of itself.
+#[test]
+fn robots_reach_clients() {
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    use hullbreakers::sim::vitals::Vitals;
+    let (_guard, mut s) = session(100);
+    s.server
+        .world_mut()
+        .resource_mut::<Director>()
+        .start(ScenarioKind::Boarding);
+    s.step(240);
+    let count = |app: &mut App| {
+        let world = app.world_mut();
+        world.query_filtered::<(), (With<Robot>, With<Player>, With<Vitals>)>().iter(world).count()
+    };
+    let (server, client) = (count(&mut s.server), count(&mut s.client));
+    let rate = s.rollback_rate(300);
+    eprintln!("robots: server {server}, client {client}; {rate:.2} rollbacks/s");
+    assert!(server > 0, "no robots on the server");
+    assert_eq!(client, server, "client sees {client} of {server} robots");
+    assert!(rate <= 0.5, "robots upset prediction: {rate:.1}/s");
+}

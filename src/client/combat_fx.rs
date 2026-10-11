@@ -28,6 +28,9 @@ use bevy::shader::ShaderRef;
 use bevy::transform::TransformSystems;
 
 use super::camera::{self, PlayerCamera};
+use super::render::Avatar;
+use crate::sim::bots::{BodyTuning, Robot};
+use crate::sim::vitals::Vitals;
 use super::render::ShipLight;
 use crate::sim::combat::{Beams, Combatant, SHIELD_CENTER, SHIELD_RADII};
 use crate::sim::ship::{Control, ControlAction, HomeShip, Turret};
@@ -42,6 +45,7 @@ impl Plugin for CombatFxPlugin {
             .init_resource::<BeamPool>()
             .add_systems(Startup, setup_fx)
             .add_observer(explode)
+            .add_observer(robot_destroyed)
             .add_systems(
                 Update,
                 (
@@ -50,6 +54,7 @@ impl Plugin for CombatFxPlugin {
                     fit_shields,
                     pulse_buttons,
                     animate_explosions,
+                    fade_robot_flashes,
                     animate_sparks,
                     cool_scorches,
                 ),
@@ -1284,6 +1289,61 @@ fn explode(
         let size = 0.15 + 0.5 * rand::random::<f32>().powi(3);
         let life = 1.0 + 2.5 * rand::random::<f32>();
         spawn_spark(&mut commands, &fx, at + v * 0.05, velocity + v, size, life);
+    }
+}
+
+/// A robot destroyed (not tidied away whole by a scenario change): a burst
+/// of sparks and a brief flash where it was drawn.
+fn robot_destroyed(
+    remove: On<Remove, Robot>,
+    robots: Query<(&Vitals, Option<&BodyTuning>)>,
+    avatars: Query<(&Avatar, &Transform)>,
+    fx: Option<Res<FxAssets>>,
+    mut commands: Commands,
+) {
+    let (Ok((vitals, own)), Some(fx)) = (robots.get(remove.entity), fx) else {
+        return;
+    };
+    if own.is_some_and(|t| vitals.health >= t.0.player_health) {
+        return;
+    }
+    let Some((_, transform)) = avatars.iter().find(|(a, _)| a.player == remove.entity) else {
+        return;
+    };
+    let at = transform.translation;
+    for _ in 0..30 {
+        let v = random_unit() * (3.0 + 12.0 * rand::random::<f32>());
+        let life = 0.4 + 0.8 * rand::random::<f32>();
+        spawn_spark(&mut commands, &fx, at, v, 0.08 + 0.12 * rand::random::<f32>(), life);
+    }
+    commands.spawn((
+        Name::new("Robot flash"),
+        RobotFlash(0.0),
+        PointLight {
+            color: Color::srgb(1.0, 0.7, 0.4),
+            intensity: 2_000_000.0,
+            range: 25.0,
+            ..default()
+        },
+        Transform::from_translation(at),
+    ));
+}
+
+#[derive(Component)]
+struct RobotFlash(f32);
+
+fn fade_robot_flashes(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut flashes: Query<(Entity, &mut RobotFlash, &mut PointLight)>,
+) {
+    for (entity, mut flash, mut light) in &mut flashes {
+        flash.0 += time.delta_secs();
+        if flash.0 > 0.3 {
+            commands.entity(entity).despawn();
+        } else {
+            light.intensity = 2_000_000.0 * (1.0 - flash.0 / 0.3);
+        }
     }
 }
 

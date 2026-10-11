@@ -39,6 +39,15 @@ braced and shoots tighter. Bullets fly at realistic speeds and keep the
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's
 hand works its rope; stow it and the rope holds its length.
 
+The raider is crewed by robots: two **Gunners** aboard (walkers with rifle
+arms that keep their distance and strafe; they hold the bridge and the hold
+facing the cargo door) and four **Swarmers** flying escort (fast, fragile
+drones that rush in and spray). Robots are players driven by a brain on the
+host, so they move, aim and shoot by the crew's rules; they see along clear
+sight lines, chase a target that ducks out of view for a few seconds, and
+are destroyed at zero health. The F1 panel can spawn a Gunner on our bridge
+or three Swarmers off our port side, for trying out a fight.
+
 Players have suit health (bottom of the screen). It comes back after a few
 seconds unhurt; at zero you respawn aboard the home ship.
 

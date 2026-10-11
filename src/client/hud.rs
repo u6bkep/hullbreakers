@@ -10,6 +10,7 @@ use super::LocalPlayer;
 use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
 use super::input::MouseCaptured;
+use crate::sim::bots::{Robot, SpawnRobots};
 use crate::sim::vitals::Vitals;
 use crate::sim::weapons::{Hand, Slot};
 use crate::sim::combat::{SHIELD_CENTER, SHIELD_RADII};
@@ -37,6 +38,7 @@ pub fn hud(
     names: Query<&Name>,
     events: Res<EventCursor>,
     mut ship_orders: MessageWriter<ShipCommand>,
+    mut robot_orders: MessageWriter<SpawnRobots>,
     camera: Single<&Transform, With<PlayerCamera>>,
     spatial: SpatialQuery,
     controls: Query<(&Control, &Transform, &ChildOf)>,
@@ -195,6 +197,13 @@ pub fn hud(
                 }
                 if ui.button("Ship lurch (L)").clicked() {
                     ship_orders.write(ShipCommand::Lurch);
+                }
+                // Host only: the authority reads these.
+                if ui.button("Spawn Gunner on bridge").clicked() {
+                    robot_orders.write(SpawnRobots(Robot::Gunner));
+                }
+                if ui.button("Spawn 3 Swarmers to port").clicked() {
+                    robot_orders.write(SpawnRobots(Robot::Swarmer));
                 }
             });
             ui.label(&panel.status);

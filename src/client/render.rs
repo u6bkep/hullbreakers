@@ -14,6 +14,7 @@ use crate::sim::SimMaterial;
 use crate::sim::asteroids::FIELD_DIRECTION;
 use crate::sim::frame::BodyFrame;
 use crate::sim::player::{Grapple, Mode, Player};
+use crate::sim::bots::{BodyTuning, Robot, tuning_of};
 use crate::sim::ship::HullPart;
 use crate::sim::tuning::Tuning;
 
@@ -452,15 +453,17 @@ pub struct Avatar {
 /// Keeps a capsule (with a visor showing where they look) on every other
 /// player, placed in the rendered frame of the body they stand on.
 pub fn update_avatars(
-    tuning: Res<Tuning>,
-    players: Query<(Entity, &Player), Without<LocalPlayer>>,
+    base: Res<Tuning>,
+    assets: Res<AssetServer>,
+    players: Query<(Entity, &Player, Option<&Robot>, Option<&BodyTuning>), Without<LocalPlayer>>,
     mut avatars: Query<(Entity, &Avatar, &mut Transform)>,
     transforms: Query<&Transform, Without<Avatar>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ) {
-    let pose = |player: &Player| -> Option<Transform> {
+    let pose = |player: &Player, own: Option<&BodyTuning>| -> Option<Transform> {
+        let tuning = tuning_of(&base, own);
         let half = tuning.capsule_height / 2.0;
         let (center, rotation) = match player.mode {
             Mode::Eva {
@@ -486,7 +489,7 @@ pub fn update_avatars(
     };
     let mut seen = Vec::new();
     for (entity, avatar, mut transform) in &mut avatars {
-        match players.get(avatar.player).ok().and_then(|(_, p)| pose(p)) {
+        match players.get(avatar.player).ok().and_then(|(_, p, _, own)| pose(p, own)) {
             Some(pose) => {
                 *transform = pose;
                 seen.push(avatar.player);
@@ -495,11 +498,27 @@ pub fn update_avatars(
             None => commands.entity(entity).despawn(),
         }
     }
-    for (entity, player) in &players {
+    for (entity, player, robot, own) in &players {
         if seen.contains(&entity) {
             continue;
         }
-        let Some(pose) = pose(player) else { continue };
+        let Some(pose) = pose(player, own) else { continue };
+        let tuning = tuning_of(&base, own);
+        if let Some(kind) = robot {
+            // Its model, whose origin is at its feet (a walker) or its
+            // middle (a flyer).
+            let (path, offset) = match kind {
+                Robot::Gunner => ("robots/gunner/gunner.glb", -tuning.capsule_height / 2.0),
+                Robot::Swarmer => ("robots/swarmer/swarmer.glb", 0.0),
+            };
+            commands
+                .spawn((Name::new(kind.name()), Avatar { player: entity }, pose, Visibility::default()))
+                .with_child((
+                    WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
+                    Transform::from_xyz(0.0, offset, 0.0),
+                ));
+            continue;
+        }
         let suit = materials.add(StandardMaterial {
             base_color: Color::srgb(0.85, 0.85, 0.8),
             perceptual_roughness: 0.6,
@@ -531,3 +550,4 @@ pub fn update_avatars(
             ));
     }
 }
+

@@ -20,6 +20,7 @@ use super::bodies::{Bodies, PreviousVelocity, dynamic_mass};
 use super::combat::Combatant;
 use super::events::PlayerEvent;
 use super::flight::{Duel, Flight, Path};
+use super::bots::{self, Robot};
 use super::player::{DeckSlot, Mode, Player, PreviousMode};
 use super::ship::{self, ControlAction, HomeShip, HullKind, ShipCommand, ShipHull};
 use super::tuning::Tuning;
@@ -125,6 +126,8 @@ pub struct Director {
     /// Whether the field's rocks are part of the field scenario (tests turn
     /// them off for a quiet ship).
     pub asteroids: bool,
+    /// Whether enemy ships carry robots (tests of other things turn them off).
+    pub robots: bool,
 }
 
 impl Director {
@@ -137,6 +140,7 @@ impl Director {
         Self {
             next: Some(ScenarioKind::Field),
             asteroids,
+            robots: true,
         }
     }
 }
@@ -186,7 +190,7 @@ pub fn settle_battle(
     mut director: ResMut<Director>,
     mut mission: Single<&mut Mission>,
     mut ships: Query<(Entity, &mut Combatant, &ShipHull, Has<HomeShip>, Option<&mut Flight>)>,
-    mut players: Query<&mut Player>,
+    mut players: Query<(Entity, &mut Player, Has<Robot>)>,
 ) {
     let wrecked: Vec<(Entity, HullKind, bool)> = ships
         .iter()
@@ -199,7 +203,14 @@ pub fn settle_battle(
         };
         info!("{kind:?} ship destroyed");
         wreck(&mut commands, ship, kind, &frame, tick.0);
-        for mut player in &mut players {
+        for (entity, mut player, robot) in &mut players {
+            // Robots aboard go down with their ship.
+            if robot {
+                if player.mode.body() == Some(ship) {
+                    commands.entity(entity).despawn();
+                }
+                continue;
+            }
             player.thrown_off(ship, &frame, &tuning);
         }
         // Nobody shoots at wreckage, and it can't shake anyone.
@@ -269,10 +280,16 @@ pub fn switch_scenario(
     tuning: Res<Tuning>,
     mut director: ResMut<Director>,
     mut commands: Commands,
-    old_world: Query<Entity, Or<(With<ShipHull>, With<Asteroid>, With<Debris>, With<GalleryAnchor>)>>,
+    old_world: Query<
+        Entity,
+        Or<(With<ShipHull>, With<Asteroid>, With<Debris>, With<GalleryAnchor>, With<Robot>)>,
+    >,
     homes: Query<(), With<HomeShip>>,
     mut mission: Single<&mut Mission>,
-    mut players: Query<(&mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>)>,
+    mut players: Query<
+        (&mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>),
+        Without<Robot>,
+    >,
     mut shots: ResMut<super::shots::Shots>,
 ) {
     let Some(kind) = director.next.take() else {
@@ -312,7 +329,7 @@ pub fn switch_scenario(
             }
             home
         }
-        ScenarioKind::Boarding => spawn_duel(&mut commands, &tuning, tick.0),
+        ScenarioKind::Boarding => spawn_duel(&mut commands, &tuning, tick.0, director.robots),
         ScenarioKind::Gallery => {
             commands.spawn((
                 Name::new("Gallery"),
@@ -391,7 +408,7 @@ const BATTLE_SAMPLES: u32 = 1200;
 
 /// Two ships in a duel: ours, and a raider weaving in and out around it.
 /// Returns ours.
-fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32) -> Entity {
+fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool) -> Entity {
     let duel = Duel {
         center: Vec3::ZERO,
         radius: 300.0,
@@ -468,7 +485,46 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32) -> Entity {
         shielded_seconds: tuning.home_survival_seconds,
         exposed_seconds: tuning.home_survival_seconds,
     });
+    if robots {
+        crew_the_raider(commands, tuning, raider, &weave, tick);
+    }
     home
+}
+
+/// Gunners aboard the raider, facing aft toward its cargo door (where
+/// boarders come in), and Swarmers flying escort around it.
+fn crew_the_raider(commands: &mut Commands, tuning: &Tuning, raider: Entity, flight: &Flight, tick: u32) {
+    let aft = Quat::from_rotation_y(std::f32::consts::PI);
+    for (i, feet) in [Vec3::new(0.0, 0.01, -10.0), Vec3::new(-1.5, 0.01, 8.0)].into_iter().enumerate() {
+        let mode = Mode::Booted {
+            body: raider,
+            feet,
+            up: Vec3::Y,
+            velocity: Vec3::ZERO,
+            orientation: aft,
+            pitch: 0.0,
+        };
+        commands.spawn(bots::new_robot(Robot::Gunner, mode, raider, feet, tuning, i as u32));
+    }
+    let frame = flight.frame(tick, Vec3::ZERO);
+    for (i, post) in [
+        Vec3::new(12.0, 3.0, -8.0),
+        Vec3::new(-12.0, 3.0, -8.0),
+        Vec3::new(12.0, -2.0, 10.0),
+        Vec3::new(-12.0, -2.0, 10.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let position = frame.point_to_world(post);
+        let mode = Mode::Eva {
+            position,
+            velocity: frame.point_velocity(position),
+            orientation: frame.rotation,
+            pitch: 0.0,
+        };
+        commands.spawn(bots::new_robot(Robot::Swarmer, mode, raider, post, tuning, 2 + i as u32));
+    }
 }
 
 /// Authority: the replicated mission status.

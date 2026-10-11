@@ -23,6 +23,9 @@ use super::input::TickInput;
 pub enum GunKind {
     Smg,
     Rifle,
+    /// Robots' guns: weaker than the crew's, since robots come in numbers.
+    GunnerRifle,
+    SwarmerSprayer,
 }
 
 /// How a kind of gun behaves.
@@ -72,6 +75,30 @@ impl GunKind {
                 reserve: 150,
                 reload: 2.0,
                 bullet_mass: 0.012,
+            },
+            GunKind::GunnerRifle => &GunStats {
+                name: "Gunner rifle",
+                rate: 5.0,
+                muzzle_speed: 450.0,
+                damage: 8.0,
+                spread_braced: 1.0,
+                spread: 1.0,
+                mag: 20,
+                reserve: 0,
+                reload: 2.0,
+                bullet_mass: 0.01,
+            },
+            GunKind::SwarmerSprayer => &GunStats {
+                name: "Sprayer",
+                rate: 10.0,
+                muzzle_speed: 300.0,
+                damage: 4.0,
+                spread_braced: 3.0,
+                spread: 3.0,
+                mag: 30,
+                reserve: 0,
+                reload: 1.5,
+                bullet_mass: 0.005,
             },
         }
     }

@@ -6,6 +6,7 @@
 
 pub mod asteroids;
 pub mod bodies;
+pub mod bots;
 pub mod combat;
 pub mod events;
 pub mod flight;
@@ -83,8 +84,10 @@ impl Plugin for SimSharedPlugin {
             app.insert_resource(tuning);
         }
         app.add_message::<ship::ShipCommand>()
+            .add_message::<bots::SpawnRobots>()
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
+            .add_observer(bots::add_body_tuning)
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid)
             .add_observer(mission::shape_debris);
@@ -188,6 +191,13 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 FixedPostUpdate,
+                (bots::debug_spawn_robots, bots::think)
+                    .chain()
+                    .after(SimSystems::Beams)
+                    .before(SimSystems::Players),
+            )
+            .add_systems(
+                FixedPostUpdate,
                 (
                     combat::apply_damage,
                     shots::launch_shots,
@@ -195,6 +205,7 @@ impl Plugin for SimPlugin {
                     vitals::beam_burns,
                     vitals::apply_damage,
                     vitals::settle_deaths,
+                    bots::settle_robot_deaths,
                     mission::handle_presses,
                     mission::settle_battle,
                     mission::switch_scenario,
