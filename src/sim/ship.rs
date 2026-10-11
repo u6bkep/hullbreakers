@@ -46,7 +46,7 @@ pub const SHIP_FORWARD: Vec3 = Vec3::NEG_Z;
 
 /// Which hull a ship has. Its geometry, controls and turrets all follow
 /// from this.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HullKind {
     /// The crew's ship.
     #[default]

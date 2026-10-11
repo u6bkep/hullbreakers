@@ -176,3 +176,104 @@ fn a_gunner_stays_on_its_feet() {
         }
     }
 }
+
+/// A carrier, holding still well clear of our ship.
+fn carrier(app: &mut App) -> Entity {
+    use hullbreakers::sim::ship::{HullKind, ShipHull};
+    let carrier = app
+        .world_mut()
+        .spawn((
+            ShipHull(HullKind::Carrier),
+            RigidBody::Kinematic,
+            Position(Vec3::new(0.0, 0.0, 300.0)),
+            Rotation::default(),
+        ))
+        .id();
+    ticks(app, 2);
+    carrier
+}
+
+fn booted(body: Entity, feet: Vec3, facing: f32) -> Mode {
+    Mode::Booted {
+        body,
+        feet,
+        up: Vec3::Y,
+        velocity: Vec3::ZERO,
+        orientation: Quat::from_rotation_y(facing),
+        pitch: 0.0,
+    }
+}
+
+fn spawn_on(app: &mut App, home: Entity, feet: Vec3, post: Vec3, index: u32) -> Entity {
+    let tuning = Tuning::default();
+    app.world_mut()
+        .spawn(new_robot(Robot::Gunner, booted(home, feet, 0.0), home, post, &tuning, index))
+        .id()
+}
+
+fn feet(app: &App, e: Entity) -> Vec3 {
+    match app.world().get::<Player>(e).unwrap().mode {
+        Mode::Booted { feet, .. } => feet,
+        Mode::Eva { position, .. } => position,
+    }
+}
+
+#[test]
+fn a_gunner_hears_gunfire_on_the_deck_above_and_goes_up_the_ramp_to_it() {
+    use hullbreakers::sim::ship::carrier::UPPER;
+    use hullbreakers::sim::weapons::Loadout;
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    // The crew member in the upper corridor, shooting at a wall; the Gunner
+    // right below, in the lower corridor, where it can't see them. The way
+    // up is aft through the hangar and up its ramp: some 70 m.
+    let me = crew(&mut app);
+    {
+        let mut p = app.world_mut().get_mut::<Player>(me).unwrap();
+        p.mode = booted(carrier, Vec3::new(0.0, UPPER + 0.01, -12.0), 0.0);
+        p.loadout = Loadout::default();
+    }
+    app.world_mut().get_mut::<PlayerInput>(me).unwrap().main.held = true;
+    let gunner = spawn_on(&mut app, carrier, Vec3::new(0.0, 0.01, -8.0), Vec3::new(0.0, 0.0, -8.0), 0);
+    let full = health(&app, me);
+    let (mut lowest, mut highest) = (full, 0.0f32);
+    for _ in 0..60 * 45 {
+        ticks(&mut app, 1);
+        lowest = lowest.min(health(&app, me));
+        highest = highest.max(feet(&app, gunner).y);
+        if lowest < full - 15.0 {
+            break;
+        }
+    }
+    assert!(highest > UPPER - 0.1, "never got upstairs (highest {highest}, now at {})", feet(&app, gunner));
+    assert!(lowest < full - 15.0, "never hurt them (at {lowest}); gunner at {}", feet(&app, gunner));
+}
+
+#[test]
+fn a_gunner_with_nothing_to_fight_walks_back_to_its_post() {
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    // In a lower side room; its post is in the hangar, round two corners.
+    let post = Vec3::new(2.5, 0.0, 20.0);
+    let gunner = spawn_on(&mut app, carrier, Vec3::new(-4.0, 0.01, -10.0), post, 0);
+    ticks(&mut app, 60 * 25);
+    let at = feet(&app, gunner);
+    assert!(Vec2::new(at.x - post.x, at.z - post.z).length() < 1.5, "at {at}");
+}
+
+#[test]
+fn a_gunner_that_spots_the_crew_calls_the_others() {
+    use hullbreakers::sim::bots::Brain;
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    // The crew member in the hangar, in sight of one Gunner at the
+    // hangar's bulkhead door; another in a lower side room can't see them.
+    let me = crew(&mut app);
+    app.world_mut().get_mut::<Player>(me).unwrap().mode = booted(carrier, Vec3::new(0.0, 0.01, 24.0), 0.0);
+    let spotter = spawn_on(&mut app, carrier, Vec3::new(0.0, 0.01, 12.0), Vec3::new(0.0, 0.0, 12.0), 0);
+    let other = spawn_on(&mut app, carrier, Vec3::new(4.0, 0.01, 6.0), Vec3::new(4.0, 0.0, 6.0), 1);
+    ticks(&mut app, 30);
+    let world = app.world();
+    assert_eq!(world.get::<Brain>(spotter).unwrap().target, Some(me));
+    assert_eq!(world.get::<Brain>(other).unwrap().target, Some(me), "not told");
+}

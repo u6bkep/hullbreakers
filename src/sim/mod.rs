@@ -14,6 +14,7 @@ pub mod frame;
 pub mod input;
 pub mod mission;
 pub mod motion;
+pub mod nav;
 pub mod pickups;
 pub mod player;
 pub mod rope;
@@ -86,6 +87,7 @@ impl Plugin for SimSharedPlugin {
         }
         app.add_message::<ship::ShipCommand>()
             .add_message::<bots::SpawnRobots>()
+            .init_resource::<nav::NavGrids>()
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
             .add_observer(bots::add_body_tuning)

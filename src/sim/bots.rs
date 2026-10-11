@@ -14,7 +14,11 @@ use serde::{Deserialize, Serialize};
 
 use super::bodies::Bodies;
 use super::events::EventLog;
+use super::events::PlayerEvent;
 use super::input::{InputCursor, PlayerInput};
+use super::nav::{NavGrid, NavGrids};
+use super::ship::ShipHull;
+use super::vitals::Damage;
 use super::player::{Mode, Player, PlayerTelemetry, PreviousMode, capsule};
 use super::shots::Team;
 use super::tuning::Tuning;
@@ -135,13 +139,18 @@ struct Mind {
 }
 
 /// A robot's state of mind. Authority only.
-#[derive(Component, Clone, Debug, Default)]
+#[derive(Component, Clone, Debug)]
 pub struct Brain {
+    /// Who it's after.
     pub target: Option<Entity>,
-    /// Whether it could see its target when it last looked, and seconds
-    /// since it last did.
+    /// Whether it could see its target when it last looked.
     visible: bool,
-    unseen: f32,
+    /// Where it believes its target is, in its home's frame, and seconds
+    /// since it last saw, heard, or was hit by it.
+    lead: Option<Vec3>,
+    since_lead: f32,
+    /// Seconds spent looking about where the lead ran out.
+    searching: f32,
     /// Seconds until it looks for a target again.
     rethink: f32,
     /// Where it is in its burst cycle (s).
@@ -150,10 +159,55 @@ pub struct Brain {
     /// sight) and seconds until it changes.
     strafe: f32,
     strafe_timer: f32,
-    /// Where it keeps to with nothing to fight, in its home body's frame.
+    /// The ship it belongs to, and where it keeps to there with nothing to
+    /// fight, in that ship's frame.
+    pub home: Entity,
     pub post: Vec3,
+    /// The way it's walking (points in its home's frame), where to, and
+    /// seconds until it plans again.
+    route: Vec<Vec3>,
+    route_goal: Option<Vec3>,
+    replan: f32,
     /// Its own phase for wobble and timers, so robots don't move in lockstep.
     seed: f32,
+}
+
+impl Brain {
+    fn new(home: Entity, post: Vec3, index: u32) -> Brain {
+        Brain {
+            target: None,
+            visible: false,
+            lead: None,
+            since_lead: 0.0,
+            searching: 0.0,
+            rethink: 0.0,
+            burst: 0.0,
+            strafe: if index % 2 == 0 { 1.0 } else { -1.0 },
+            strafe_timer: 0.0,
+            home,
+            post,
+            route: Vec::new(),
+            route_goal: None,
+            replan: 0.0,
+            seed: index as f32 * 1.618,
+        }
+    }
+
+    /// It has word of `target` at `at` (in its home's frame): a sighting,
+    /// a sound, a hit, a call from another robot.
+    fn hear_of(&mut self, target: Entity, at: Vec3) {
+        self.target = Some(target);
+        self.lead = Some(at);
+        self.since_lead = 0.0;
+        self.searching = 0.0;
+    }
+
+    fn forget(&mut self) {
+        self.target = None;
+        self.visible = false;
+        self.lead = None;
+        self.searching = 0.0;
+    }
 }
 
 impl MapEntities for Brain {
@@ -161,6 +215,7 @@ impl MapEntities for Brain {
         if let Some(t) = &mut self.target {
             *t = mapper.get_mapped(*t);
         }
+        self.home = mapper.get_mapped(self.home);
     }
 }
 
@@ -185,12 +240,7 @@ pub fn new_robot(kind: Robot, mode: Mode, home: Entity, post: Vec3, base: &Tunin
     (
         Name::new(kind.name()),
         kind,
-        Brain {
-            post,
-            seed: index as f32 * 1.618,
-            strafe: if index % 2 == 0 { 1.0 } else { -1.0 },
-            ..default()
-        },
+        Brain::new(home, post, index),
         Player {
             mode,
             boots_on: matches!(mode, Mode::Booted { .. }),
@@ -236,6 +286,13 @@ type CrewQuery<'a> = (Entity, &'a Player, Option<&'a Team>, Option<&'a BodyTunin
 
 /// Authority, before players move: every robot decides what to do this
 /// tick and writes it as input.
+///
+/// What a robot knows of the crew is what it has seen, heard (gunfire,
+/// through walls), felt (a hit tells it where the shot came from), or been
+/// told by another robot that saw them. Out of sight, it goes where it last
+/// knew its target to be, by the ship's walkways if it walks; finding
+/// nothing there, it looks about a while, then goes back to its post.
+#[allow(clippy::too_many_arguments)]
 pub fn think(
     tick: Res<SimTick>,
     time: Res<Time>,
@@ -243,17 +300,44 @@ pub fn think(
     bodies: Bodies,
     spatial: SpatialQuery,
     everyone: Query<CrewQuery>,
+    hulls: Query<&ShipHull>,
+    mut grids: ResMut<NavGrids>,
+    mut damage: MessageReader<Damage>,
     mut robots: Query<(Entity, &Robot, &mut Brain, &mut PlayerInput)>,
 ) {
     let dt = time.delta_secs();
     let now = tick.0 as f32 / TICK_HZ as f32;
+    let where_is = |e: Entity| -> Option<Vec3> {
+        let (_, p, _, t) = everyone.get(e).ok()?;
+        let f = p.mode.body().and_then(|b| bodies.frame(b));
+        Some(p.mode.world_kinematics(tuning_of(&base, t), f.as_ref()).0)
+    };
+    let crew = |team: Option<&Team>| team.copied().unwrap_or_default() != Team::Robots;
+    // Gunfire from the crew this tick or last, and who hit whom.
+    let shots: Vec<(Entity, Vec3)> = everyone
+        .iter()
+        .filter(|(_, p, team, _)| {
+            crew(*team)
+                && p.events
+                    .iter()
+                    .any(|(at, e)| matches!(e, PlayerEvent::Fired { .. }) && tick.0.wrapping_sub(at) <= 1)
+        })
+        .filter_map(|(e, ..)| Some((e, where_is(e)?)))
+        .collect();
+    let hits: Vec<(Entity, Entity)> = damage.read().filter_map(|d| Some((d.target, d.source?))).collect();
+    // Robots that caught sight of someone just now, and who.
+    let mut sightings: Vec<(Vec3, Entity)> = Vec::new();
     for (entity, kind, mut brain, mut input) in &mut robots {
         let Ok((_, me, _, own)) = everyone.get(entity) else {
             continue;
         };
+        let brain = &mut *brain;
         let tuning = tuning_of(&base, own);
         let mind = kind.mind();
         let frame = me.mode.body().and_then(|b| bodies.frame(b));
+        let home = bodies.frame(brain.home);
+        let to_home = |w: Vec3| home.as_ref().map_or(w, |f| f.point_to_local(w));
+        let to_world = |l: Vec3| home.as_ref().map_or(l, |f| f.point_to_world(l));
         let (eye, view) = me.mode.world_view(tuning, frame.as_ref());
         // The body's rotation (its Y the axis it turns about) and view pitch.
         let body = body_rotation(&me.mode, frame.as_ref());
@@ -261,116 +345,123 @@ pub fn think(
             Mode::Booted { pitch, .. } | Mode::Eva { pitch, .. } => pitch,
         };
         let (position, _) = me.mode.world_kinematics(tuning, frame.as_ref());
-        let sees = |target: Vec3| {
-            let Ok(dir) = Dir3::new(target - eye) else {
+        let clear_line = |from: Vec3, to: Vec3| {
+            let Ok(dir) = Dir3::new(to - from) else {
                 return true;
             };
-            let distance = eye.distance(target);
+            let distance = from.distance(to);
             spatial
-                .cast_ray(eye, dir, distance, true, &SpatialQueryFilter::from_mask(Layer::World))
+                .cast_ray(from, dir, distance, true, &SpatialQueryFilter::from_mask(Layer::World))
                 .is_none_or(|hit| hit.distance > distance - 0.6)
         };
-        let where_is = |e: Entity| -> Option<Vec3> {
-            let (_, p, _, t) = everyone.get(e).ok()?;
-            let f = p.mode.body().and_then(|b| bodies.frame(b));
-            Some(p.mode.world_kinematics(tuning_of(&base, t), f.as_ref()).0)
-        };
-        // Who to fight: the nearest of the crew in sight, looked for now
-        // and then (sight lines cost a ray each). One that slips out of
-        // sight is followed a while (it's probably just behind something),
-        // but not shot at.
+
+        // Sight: the nearest of the crew in view, looked for now and then
+        // (sight lines cost a ray each).
         brain.rethink -= dt;
-        brain.unseen += dt;
+        brain.since_lead += dt;
         if brain.rethink <= 0.0 {
             brain.rethink = 0.3;
+            let was_visible = brain.visible;
             let current = brain.target.and_then(|t| Some((t, where_is(t)?)));
-            if let Some((t, at)) = current
-                && at.distance(eye) < mind.sight
-                && sees(at)
-            {
-                brain.target = Some(t);
-                brain.visible = true;
-            } else if let Some((t, _)) = everyone
-                .iter()
-                .filter(|(_, _, team, _)| team.copied().unwrap_or_default() != Team::Robots)
-                .filter_map(|(e, ..)| Some((e, where_is(e)?)))
-                .filter(|(_, at)| at.distance(eye) < mind.sight && sees(*at))
-                .min_by(|a, b| a.1.distance(eye).total_cmp(&b.1.distance(eye)))
-            {
-                brain.target = Some(t);
-                brain.visible = true;
-            } else {
-                brain.visible = false;
-                if current.is_none() || brain.unseen > MEMORY {
-                    brain.target = None;
+            let seen = current
+                .filter(|(_, at)| at.distance(eye) < mind.sight && clear_line(eye, *at))
+                .or_else(|| {
+                    everyone
+                        .iter()
+                        .filter(|(_, _, team, _)| crew(*team))
+                        .filter_map(|(e, ..)| Some((e, where_is(e)?)))
+                        .filter(|(_, at)| at.distance(eye) < mind.sight && clear_line(eye, *at))
+                        .min_by(|a, b| a.1.distance(eye).total_cmp(&b.1.distance(eye)))
+                });
+            brain.visible = seen.is_some();
+            if let Some((t, at)) = seen {
+                if !was_visible {
+                    sightings.push((position, t));
                 }
-            }
-            if brain.visible {
-                brain.unseen = 0.0;
+                brain.target = Some(t);
                 // Strafe only to a side it would still see the target from.
-                if let Some(at) = brain.target.and_then(where_is) {
-                    let right = view * Vec3::X;
-                    let side = if brain.strafe == 0.0 { 1.0 } else { brain.strafe };
-                    let sees_from = |s: f32| {
-                        let from = eye + right * s * STRAFE_PROBE;
-                        Dir3::new(at - from).is_ok_and(|dir| {
-                            let d = from.distance(at);
-                            spatial
-                                .cast_ray(from, dir, d, true, &SpatialQueryFilter::from_mask(Layer::World))
-                                .is_none_or(|hit| hit.distance > d - 0.6)
-                        })
-                    };
-                    brain.strafe = if sees_from(side) {
-                        side
-                    } else if sees_from(-side) {
-                        -side
-                    } else {
-                        0.0
-                    };
-                }
+                let right = view * Vec3::X;
+                let side = if brain.strafe == 0.0 { 1.0 } else { brain.strafe };
+                let sees_from = |s: f32| clear_line(eye + right * s * STRAFE_PROBE, at);
+                brain.strafe = if sees_from(side) {
+                    side
+                } else if sees_from(-side) {
+                    -side
+                } else {
+                    0.0
+                };
             }
         }
-        let target = brain.target.and_then(where_is);
-        // Aim: turn toward the target (off by a wandering error), at the
-        // robot's turn rate.
-        let mut look = Vec2::ZERO;
+        let target_at = brain.target.and_then(where_is);
+        if let (Some(t), Some(at)) = (brain.target, target_at)
+            && (brain.visible || (brain.lead.is_some() && brain.since_lead < GLIMPSE))
+        {
+            // In sight, or only just out of it: it saw where they went.
+            brain.hear_of(t, to_home(at));
+        } else if !brain.visible {
+            // Out of sight: shot at, or gunfire within earshot, tells it
+            // where someone is.
+            let hit_by = hits.iter().find(|(victim, _)| *victim == entity).map(|(_, s)| *s);
+            let heard = || {
+                shots
+                    .iter()
+                    .filter(|(_, at)| at.distance(position) < HEARING)
+                    .min_by(|a, b| a.1.distance(position).total_cmp(&b.1.distance(position)))
+                    .map(|(s, _)| *s)
+            };
+            let fresh = brain.lead.is_none() || brain.since_lead > 1.0;
+            if let Some(source) = hit_by.or_else(|| fresh.then(heard).flatten())
+                && let Some(at) = where_is(source)
+            {
+                brain.hear_of(source, to_home(at));
+                brain.rethink = 0.0;
+            }
+        }
+        if brain.since_lead > FORGET || brain.searching > SEARCH_SECONDS || brain.target.is_some_and(|t| everyone.get(t).is_err()) {
+            brain.forget();
+        }
+
+        // Aim: in sight, turn toward the target (off by a wandering error)
+        // at the robot's turn rate, and fire in bursts while on target.
+        let step = mind.turn_rate * dt;
+        let turn = |want: Vec2| want.clamp(Vec2::splat(-step), Vec2::splat(step));
         let mut on_target = false;
-        if let Some(at) = target {
+        let aiming = target_at.filter(|_| brain.visible);
+        if let Some(at) = aiming {
             let wobble = Vec2::new((now * 1.3 + brain.seed).sin(), (now * 0.9 + brain.seed * 2.0).cos()) * mind.aim_error;
             let want = look_toward(body, pitch, at - eye) + wobble;
-            let step = mind.turn_rate * dt;
-            look = want.clamp(Vec2::splat(-step), Vec2::splat(step));
-            on_target = brain.visible && want.length() < mind.fire_cone;
+            input.add_look(turn(want));
+            on_target = want.length() < mind.fire_cone;
         }
-        input.add_look(look);
-        // Fire in bursts while on target.
         brain.burst = (brain.burst + dt) % (mind.burst_on + mind.burst_off);
         input.main.held = on_target && brain.burst < mind.burst_on;
-        // Move: keep within its fighting range, strafing; with nothing to
-        // fight, go back to its post.
+        input.sprint = false;
+
         brain.strafe_timer -= dt;
         if brain.strafe_timer <= 0.0 {
             brain.strafe = if brain.strafe == 0.0 { 1.0 } else { -brain.strafe };
             brain.strafe_timer = 1.5 + (brain.seed * 7.3 + now).sin().abs() * 2.0;
         }
         let (near, far) = mind.range;
-        input.movement = match (target, me.mode) {
-            (Some(at), Mode::Booted { up, .. }) => {
-                let distance = at.distance(position);
-                // Lost sight of it: stop strafing and go after it.
-                let hunting = !brain.visible;
-                let mut advance = if hunting || distance > far {
-                    1.0
-                } else if distance < near {
-                    -1.0
-                } else {
-                    0.0
-                };
-                // Walking into a wall climbs it; a robot keeps off walls
-                // (and other robots) instead: it turns its strafe round,
-                // and won't press on toward something in the way.
-                let up = frame.map_or(up, |f| f.rotation * up);
-                let flat = |v: Vec3| (v - up * v.dot(up)).normalize_or_zero();
+        // Where it's going, in its home's frame: after the target, to where
+        // it was last known, or back to its post.
+        let distance = target_at.map(|at| at.distance(position));
+        let goal = match (aiming, brain.lead) {
+            (Some(_), _) if distance.is_some_and(|d| d <= far) => None,
+            (_, Some(lead)) => Some(lead),
+            (None, None) => Some(brain.post),
+            (Some(at), None) => Some(to_home(at)),
+        };
+        // Looking about where the trail ran cold.
+        let search = |input: &mut PlayerInput, brain: &mut Brain| {
+            brain.searching += dt;
+            let dir = if brain.seed.sin() > 0.0 { 1.0 } else { -1.0 };
+            input.add_look(Vec2::new(dir * SEARCH_TURN * dt, turn(Vec2::new(0.0, pitch)).y));
+        };
+        input.movement = match me.mode {
+            Mode::Booted { body: on, feet, up, orientation, .. } => {
+                let up_w = frame.map_or(up, |f| f.rotation * up);
+                let flat = |v: Vec3| (v - up_w * v.dot(up_w)).normalize_or_zero();
                 let (forward, right) = (flat(view * Vec3::NEG_Z), flat(view * Vec3::X));
                 let blocked = |dir: Vec3| {
                     Dir3::new(dir).is_ok_and(|dir| {
@@ -379,50 +470,135 @@ pub fn think(
                             .is_some()
                     })
                 };
-                if blocked(right * brain.strafe) {
-                    brain.strafe = -brain.strafe;
-                }
-                if advance != 0.0 && blocked(forward * advance) {
-                    advance = 0.0;
-                }
-                // Hunting, it sidesteps to line up with where the target is
-                // (through a doorway, say); fighting, it strafes.
-                let across = right.dot(at - position);
-                let strafe = if hunting {
-                    if across.abs() > 0.1 { across.signum() } else { 0.0 }
-                } else if blocked(right * brain.strafe) {
-                    0.0
-                } else {
-                    brain.strafe
+                // Walking a route: the grid of the ship underfoot, if that's
+                // its home (routes are in its home's frame).
+                let grid = (on == brain.home).then(|| hulls.get(on).ok()).flatten().map(|h| grids.get(h.0));
+                let walk = goal.and_then(|goal| {
+                    let grid = grid?;
+                    let stale = brain.route_goal.is_none_or(|g| g.distance(goal) > REPLAN_DISTANCE);
+                    brain.replan -= dt;
+                    if stale || brain.replan <= 0.0 {
+                        brain.route = grid.path(feet, goal).unwrap_or_default();
+                        brain.route_goal = Some(goal);
+                        brain.replan = REPLAN_SECONDS + brain.seed.fract() * 0.5;
+                    }
+                    Some(follow(grid, &mut brain.route, feet))
+                });
+                // A local walking direction as input, in the body's own
+                // frame (x right, z forward).
+                let to_input = |dir: Vec3| {
+                    let local = orientation.inverse() * dir;
+                    Vec3::new(local.x, 0.0, -local.z).normalize_or_zero()
                 };
-                Vec3::new(strafe, 0.0, advance)
-            }
-            (Some(at), Mode::Eva { .. }) => {
-                // Hold a point beside the target, swinging round it.
-                let toward = (at - position).normalize_or_zero();
-                let side = toward.any_orthonormal_vector() * brain.strafe;
-                let goal = at - toward * (near + far) / 2.0 + side * 4.0;
-                to_input(view, goal - position)
-            }
-            (None, Mode::Booted { feet, .. }) => {
-                let off = brain.post - feet;
-                if off.length() > 1.5 {
-                    // Walk back: turn toward the post first.
-                    let world = frame.map_or(off, |f| f.rotation * off);
-                    input.add_look(Vec2::new(look_toward(body, pitch, world).x.clamp(-0.05, 0.05), 0.0));
-                    Vec3::new(0.0, 0.0, 1.0)
-                } else {
-                    Vec3::ZERO
+                match (aiming, walk) {
+                    // Closing on a target in sight: walk the route, gun on it.
+                    (Some(_), Some(Some(dir))) => to_input(dir),
+                    (Some(at), _) => {
+                        // Fighting: keep within range, strafing; walking into
+                        // a wall climbs it, so a robot keeps off walls (and
+                        // other robots), turning its strafe round, and won't
+                        // press on toward something in the way.
+                        let d = at.distance(position);
+                        let mut advance = if d > far {
+                            1.0
+                        } else if d < near {
+                            -1.0
+                        } else {
+                            0.0
+                        };
+                        if blocked(right * brain.strafe) {
+                            brain.strafe = -brain.strafe;
+                        }
+                        if advance != 0.0 && blocked(forward * advance) {
+                            advance = 0.0;
+                        }
+                        let strafe = if blocked(right * brain.strafe) { 0.0 } else { brain.strafe };
+                        Vec3::new(strafe, 0.0, advance)
+                    }
+                    // Going somewhere: face the way it's walking.
+                    (None, Some(Some(dir))) => {
+                        let world = frame.map_or(dir, |f| f.rotation * dir);
+                        input.add_look(turn(look_toward(body, pitch, world)));
+                        input.sprint = brain.lead.is_some();
+                        to_input(dir)
+                    }
+                    // Got there (or can't get anywhere).
+                    _ => {
+                        if brain.lead.is_some() {
+                            search(&mut input, brain);
+                        }
+                        Vec3::ZERO
+                    }
                 }
             }
-            (None, Mode::Eva { .. }) => {
-                let home = me.reference_body.and_then(|b| bodies.frame(b));
-                let post = home.map_or(brain.post, |f| f.point_to_world(brain.post));
-                let off = post - position;
-                if off.length() > 3.0 { to_input(view, off) } else { Vec3::ZERO }
+            Mode::Eva { .. } => {
+                let goal = match aiming {
+                    // Hold a point beside the target, swinging round it.
+                    Some(at) => {
+                        let toward = (at - position).normalize_or_zero();
+                        let side = toward.any_orthonormal_vector() * brain.strafe;
+                        Some(at - toward * (near + far) / 2.0 + side * 4.0)
+                    }
+                    None => goal.map(to_world),
+                };
+                match goal {
+                    Some(goal) if goal.distance(position) > ARRIVED_EVA => {
+                        let dir = steer_clear(&spatial, entity, position, goal - position);
+                        if aiming.is_none() {
+                            input.add_look(turn(look_toward(body, pitch, dir)));
+                        }
+                        to_input(view, dir)
+                    }
+                    _ => {
+                        if aiming.is_none() && brain.lead.is_some() {
+                            search(&mut input, brain);
+                        }
+                        Vec3::ZERO
+                    }
+                }
             }
         };
     }
+    // A robot that catches sight of someone tells the others near it.
+    for (from, target) in sightings {
+        let Some(at) = where_is(target) else { continue };
+        for (entity, _, mut brain, _) in &mut robots {
+            if brain.visible || brain.since_lead < 1.0 && brain.lead.is_some() {
+                continue;
+            }
+            if where_is(entity).is_some_and(|p| p.distance(from) < CALL_RANGE) {
+                let local = bodies.frame(brain.home).map_or(at, |f| f.point_to_local(at));
+                brain.hear_of(target, local);
+            }
+        }
+    }
+}
+
+/// The way to walk along `route` from `feet` (both in the grid's frame):
+/// past the points already reached, toward the furthest of the next few it
+/// can walk straight to. `None` when the route's done.
+fn follow(grid: &NavGrid, route: &mut Vec<Vec3>, feet: Vec3) -> Option<Vec3> {
+    let flat = |p: Vec3| Vec2::new(p.x - feet.x, p.z - feet.z).length();
+    while route.first().is_some_and(|p| flat(*p) < REACHED && (p.y - feet.y).abs() < 1.0) {
+        route.remove(0);
+    }
+    let next = (0..route.len().min(LOOK_AHEAD)).rev().find(|&i| grid.walkable(feet, route[i])).unwrap_or(0);
+    let p = route.get(next)?;
+    let dir = Vec3::new(p.x - feet.x, 0.0, p.z - feet.z);
+    dir.try_normalize()
+}
+
+/// A flyer heading along `dir` from `from`, turned aside from anything in
+/// the way: along its surface, and away from it the closer it is.
+fn steer_clear(spatial: &SpatialQuery, me: Entity, from: Vec3, dir: Vec3) -> Vec3 {
+    let Ok(d) = Dir3::new(dir) else { return Vec3::ZERO };
+    let filter = SpatialQueryFilter::from_mask(Layer::World).with_excluded_entities([me]);
+    let Some(hit) = spatial.cast_ray(from, d, AVOID_RANGE, true, &filter) else {
+        return *d;
+    };
+    let n = hit.normal;
+    let along = *d - n * d.dot(n).min(0.0);
+    (along.normalize_or_zero() + n * (1.0 - hit.distance / AVOID_RANGE)).normalize_or_zero()
 }
 
 /// Weak spot centres (see [`Robot::weak_spot`]): the Gunner's backpack
@@ -448,12 +624,39 @@ pub fn body_rotation(mode: &Mode, frame: Option<&super::frame::BodyFrame>) -> Qu
 /// before strafing that way (m).
 const STRAFE_PROBE: f32 = 1.0;
 
-/// How long a robot keeps after a target it can't see (s).
-const MEMORY: f32 = 3.0;
+/// How long after losing sight a robot still knows where its target went (s).
+const GLIMPSE: f32 = 0.6;
+
+/// How long word of a target lasts with nothing new (s).
+const FORGET: f32 = 25.0;
+
+/// How long a robot looks about where the trail ran cold (s), and how fast
+/// it turns doing so (rad/s).
+const SEARCH_SECONDS: f32 = 4.0;
+const SEARCH_TURN: f32 = 1.4;
+
+/// How far gunfire carries, through walls and all (m).
+const HEARING: f32 = 30.0;
+
+/// How far a robot's call carries when it spots someone (m).
+const CALL_RANGE: f32 = 25.0;
 
 /// How close (m, from a walking robot's middle) it lets walls come before
 /// stepping away.
 const WALL_CLEARANCE: f32 = 1.3;
+
+/// Following a route: a point is reached within this (m, across the deck);
+/// it looks this many points ahead for one to walk straight to; it plans
+/// again this often (s), or when its goal moves this far (m).
+const REACHED: f32 = 0.45;
+const LOOK_AHEAD: usize = 6;
+const REPLAN_SECONDS: f32 = 1.0;
+const REPLAN_DISTANCE: f32 = 1.5;
+
+/// A flyer is where it's going within this (m), and looks this far ahead
+/// for things in its way.
+const ARRIVED_EVA: f32 = 3.0;
+const AVOID_RANGE: f32 = 6.0;
 
 /// A world direction as jetpack input (x right, y up, z forward in the
 /// view), full strength.
