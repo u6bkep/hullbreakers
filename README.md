@@ -1,6 +1,6 @@
-# space-game
+# Hullbreakers
 
-First-person co-op boarding-combat roguelite, early days. Bevy 0.19 + Avian 0.7.
+First-person co-op boarding-combat roguelite, early days (provisional name; the crate is still `space_game`). Bevy 0.19 + Avian 0.7.
 
 ```
 cargo run                                # host a game and play (UDP port 5888)
