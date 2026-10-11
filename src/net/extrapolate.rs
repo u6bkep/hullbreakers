@@ -15,6 +15,7 @@ use lightyear::prelude::client::LocalTimelineSync;
 
 use crate::sim::{SimTick, TICK_HZ};
 use crate::sim::bodies::{BodyInertia, PreviousVelocity};
+use crate::sim::flight::Flight;
 use crate::sim::frame::BodyFrame;
 use crate::sim::motion::{Motion, rotation_error};
 
@@ -113,6 +114,17 @@ pub fn prepare_extrapolated(add: On<Add, Motion>, mut commands: Commands) {
     ));
 }
 
+/// Client: a ship on a scripted flight is, like an extrapolated body, a
+/// static rigid body posed each tick, by [`crate::sim::flight::fly`].
+pub fn prepare_flight(add: On<Add, Flight>, mut commands: Commands) {
+    commands.entity(add.entity).insert((
+        RigidBody::Static,
+        LinearVelocity::default(),
+        AngularVelocity::default(),
+        PreviousVelocity::default(),
+    ));
+}
+
 /// Client: whether this peer's clock has synchronized with the authority's.
 /// Before that, its ticks mean nothing to a [`Motion`].
 pub fn synced(sync: Option<Res<LocalTimelineSync>>) -> bool {
@@ -183,7 +195,7 @@ pub fn follow_motion(
 pub fn draw_extrapolated(
     time: Res<Time>,
     clock: Res<DrawClock>,
-    mut unposed: Query<&mut Visibility, (With<BodyInertia>, Without<Motion>)>,
+    mut unposed: Query<&mut Visibility, (With<BodyInertia>, Without<Motion>, Without<Flight>)>,
     mut bodies: Query<(
         &Motion,
         &BodyInertia,
@@ -224,5 +236,23 @@ pub fn draw_extrapolated(
         smoothing.rotation = Quat::IDENTITY.slerp(smoothing.rotation, decay);
         transform.translation = pose.position + smoothing.offset;
         transform.rotation = (smoothing.rotation * pose.rotation).normalize();
+    }
+}
+
+/// Client, each frame: where every flying ship is drawn, exactly on its
+/// path, at the draw clock's time.
+pub fn draw_flights(
+    clock: Res<DrawClock>,
+    mut ships: Query<(&Flight, &mut Transform, &mut Visibility)>,
+) {
+    for (flight, mut transform, mut visibility) in &mut ships {
+        let Some(now) = clock.0 else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let (position, rotation) = flight.pose(now.floor() as u32, now.fract() as f32);
+        transform.translation = position;
+        transform.rotation = rotation;
+        *visibility = Visibility::Inherited;
     }
 }

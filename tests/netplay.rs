@@ -18,7 +18,7 @@ use space_game::net::{
 };
 use space_game::sim::asteroids::Asteroid;
 use space_game::sim::player::{Mode, Player};
-use space_game::sim::ship::Ship;
+use space_game::sim::ship::HomeShip;
 
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
@@ -116,7 +116,7 @@ impl Session {
     fn server_ship(&mut self) -> (Entity, Vec3, Quat) {
         let world = self.server.world_mut();
         let (e, p, r) = world
-            .query_filtered::<(Entity, &Position, &Rotation), With<Ship>>()
+            .query_filtered::<(Entity, &Position, &Rotation), With<HomeShip>>()
             .single(world)
             .unwrap();
         (e, p.0, r.0)
@@ -267,4 +267,36 @@ fn forced_rollbacks_change_nothing() {
         panic!("expected both in EVA: client {client:?}, server {server:?}");
     };
     assert!(c.distance(v) < 0.05, "client settled {} m from the server", c.distance(v));
+}
+
+/// Standing on our ship through a boarding action's duel: the ship flies a
+/// scripted path both sides compute, so a client standing on it predicts
+/// itself without corrections, and sees the ship exactly where the server
+/// has it.
+#[test]
+fn standing_on_a_duelling_ship_is_predicted() {
+    use space_game::sim::flight::Flight;
+    use space_game::sim::mission::{Director, ScenarioKind};
+    let (_guard, mut s) = session(100);
+    s.server
+        .world_mut()
+        .resource_mut::<Director>()
+        .start(ScenarioKind::Boarding);
+    s.step(180);
+    let player = s.local_player().unwrap();
+    let (home, server_pos, _) = s.server_ship();
+    assert!(s.server.world().get::<Flight>(home).is_some(), "no duel");
+    let rate = s.rollback_rate(600);
+    let player = s.local_player().map(|p| p.mode.body()).unwrap_or(player.mode.body());
+    // The client's copy of the ship, at the same tick.
+    let world = s.client.world_mut();
+    let client_pos = world
+        .query_filtered::<&Position, With<HomeShip>>()
+        .single(world)
+        .unwrap()
+        .0;
+    let (_, server_now, _) = s.server_ship();
+    eprintln!("duel: {rate:.2} rollbacks/s standing; ship server {server_now} client {client_pos} (was {server_pos})");
+    assert!(player.is_some(), "not standing on anything");
+    assert!(rate <= 0.5, "standing on the duelling ship mispredicted {rate:.1}/s");
 }

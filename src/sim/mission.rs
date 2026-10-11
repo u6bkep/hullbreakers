@@ -1,0 +1,396 @@
+//! Scenarios: what the world is set up for, and how it ends.
+//!
+//! The crew's ship has a wall of buttons, one per scenario. Pressing one
+//! tears the world down (ships, rocks, debris) and builds the scenario's
+//! world, with everyone back aboard on the deck. The game starts in the
+//! asteroid field, which is also where the wall's "Asteroid field" button
+//! returns to.
+//!
+//! The authority runs all of this; clients see the result through
+//! replication (the world itself, and the [`Mission`] status).
+
+use avian3d::prelude::*;
+use bevy::prelude::*;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+use serde::{Deserialize, Serialize};
+
+use super::asteroids::{self, Asteroid};
+use super::bodies::{Bodies, PreviousVelocity, dynamic_mass};
+use super::combat::Combatant;
+use super::events::PlayerEvent;
+use super::flight::{Duel, Flight, Path};
+use super::player::{DeckSlot, Player, PreviousMode};
+use super::ship::{self, ControlAction, HomeShip, HullKind, ShipCommand, ShipHull};
+use super::tuning::Tuning;
+use super::{SimMaterial, SimTick, TICK_HZ};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ScenarioKind {
+    /// Drifting with the asteroid stream. Where the game starts.
+    #[default]
+    Field,
+    /// Under attack: cross to the enemy ship and drop its shield.
+    Boarding,
+}
+
+impl ScenarioKind {
+    /// In the order of the buttons on the mission wall.
+    pub const ALL: [ScenarioKind; 2] = [ScenarioKind::Field, ScenarioKind::Boarding];
+
+    pub fn button_label(self) -> &'static str {
+        match self {
+            ScenarioKind::Field => "Asteroid field",
+            ScenarioKind::Boarding => "Boarding action",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Phase {
+    #[default]
+    Underway,
+    Won,
+    Lost,
+}
+
+/// How the last mission went, shown to the crew when they're back in the
+/// field.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Debrief {
+    pub scenario: ScenarioKind,
+    pub phase: Phase,
+    /// From the start to the win or loss.
+    pub seconds: f32,
+    /// Who dropped the shield.
+    pub shield_breaker: Option<String>,
+    /// Who was standing on the crew's ship when it was over, and who wasn't.
+    pub aboard: Vec<String>,
+    pub adrift: Vec<String>,
+}
+
+/// The scenario under way, replicated to everyone for the HUD.
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Mission {
+    pub kind: ScenarioKind,
+    pub phase: Phase,
+    pub started: u32,
+    /// The tick it was won or lost on.
+    pub ended: Option<u32>,
+    pub shield_breaker: Option<String>,
+    /// The mission before this one, if it ended.
+    pub debrief: Option<Debrief>,
+}
+
+/// Wreckage: a box of hull, flung off a destroyed ship. Its body is built
+/// from this wherever it appears (see [`shape_debris`]), so replicating this
+/// is replicating the piece.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Debris {
+    pub size: Vec3,
+    /// Painted like the raider's hull rather than ours.
+    pub hostile: bool,
+}
+
+/// Wreckage is light, as hull plate goes, so a crew can shove it around.
+const DEBRIS_DENSITY: f32 = 150.0;
+
+pub fn shape_debris(add: On<Add, Debris>, pieces: Query<&Debris>, mut commands: Commands) {
+    let piece = pieces.get(add.entity).expect("just added");
+    let collider = Collider::cuboid(piece.size.x, piece.size.y, piece.size.z);
+    commands.entity(add.entity).insert((
+        dynamic_mass(&collider, DEBRIS_DENSITY),
+        collider,
+        // Pieces start out overlapping; they fly through each other (and
+        // everything else) rather than burst apart. Players still stand on
+        // and grapple them.
+        CollisionLayers::new(super::Layer::World, LayerMask::NONE),
+        if piece.hostile {
+            SimMaterial::HostileHull
+        } else {
+            SimMaterial::Hull
+        },
+    ));
+}
+
+/// Authority: what to do next, decided by this tick's button presses and
+/// battle results.
+#[derive(Resource, Default)]
+pub struct Director {
+    /// A scenario to switch to at the end of this tick.
+    next: Option<ScenarioKind>,
+    /// Whether the field's rocks are part of the field scenario (tests turn
+    /// them off for a quiet ship).
+    pub asteroids: bool,
+}
+
+impl Director {
+    /// Switches to `kind` at the end of this tick.
+    pub fn start(&mut self, kind: ScenarioKind) {
+        self.next = Some(kind);
+    }
+
+    pub fn with_asteroids(asteroids: bool) -> Self {
+        Self {
+            next: Some(ScenarioKind::Field),
+            asteroids,
+        }
+    }
+}
+
+/// Authority: acts on the controls players pressed this tick.
+pub fn handle_presses(
+    tick: Res<SimTick>,
+    players: Query<(&Player, Option<&Name>)>,
+    mut director: ResMut<Director>,
+    mut mission: Single<&mut Mission>,
+    mut ships: Query<&mut Combatant>,
+    mut orders: MessageWriter<ShipCommand>,
+) {
+    for (player, name) in &players {
+        for (at, event) in player.events.iter() {
+            let PlayerEvent::Pressed { body, action } = event else {
+                continue;
+            };
+            if at != tick.0 {
+                continue;
+            }
+            match action {
+                ControlAction::Scenario(kind) => director.next = Some(kind),
+                ControlAction::Lurch => {
+                    orders.write(ShipCommand::Lurch);
+                }
+                ControlAction::DisableShields => {
+                    if let Ok(mut ship) = ships.get_mut(body)
+                        && ship.shield
+                    {
+                        ship.shield = false;
+                        mission.shield_breaker = name.map(|n| n.to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Authority: wrecks any ship worn down to nothing, and decides the
+/// mission.
+pub fn settle_battle(
+    tick: Res<SimTick>,
+    tuning: Res<Tuning>,
+    bodies: Bodies,
+    mut commands: Commands,
+    mut director: ResMut<Director>,
+    mut mission: Single<&mut Mission>,
+    mut ships: Query<(Entity, &mut Combatant, &ShipHull, Has<HomeShip>, Option<&mut Flight>)>,
+    mut players: Query<&mut Player>,
+) {
+    let wrecked: Vec<(Entity, HullKind, bool)> = ships
+        .iter()
+        .filter(|(_, c, ..)| c.integrity <= 0.0)
+        .map(|(e, _, hull, home, _)| (e, hull.0, home))
+        .collect();
+    for (ship, kind, home) in wrecked {
+        let Some(frame) = bodies.frame(ship) else {
+            continue;
+        };
+        info!("{kind:?} ship destroyed");
+        wreck(&mut commands, ship, kind, &frame, tick.0);
+        for mut player in &mut players {
+            player.thrown_off(ship, &frame, &tuning);
+        }
+        // Nobody shoots at wreckage, and it can't shake anyone.
+        for (_, mut combatant, _, _, flight) in &mut ships {
+            if combatant.target == Some(ship) {
+                combatant.target = None;
+                if let Some(mut flight) = flight {
+                    flight.shaken = false;
+                }
+            }
+        }
+        if mission.phase == Phase::Underway {
+            mission.phase = if home { Phase::Lost } else { Phase::Won };
+            mission.ended = Some(tick.0);
+        }
+    }
+    // After a loss, the crew drifts a while, then it's back to the field.
+    if mission.phase == Phase::Lost
+        && let Some(ended) = mission.ended
+        && tick.0.wrapping_sub(ended) as f32 >= tuning.wreck_return_seconds * TICK_HZ as f32
+    {
+        director.next = Some(ScenarioKind::Field);
+    }
+}
+
+/// Breaks a ship into tumbling pieces of its hull.
+fn wreck(commands: &mut Commands, ship: Entity, kind: HullKind, frame: &super::frame::BodyFrame, tick: u32) {
+    let mut rng = ChaCha8Rng::seed_from_u64(tick as u64);
+    for (center, size, material) in ship::hull_pieces(kind) {
+        if material == SimMaterial::Trim && size.max_element() < 1.5 {
+            continue;
+        }
+        let at = frame.point_to_world(center);
+        let out = (at - frame.center_of_mass).normalize_or(Vec3::Y);
+        let scatter = Vec3::new(
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+        );
+        let spin = Vec3::new(
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+        ) * rng.random_range(0.2..1.2);
+        commands.spawn((
+            Name::new("Debris"),
+            Debris {
+                size,
+                hostile: kind == HullKind::Raider,
+            },
+            RigidBody::Dynamic,
+            SleepingDisabled,
+            PreviousVelocity::default(),
+            LinearVelocity(frame.point_velocity(at) + out * rng.random_range(3.0..9.0) + scatter * 1.5),
+            AngularVelocity(spin),
+            Position(at),
+            Rotation(frame.rotation),
+        ));
+    }
+    commands.entity(ship).despawn();
+}
+
+/// Authority: at the end of a tick that asked for one, replaces the world
+/// with a new scenario's and puts every player back aboard.
+pub fn switch_scenario(
+    tick: Res<SimTick>,
+    tuning: Res<Tuning>,
+    mut director: ResMut<Director>,
+    mut commands: Commands,
+    old_world: Query<Entity, Or<(With<ShipHull>, With<Asteroid>, With<Debris>)>>,
+    homes: Query<(), With<HomeShip>>,
+    mut mission: Single<&mut Mission>,
+    mut players: Query<(&mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>)>,
+) {
+    let Some(kind) = director.next.take() else {
+        return;
+    };
+    info!("starting scenario {kind:?}");
+    let debrief = (mission.phase != Phase::Underway).then(|| {
+        let ended = mission.ended.unwrap_or(tick.0);
+        let mut debrief = Debrief {
+            scenario: mission.kind,
+            phase: mission.phase,
+            seconds: ended.wrapping_sub(mission.started) as f32 / TICK_HZ as f32,
+            shield_breaker: mission.shield_breaker.clone(),
+            ..default()
+        };
+        for (player, _, _, name) in &players {
+            let name = name.map_or("?".to_string(), |n| n.to_string());
+            if player.mode.body().is_some_and(|b| homes.contains(b)) {
+                debrief.aboard.push(name);
+            } else {
+                debrief.adrift.push(name);
+            }
+        }
+        debrief
+    });
+    for entity in &old_world {
+        commands.entity(entity).despawn();
+    }
+    commands.remove_resource::<asteroids::FieldRng>();
+    let home = match kind {
+        ScenarioKind::Field => {
+            let home = commands.spawn(ship::drifting_home_ship()).id();
+            if director.asteroids {
+                asteroids::spawn_field(&mut commands, &tuning);
+            }
+            home
+        }
+        ScenarioKind::Boarding => spawn_duel(&mut commands, &tuning, tick.0),
+    };
+    **mission = Mission {
+        kind,
+        phase: Phase::Underway,
+        started: tick.0,
+        ended: None,
+        shield_breaker: None,
+        debrief,
+    };
+    for (index, (mut player, slot, previous, _)) in players.iter_mut().enumerate() {
+        let slot = slot.map_or(index as u32, |s| s.0);
+        player.respawn(home, slot);
+        if let Some(mut previous) = previous {
+            previous.0 = player.mode;
+        }
+    }
+}
+
+/// Two ships in a duel: ours, and a raider weaving in and out around it.
+/// Returns ours.
+fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32) -> Entity {
+    let duel = Duel {
+        center: Vec3::ZERO,
+        radius: 250.0,
+        lap: 100.0,
+        bob: 15.0,
+        near: tuning.duel_near,
+        far: tuning.duel_far,
+        pass: tuning.duel_pass_seconds,
+        sweep: 90.0,
+    };
+    let flying = |flight: Flight| {
+        let frame = flight.frame(tick, Vec3::ZERO);
+        (
+            flight,
+            RigidBody::Static,
+            PreviousVelocity::default(),
+            Position(frame.position),
+            Rotation(frame.rotation),
+            LinearVelocity(frame.linear_velocity),
+            AngularVelocity(frame.angular_velocity),
+        )
+    };
+    let home = commands
+        .spawn((
+            Name::new("Ship"),
+            HomeShip,
+            ShipHull(HullKind::Home),
+            flying(Flight {
+                start: tick,
+                path: Path::Orbit(duel),
+                shaken: true,
+            }),
+        ))
+        .id();
+    let raider = commands
+        .spawn((
+            Name::new("Raider"),
+            ShipHull(HullKind::Raider),
+            flying(Flight {
+                start: tick,
+                path: Path::Weave(duel),
+                shaken: true,
+            }),
+            Combatant {
+                target: Some(home),
+                integrity: 1.0,
+                shield: true,
+                shielded_seconds: tuning.raider_shielded_seconds,
+                exposed_seconds: tuning.raider_exposed_seconds,
+            },
+        ))
+        .id();
+    commands.entity(home).insert(Combatant {
+        target: Some(raider),
+        integrity: 1.0,
+        shield: true,
+        shielded_seconds: tuning.home_survival_seconds,
+        exposed_seconds: tuning.home_survival_seconds,
+    });
+    home
+}
+
+/// Authority: the replicated mission status.
+pub fn spawn_mission(mut commands: Commands) {
+    commands.spawn((Name::new("Mission"), Mission::default()));
+}

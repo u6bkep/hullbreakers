@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::sim::player::{Grapple, Mode, Player};
-use crate::sim::ship::Ship;
+use crate::sim::ship::HomeShip;
 
 #[derive(Resource)]
 pub struct ShotScript {
@@ -134,7 +134,7 @@ pub fn run_shot_script(
     mut script: ResMut<ShotScript>,
     mut commands: Commands,
     mut player: Single<&mut Player, With<super::LocalPlayer>>,
-    ship: Single<(Entity, &Transform), With<Ship>>,
+    ship: Single<(Entity, &Transform), With<HomeShip>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let shots = vantages();

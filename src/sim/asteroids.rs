@@ -155,7 +155,7 @@ fn drift(rng: &mut impl Rng, field_speed: f32) -> (Vec3, Vec3) {
     (linear, angular)
 }
 
-pub fn spawn_field(mut commands: Commands, tuning: Res<Tuning>) {
+pub fn spawn_field(commands: &mut Commands, tuning: &Tuning) {
     let mut field = FieldRng {
         rng: ChaCha8Rng::seed_from_u64(0x5ace_5eed),
         next: 0,
@@ -169,7 +169,7 @@ pub fn spawn_field(mut commands: Commands, tuning: Res<Tuning>) {
             true,
             (-FIELD_LENGTH / 2.0, FIELD_LENGTH / 2.0),
         );
-        spawn_rock(&mut commands, &mut field, radius, position, tuning.field_speed);
+        spawn_rock(commands, &mut field, radius, position, tuning.field_speed);
     }
     commands.insert_resource(field);
     commands.insert_resource(AppliedFieldSpeed(tuning.field_speed));

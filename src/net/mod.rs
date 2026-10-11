@@ -24,9 +24,12 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::sim::asteroids::Asteroid;
+use crate::sim::combat::Combatant;
+use crate::sim::flight::Flight;
 use crate::sim::input::PlayerInput;
-use crate::sim::player::{Mode, Player, PlayerTelemetry, PreviousMode, new_player};
-use crate::sim::ship::{Ship, ShipHull};
+use crate::sim::mission::{Debris, Mission};
+use crate::sim::player::{DeckSlot, Mode, Player, PlayerTelemetry, PreviousMode, new_player};
+use crate::sim::ship::{Drift, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
 use crate::sim::motion::{Motion, rotation_error};
 use crate::sim::bodies::Bodies;
@@ -145,8 +148,11 @@ impl Plugin for NetPlugin {
             ))
             .insert_resource(ReplicationMetadata::new(SEND_INTERVAL))
             .add_observer(on_link)
-            .add_observer(replicate_body::<Ship>)
+            .add_observer(replicate_body::<Drift>)
             .add_observer(replicate_body::<Asteroid>)
+            .add_observer(replicate_body::<Debris>)
+            .add_observer(replicate_flight)
+            .add_observer(replicate_mission)
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players))
             .add_systems(
@@ -167,6 +173,7 @@ impl Plugin for NetPlugin {
                 PlayerSimPlugin,
             ))
             .add_observer(extrapolate::prepare_extrapolated)
+            .add_observer(extrapolate::prepare_flight)
             .add_systems(Update, adopt_host_tuning)
             .init_resource::<extrapolate::DrawClock>()
             .init_resource::<ViewBeforeRollback>()
@@ -190,7 +197,10 @@ impl Plugin for NetPlugin {
             .add_systems(Update, report_rollbacks)
             .add_systems(
                 PostUpdate,
-                (extrapolate::advance_draw_clock, extrapolate::draw_extrapolated)
+                (
+                    extrapolate::advance_draw_clock,
+                    (extrapolate::draw_extrapolated, extrapolate::draw_flights),
+                )
                     .chain()
                     .in_set(crate::client::BodyPoses),
             );
@@ -246,7 +256,12 @@ impl Plugin for ProtocolPlugin {
         app.add_plugins(InputPlugin::<PlayerInput>::default());
         app.component::<Name>().replicate();
         app.component::<ShipHull>().replicate_once();
+        app.component::<HomeShip>().replicate_once();
         app.component::<Asteroid>().replicate_once();
+        app.component::<Debris>().replicate_once();
+        app.component::<Flight>().replicate();
+        app.component::<Combatant>().replicate();
+        app.component::<Mission>().replicate();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();
         // Derived each tick wherever the player is simulated; never worth a
@@ -507,17 +522,13 @@ fn on_link(add: On<Add, LinkOf>, mut commands: Commands) {
 #[derive(Component)]
 struct HasPlayer;
 
-/// Which deck spot a player spawned on; freed when they leave.
-#[derive(Component)]
-struct Slot(u32);
-
 /// Gives every connected client without a player one, on the ship's deck.
 /// A system rather than a `Connected` observer: the host's own client
 /// connects during startup, before the ship exists.
 fn spawn_players(
     clients: Query<(Entity, &RemoteId), (With<ClientOf>, With<Connected>, Without<HasPlayer>)>,
-    ship: Query<Entity, With<Ship>>,
-    slots: Query<&Slot>,
+    ship: Query<Entity, With<HomeShip>>,
+    slots: Query<&DeckSlot>,
     mut commands: Commands,
 ) {
     let Ok(ship) = ship.single() else { return };
@@ -536,7 +547,6 @@ fn spawn_players(
         ));
         let mut player = commands.spawn((
             new_player(ship, index),
-            Slot(index),
             ActionState::<PlayerInput>::default(),
             Replicate::to_clients(NetworkTarget::All),
             interpolate,
@@ -559,6 +569,21 @@ fn replicate_body<C: Component>(add: On<Add, C>, mut commands: Commands) {
         extrapolate::Extrapolated,
         DisableReplicateHierarchy,
     ));
+}
+
+/// Ships flying a scripted path reach clients as that path (see
+/// [`crate::sim::flight`]), sent when it changes.
+fn replicate_flight(add: On<Add, Flight>, mut commands: Commands) {
+    commands.entity(add.entity).insert((
+        Replicate::to_clients(NetworkTarget::All),
+        DisableReplicateHierarchy,
+    ));
+}
+
+fn replicate_mission(add: On<Add, Mission>, mut commands: Commands) {
+    commands
+        .entity(add.entity)
+        .insert(Replicate::to_clients(NetworkTarget::All));
 }
 
 fn spawn_host_tuning(mut commands: Commands, tuning: Res<Tuning>) {

@@ -6,9 +6,12 @@
 
 pub mod asteroids;
 pub mod bodies;
+pub mod combat;
 pub mod events;
+pub mod flight;
 pub mod frame;
 pub mod input;
+pub mod mission;
 pub mod motion;
 pub mod player;
 pub mod rope;
@@ -43,6 +46,8 @@ pub enum Layer {
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SimMaterial {
     Hull,
+    /// The enemy's hull paint.
+    HostileHull,
     Trim,
     Rock,
 }
@@ -55,8 +60,12 @@ pub enum SimSystems {
     RecordVelocities,
     /// Script-driven bodies set their velocities and the field is maintained.
     Drive,
-    /// Players are simulated, in `FixedPostUpdate` after the physics step.
+    /// Beams are traced, in `FixedPostUpdate` after the physics step.
+    Beams,
+    /// Players are simulated, after the beams.
     Players,
+    /// The authority reacts to what players did and what the battle did.
+    Mission,
 }
 
 /// What every peer needs to make sense of the world, authoritative or not:
@@ -74,7 +83,8 @@ impl Plugin for SimSharedPlugin {
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
             .add_observer(ship::build_hull)
-            .add_observer(asteroids::shape_asteroid);
+            .add_observer(asteroids::shape_asteroid)
+            .add_observer(mission::shape_debris);
     }
 }
 
@@ -89,16 +99,26 @@ impl Plugin for PlayerSimPlugin {
             FixedUpdate,
             (SimSystems::RecordVelocities, SimSystems::Drive).chain(),
         )
+        .configure_sets(
+            FixedPostUpdate,
+            (SimSystems::Beams, SimSystems::Players, SimSystems::Mission)
+                .chain()
+                .after(PhysicsSystems::Last),
+        )
+        .init_resource::<combat::Beams>()
         .add_systems(
             FixedUpdate,
-            bodies::record_previous_velocity.in_set(SimSystems::RecordVelocities),
+            (
+                bodies::record_previous_velocity.in_set(SimSystems::RecordVelocities),
+                // Scripted ships are where their flight says, on every peer.
+                flight::fly.in_set(SimSystems::Drive),
+            ),
         )
         .add_systems(
             FixedPostUpdate,
             (
-                player::player_tick
-                    .in_set(SimSystems::Players)
-                    .after(PhysicsSystems::Last),
+                combat::update_beams.in_set(SimSystems::Beams),
+                player::player_tick.in_set(SimSystems::Players),
                 player::pose_player_hulls.after(SimSystems::Players),
             ),
         );
@@ -126,38 +146,51 @@ impl Default for SimPlugin {
 impl Plugin for SimPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((SimSharedPlugin, PlayerSimPlugin));
-        if self.asteroids {
-            app.init_resource::<asteroids::FieldInterest>()
-                .add_systems(Startup, asteroids::spawn_field.after(ship::spawn_ship))
-                .add_systems(
-                    FixedUpdate,
-                    (
-                        asteroids::apply_field_speed,
-                        asteroids::recycle_field
-                            .after(update_pins)
-                            .after(update_field_interest),
-                        update_field_interest,
-                    )
-                        .in_set(SimSystems::Drive),
-                );
-        }
+        let in_field = resource_exists::<asteroids::FieldRng>;
+        app.init_resource::<asteroids::FieldInterest>()
+            .insert_resource(mission::Director::with_asteroids(self.asteroids))
+            .add_systems(
+                FixedUpdate,
+                (
+                    asteroids::apply_field_speed,
+                    asteroids::recycle_field
+                        .after(update_pins)
+                        .after(update_field_interest),
+                    update_field_interest,
+                )
+                    .run_if(in_field)
+                    .in_set(SimSystems::Drive),
+            );
+        // The first scenario is built at the end of the first tick; the
+        // local player joins it then.
+        app.add_systems(Startup, mission::spawn_mission);
         if self.local_player {
             app.add_systems(
-                Startup,
+                FixedPostUpdate,
                 player::spawn_player
-                    .after(ship::spawn_ship)
-                    .after(asteroids::spawn_field),
+                    .after(SimSystems::Mission)
+                    .run_if(run_once),
             );
         }
         // Bevy's default fixed clock is 64 Hz. A network layer must use the
         // same rate for its ticks.
         app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
             .insert_resource(Gravity(Vec3::ZERO))
-            .add_systems(Startup, ship::spawn_ship)
             .add_systems(FixedFirst, advance_tick)
             .add_systems(
                 FixedUpdate,
                 (ship::drive_ship, update_pins).in_set(SimSystems::Drive),
+            )
+            .add_systems(
+                FixedPostUpdate,
+                (
+                    combat::apply_damage,
+                    mission::handle_presses,
+                    mission::settle_battle,
+                    mission::switch_scenario,
+                )
+                    .chain()
+                    .in_set(SimSystems::Mission),
             );
     }
 }
@@ -190,7 +223,7 @@ fn update_pins(
 /// The field is kept populated around the ship and every player.
 fn update_field_interest(
     mut interest: ResMut<asteroids::FieldInterest>,
-    ships: Query<&Position, With<ship::Ship>>,
+    ships: Query<&Position, With<ship::HomeShip>>,
     players: Query<&player::Player>,
     bodies: bodies::Bodies,
     tuning: Res<tuning::Tuning>,

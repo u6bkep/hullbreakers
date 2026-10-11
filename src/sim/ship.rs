@@ -1,31 +1,40 @@
-//! The player ship: a kinematic greybox hull on a scripted flight path.
+//! Ships: greybox hulls, the controls and turrets fitted to them, and the
+//! crew ship's drift through the asteroid field.
 //!
-//! The world frame is chosen so the ship is (on average) at rest and the
-//! asteroid field streams past it. Physics is Galilean-invariant, so this is
-//! identical to the ship flying through a static field, but keeps every
-//! coordinate near the origin and keeps relative velocities near the ship small
-//! for collision sweeps.
+//! In the field the world frame is chosen so the crew's ship is (on average)
+//! at rest and the asteroid field streams past it. Physics is
+//! Galilean-invariant, so this is identical to the ship flying through a
+//! static field, but keeps every coordinate near the origin and keeps
+//! relative velocities near the ship small for collision sweeps. Ships in a
+//! fight fly scripted paths instead (see [`super::flight`]).
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::bodies::{BodyInertia, PreviousVelocity};
+use super::mission::ScenarioKind;
 use super::tuning::Tuning;
 use super::{SimMaterial, SimTick, TICK_HZ};
 
+/// The crew's ship: where players come aboard, and where the mission wall is.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct HomeShip;
+
+/// A ship drifting with the field: a slow roll, a gentle yaw wobble, and an
+/// optional forward lurch.
 #[derive(Component, Default)]
-pub struct Ship {
+pub struct Drift {
     /// Tick the current forward lurch started on.
     lurch_start: Option<u32>,
 }
 
-/// Orders for the ship, from whoever is allowed to give them. Consumed by the
-/// authoritative simulation only: the ship is not something a client
+/// Orders for drifting ships, from whoever is allowed to give them. Consumed
+/// by the authoritative simulation only: a ship is not something a client
 /// predicts, so these never need replaying.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub enum ShipCommand {
-    /// Debug: a one-second forward lurch.
+    /// A one-second forward lurch.
     Lurch,
 }
 
@@ -34,6 +43,18 @@ const WOBBLE_SECONDS: u32 = 20;
 
 /// Ship-local forward axis.
 pub const SHIP_FORWARD: Vec3 = Vec3::NEG_Z;
+
+/// Which hull a ship has. Its geometry, controls and turrets all follow
+/// from this.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HullKind {
+    /// The crew's ship.
+    #[default]
+    Home,
+    /// The enemy in a boarding action: the same frame, hostile paint, and a
+    /// shield console on its bridge.
+    Raider,
+}
 
 /// One structural box of the hull: center and full size, in ship coordinates.
 struct HullBox {
@@ -60,10 +81,10 @@ const fn trim(center: Vec3, size: Vec3) -> HullBox {
 
 /// Greybox layout. Interior deck surface is y = 0, ceiling y = 3, interior
 /// half-width 3.7, hull runs z = -15 (bow) to z = +15 (stern, open cargo door).
-fn hull_layout() -> Vec<HullBox> {
+fn hull_layout(kind: HullKind) -> Vec<HullBox> {
     let t = 0.3;
     let v = Vec3::new;
-    vec![
+    let mut boxes = vec![
         // Floor, ceiling, side walls.
         hull(v(0.0, -t / 2.0, 0.0), v(8.0, t, 30.0)),
         hull(v(0.0, 3.0 + t / 2.0, 0.0), v(8.0, t, 30.0)),
@@ -95,7 +116,101 @@ fn hull_layout() -> Vec<HullBox> {
         hull(v(5.4, 1.5, 11.0), v(1.6, 1.6, 8.0)),
         trim(v(-4.3, 1.5, 11.0), v(0.6, 0.4, 3.0)),
         trim(v(4.3, 1.5, 11.0), v(0.6, 0.4, 3.0)),
-    ]
+    ];
+    // Turret bases, where the turrets below are mounted.
+    for mount in TURRET_MOUNTS {
+        boxes.push(trim(mount - Vec3::Y * mount.y.signum() * 0.25, v(1.0, 0.5, 1.0)));
+    }
+    match kind {
+        HullKind::Home => {
+            // The mission wall: a panel on the port side of the bridge.
+            boxes.push(trim(v(-3.65, 1.5, -7.0), v(0.1, 1.4, 4.4)));
+        }
+        HullKind::Raider => {
+            for b in &mut boxes {
+                if b.material == SimMaterial::Hull {
+                    b.material = SimMaterial::HostileHull;
+                }
+            }
+        }
+    }
+    boxes
+}
+
+/// The boxes a hull is built from: center, full size, and paint.
+pub fn hull_pieces(kind: HullKind) -> Vec<(Vec3, Vec3, SimMaterial)> {
+    hull_layout(kind)
+        .into_iter()
+        .map(|b| (b.center, b.size, b.material))
+        .collect()
+}
+
+/// Where turrets sit, in ship coordinates: one on the dorsal spine, one
+/// under the keel. A turret's beam leaves from its mount.
+pub const TURRET_MOUNTS: [Vec3; 2] = [Vec3::new(0.0, 4.6, -4.0), Vec3::new(0.0, -0.8, -6.0)];
+
+/// Something on a ship a player can press (by clicking it, within reach).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ControlAction {
+    /// Leave whatever is going on and start this scenario.
+    Scenario(ScenarioKind),
+    /// Lurch the ship forward.
+    Lurch,
+    /// Drop this ship's shield.
+    DisableShields,
+}
+
+impl ControlAction {
+    /// What the button says.
+    pub fn label(self) -> &'static str {
+        match self {
+            ControlAction::Scenario(kind) => kind.button_label(),
+            ControlAction::Lurch => "Lurch (DO NOT PRESS)",
+            ControlAction::DisableShields => "Disable shields",
+        }
+    }
+}
+
+/// A button fitted to a ship: an action, and the box (centered on the
+/// entity's transform, in ship coordinates) a player clicks on.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Control {
+    pub action: ControlAction,
+    pub half_size: Vec3,
+}
+
+/// A laser turret fitted to a ship (see [`super::combat`]).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Turret {
+    /// Which of the ship's turrets: sets its place in the firing cycle.
+    pub index: u8,
+}
+
+/// The controls fitted to each kind of hull: (action, center, half size).
+fn controls(kind: HullKind) -> Vec<(ControlAction, Vec3, Vec3)> {
+    let v = Vec3::new;
+    match kind {
+        HullKind::Home => {
+            // Buttons on the mission wall, sticking out of the panel.
+            let button = v(0.06, 0.28, 0.4);
+            let mut buttons: Vec<_> = ScenarioKind::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, kind)| {
+                    (
+                        ControlAction::Scenario(*kind),
+                        v(-3.54, 1.75, -8.4 + 1.1 * i as f32),
+                        button,
+                    )
+                })
+                .collect();
+            // Lower, and apart from the rest.
+            buttons.push((ControlAction::Lurch, v(-3.54, 1.05, -5.4), v(0.06, 0.18, 0.25)));
+            buttons
+        }
+        // A big button on top of the bridge console.
+        HullKind::Raider => vec![(ControlAction::DisableShields, v(0.0, 1.06, -13.0), v(0.35, 0.06, 0.3))],
+    }
 }
 
 /// Visual-only hull piece; the collision shape is the ship's compound collider.
@@ -108,19 +223,21 @@ pub struct HullPart {
 /// component appears (see [`build_hull`]), so replicating this is replicating
 /// the hull.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct ShipHull;
+pub struct ShipHull(pub HullKind);
 
-pub fn spawn_ship(mut commands: Commands) {
-    commands.spawn((
+/// The crew's ship, drifting with the field at the origin.
+pub fn drifting_home_ship() -> impl Bundle {
+    (
         Name::new("Ship"),
-        Ship::default(),
-        ShipHull,
+        HomeShip,
+        Drift::default(),
+        ShipHull(HullKind::Home),
         RigidBody::Kinematic,
         SleepingDisabled,
         PreviousVelocity::default(),
         Position::default(),
         Rotation::default(),
-    ));
+    )
 }
 
 /// Gives a new [`ShipHull`] its collider and visual parts.
@@ -129,8 +246,9 @@ pub fn spawn_ship(mut commands: Commands) {
 /// Avian only re-syncs *child* collider poses at the start of each physics
 /// step, so child colliders would be queried a tick stale (v·dt off) by the
 /// player controller, which runs after the step.
-pub fn build_hull(add: On<Add, ShipHull>, mut commands: Commands) {
-    let layout = hull_layout();
+pub fn build_hull(add: On<Add, ShipHull>, hulls: Query<&ShipHull>, mut commands: Commands) {
+    let kind = hulls.get(add.entity).expect("just added").0;
+    let layout = hull_layout(kind);
     let collider = Collider::compound(
         layout
             .iter()
@@ -157,10 +275,24 @@ pub fn build_hull(add: On<Add, ShipHull>, mut commands: Commands) {
                     b.material,
                 ));
             }
+            for (action, center, half_size) in controls(kind) {
+                ship.spawn((
+                    Name::new(action.label()),
+                    Control { action, half_size },
+                    Transform::from_translation(center),
+                ));
+            }
+            for (index, mount) in TURRET_MOUNTS.into_iter().enumerate() {
+                ship.spawn((
+                    Name::new(format!("Turret {index}")),
+                    Turret { index: index as u8 },
+                    Transform::from_translation(mount),
+                ));
+            }
         });
 }
 
-/// Drives the kinematic ship: a slow roll, a gentle yaw wobble, and an
+/// Drives drifting ships: a slow roll, a gentle yaw wobble, and an
 /// optional forward lurch limited by `ship_max_accel`.
 pub fn drive_ship(
     time: Res<Time>,
@@ -168,7 +300,7 @@ pub fn drive_ship(
     tuning: Res<Tuning>,
     mut orders: MessageReader<ShipCommand>,
     mut ships: Query<(
-        &mut Ship,
+        &mut Drift,
         &Rotation,
         &mut LinearVelocity,
         &mut AngularVelocity,

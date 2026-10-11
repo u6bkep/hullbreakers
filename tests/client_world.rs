@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use space_game::sim::input::PlayerInput;
 use space_game::sim::player::{Mode, Player, new_player};
-use space_game::sim::ship::ShipHull;
+use space_game::sim::ship::{HullKind, ShipHull};
 use space_game::sim::tuning::Tuning;
 use space_game::sim::{PlayerSimPlugin, SimSharedPlugin};
 
@@ -41,7 +41,7 @@ fn client_app() -> (App, Entity) {
     let ship = app
         .world_mut()
         .spawn((
-            ShipHull,
+            ShipHull(HullKind::Home),
             RigidBody::Static,
             Position::default(),
             Rotation::default(),

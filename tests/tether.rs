@@ -9,7 +9,7 @@ use space_game::sim::SimPlugin;
 use space_game::sim::events::{Detach, PlayerEvent};
 use space_game::sim::input::PlayerInput;
 use space_game::sim::player::{Mode, Player, new_player};
-use space_game::sim::ship::Ship;
+use space_game::sim::ship::HomeShip;
 use space_game::sim::tuning::Tuning;
 
 /// A ship, the default player (A), and a second player (B).
@@ -37,7 +37,7 @@ fn two_players() -> (App, Entity, Entity) {
     }
     let world = app.world_mut();
     let ship = world
-        .query_filtered::<Entity, With<Ship>>()
+        .query_filtered::<Entity, With<HomeShip>>()
         .single(world)
         .unwrap();
     let a = world

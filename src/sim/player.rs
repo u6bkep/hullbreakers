@@ -24,7 +24,9 @@ use super::bodies::{Bodies, BodyInertia};
 use super::events::{Detach, EventLog, PlayerEvent};
 use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
+use super::combat::{Beams, beam_shove};
 use super::rope::{RopeEnd, solve_rope};
+use super::ship::Control;
 use super::tuning::Tuning;
 
 pub const PITCH_LIMIT: f32 = 1.55;
@@ -207,7 +209,59 @@ impl Player {
     fn emit(&mut self, event: PlayerEvent) {
         self.events.push(event);
     }
+
+    /// Puts the player back aboard `ship`, on deck spot `slot`, as at the
+    /// start of a game: boots on, nothing grappled.
+    pub fn respawn(&mut self, ship: Entity, slot: u32) {
+        self.mode = deck_mode(ship, slot);
+        self.boots_on = true;
+        self.grapple = None;
+        self.reference_body = Some(ship);
+        self.detach_timer = 0.0;
+        self.emit(PlayerEvent::Respawned);
+    }
+
+    /// `ship` (whose frame is `frame`) is coming apart: a player standing on
+    /// it is thrown clear, and one tied to it or flying relative to it lets
+    /// go.
+    pub fn thrown_off(&mut self, ship: Entity, frame: &BodyFrame, tuning: &Tuning) {
+        if let Mode::Booted {
+            body,
+            feet,
+            up,
+            velocity,
+            orientation,
+            pitch,
+        } = self.mode
+            && body == ship
+        {
+            let mut mode = booted_to_eva(frame, feet, up, velocity, orientation, pitch, tuning);
+            if let Mode::Eva {
+                position, velocity, ..
+            } = &mut mode
+            {
+                let out = (*position - frame.center_of_mass).normalize_or(frame.rotation * Vec3::Y);
+                *velocity += out * BLAST_SPEED;
+            }
+            self.mode = mode;
+            self.detach_timer = tuning.detach_cooldown;
+            self.emit(PlayerEvent::Detached(Detach::Blasted));
+        }
+        if self.grapple.is_some_and(|g| g.target == ship) {
+            self.grapple = None;
+            self.emit(PlayerEvent::RopeSnapped);
+        }
+        if self.reference_body == Some(ship) {
+            self.reference_body = None;
+        }
+    }
 }
+
+/// Ticks after a beam shoves a player before it can again.
+const BEAM_HIT_COOLDOWN: u32 = 30;
+
+/// How fast a ship coming apart throws off whoever is standing on it (m/s).
+const BLAST_SPEED: f32 = 5.0;
 
 /// Per-tick outputs derived from the simulation, for presentation. Not state:
 /// recomputed every tick.
@@ -263,25 +317,35 @@ pub fn pose_player_hulls(
 }
 
 /// Spawns the one local player of a game without a network.
-pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::ship::Ship>>) {
+pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::ship::HomeShip>>) {
     commands.spawn(new_player(*ship, 0));
 }
 
-/// A player standing on `ship`'s deck. Players are spread across the deck by
-/// `index` so they don't spawn inside each other.
-pub fn new_player(ship: Entity, index: u32) -> impl Bundle {
-    let column = [0.0, 1.2, -1.2, 2.4][index as usize % 4];
-    let row = (index / 4) as f32;
-    let mode = Mode::Booted {
+/// Which spot on the deck a player comes aboard at.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct DeckSlot(pub u32);
+
+/// Standing on `ship`'s deck at spot `slot`. Players are spread across the
+/// deck so they don't spawn inside each other.
+fn deck_mode(ship: Entity, slot: u32) -> Mode {
+    let column = [0.0, 1.2, -1.2, 2.4][slot as usize % 4];
+    let row = (slot / 4) as f32;
+    Mode::Booted {
         body: ship,
         feet: Vec3::new(column, SKIN, 5.0 + row * 1.5),
         up: Vec3::Y,
         velocity: Vec3::ZERO,
         orientation: Quat::IDENTITY,
         pitch: 0.0,
-    };
+    }
+}
+
+/// A player standing on `ship`'s deck, at spot `index`.
+pub fn new_player(ship: Entity, index: u32) -> impl Bundle {
+    let mode = deck_mode(ship, index);
     (
         Name::new(format!("Player {}", index + 1)),
+        DeckSlot(index),
         Player {
             mode,
             boots_on: true,
@@ -428,7 +492,23 @@ struct TickContext<'a, 'w, 's> {
     filter: SpatialQueryFilter,
     /// Every player, as something a rope can hold.
     players: &'a [PlayerPoint],
+    /// Every button on every ship.
+    controls: &'a [ControlPoint],
+    /// Every laser beam firing this tick.
+    beams: &'a Beams,
 }
+
+/// A button, where it is on its ship.
+#[derive(Clone, Copy, Debug)]
+struct ControlPoint {
+    body: Entity,
+    control: Control,
+    /// Center in the ship's coordinates.
+    center: Vec3,
+}
+
+/// How far a player can reach to press a button (m from the eye).
+pub const CONTROL_REACH: f32 = 2.5;
 
 /// A player as something a rope can be tied to: where the center of their
 /// body is and how it moves.
@@ -662,10 +742,20 @@ pub fn player_tick(
     time: Res<Time>,
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
+    beams: Res<Beams>,
     mas: MoveAndSlide,
     mut bodies: Bodies,
     mut players: Query<PlayerQuery>,
+    controls: Query<(&Control, &Transform, &ChildOf)>,
 ) {
+    let controls: Vec<ControlPoint> = controls
+        .iter()
+        .map(|(control, transform, ship)| ControlPoint {
+            body: ship.parent(),
+            control: *control,
+            center: transform.translation,
+        })
+        .collect();
     // Every player, simulated here or not, can be aimed at and tied to.
     let points: Vec<PlayerPoint> = players
         .iter()
@@ -686,6 +776,8 @@ pub fn player_tick(
         mas: &mas,
         filter: SpatialQueryFilter::from_mask(super::Layer::World),
         players: &points,
+        controls: &controls,
+        beams: &beams,
     };
     if ctx.dt <= 0.0 {
         return;
@@ -716,7 +808,18 @@ pub fn player_tick(
         // Recorded after look so the camera interpolates movement only; look
         // is applied immediately (see `update_camera`).
         previous.0 = player.mode;
-        if cmd.grapple {
+        // A click on a button within reach presses it; anywhere else it
+        // fires (or lets go of) the grapple.
+        let pressed = cmd
+            .grapple
+            .then(|| control_under_crosshair(&ctx, &bodies, entity, player))
+            .flatten();
+        if let Some(control) = pressed {
+            player.emit(PlayerEvent::Pressed {
+                body: control.body,
+                action: control.control.action,
+            });
+        } else if cmd.grapple {
             if player.grapple.take().is_none() {
                 fire_grapple(&ctx, &bodies, entity, player);
             } else {
@@ -822,6 +925,59 @@ fn aim(
         point,
         distance: hit.distance,
     })
+}
+
+/// The button under the crosshair, if one is within reach and nothing is in
+/// front of it.
+fn control_under_crosshair(
+    ctx: &TickContext,
+    bodies: &Bodies,
+    entity: Entity,
+    player: &Player,
+) -> Option<ControlPoint> {
+    let frame = player.mode.body().and_then(|b| bodies.frame(b));
+    let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
+    let dir = view * Vec3::NEG_Z;
+    // Buttons stand proud of the surface they're mounted on, so whatever
+    // the ray hits just behind the button is that surface.
+    let blocked = ctx
+        .mas
+        .spatial_query
+        .cast_ray(eye, Dir3::new(dir).ok()?, CONTROL_REACH, true, &ctx.filter.clone().with_excluded_entities([entity]))
+        .map_or(f32::MAX, |hit| hit.distance + 0.15);
+    ctx.controls
+        .iter()
+        .filter_map(|c| {
+            let ship = bodies.frame(c.body)?;
+            let t = ray_box(
+                ship.point_to_local(eye) - c.center,
+                ship.dir_to_local(dir),
+                c.control.half_size,
+            )?;
+            (t <= CONTROL_REACH && t <= blocked).then_some((t, *c))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, c)| c)
+}
+
+/// Distance along a ray (`origin` relative to the box center, `dir` unit) to
+/// where it enters an axis-aligned box of `half` extents; zero if it starts
+/// inside.
+fn ray_box(origin: Vec3, dir: Vec3, half: Vec3) -> Option<f32> {
+    let (mut near, mut far) = (0.0f32, f32::MAX);
+    for axis in 0..3 {
+        let (o, d, h) = (origin[axis], dir[axis], half[axis]);
+        if d.abs() < 1e-9 {
+            if o.abs() > h {
+                return None;
+            }
+            continue;
+        }
+        let (a, b) = ((-h - o) / d, (h - o) / d);
+        near = near.max(a.min(b));
+        far = far.min(a.max(b));
+    }
+    (near <= far).then_some(near)
 }
 
 fn fire_grapple(ctx: &TickContext, bodies: &Bodies, entity: Entity, player: &mut Player) {
@@ -1237,6 +1393,18 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
         return 0.0;
     };
     let inverse_mass = 1.0 / t.player_mass;
+
+    // Caught in a laser beam: a hard shove out of it, once per crossing.
+    if let Some(shove) = beam_shove(ctx.beams, position) {
+        let tick = player.events.tick();
+        let recently = player.events.iter().any(|(at, e)| {
+            e == PlayerEvent::BeamHit && tick.wrapping_sub(at) < BEAM_HIT_COOLDOWN
+        });
+        if !recently {
+            velocity += shove * t.beam_push_speed;
+            player.emit(PlayerEvent::BeamHit);
+        }
+    }
 
     // The body slowly turns to follow where the head is looking.
     let follow = pitch * (1.0 - (-BODY_FOLLOW_RATE * ctx.dt).exp());

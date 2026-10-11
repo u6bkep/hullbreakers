@@ -492,6 +492,12 @@ pub fn play_event_sounds(
             }
             PlayerEvent::ReferenceSet { .. } => play(&mut commands, &sounds.click_on, 0.5, 1.4),
             PlayerEvent::NoReferenceTarget => play(&mut commands, &sounds.click_off, 0.4, 0.7),
+            PlayerEvent::Pressed { .. } => play(&mut commands, &sounds.click_on, 0.8, 0.6),
+            PlayerEvent::Respawned => {}
+            PlayerEvent::BeamHit => {
+                play(&mut commands, &sounds.impact, 1.0, 0.6);
+                play(&mut commands, &sounds.warning, 0.6, 1.3);
+            }
         }
     }
 }

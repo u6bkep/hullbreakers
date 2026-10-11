@@ -13,6 +13,8 @@ use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::ship::ControlAction;
+
 /// How long entries stay in the log, in ticks. Readers must look at least
 /// this often.
 pub const LOG_TICKS: u32 = 120;
@@ -26,6 +28,8 @@ pub enum Detach {
     RippedOff(f32),
     /// The rope out-pulled the boots (N).
     Yanked(f32),
+    /// The ship underfoot came apart.
+    Blasted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -62,6 +66,15 @@ pub enum PlayerEvent {
         distance: f32,
     },
     NoReferenceTarget,
+    /// Pressed a button on a ship.
+    Pressed {
+        body: Entity,
+        action: ControlAction,
+    },
+    /// Put back aboard at the start of a scenario.
+    Respawned,
+    /// Shoved by a laser beam.
+    BeamHit,
 }
 
 impl PlayerEvent {
@@ -72,7 +85,10 @@ impl PlayerEvent {
     pub fn relocates_view(&self) -> bool {
         matches!(
             self,
-            PlayerEvent::Landed { .. } | PlayerEvent::SurfaceChanged { .. } | PlayerEvent::Detached(_)
+            PlayerEvent::Landed { .. }
+                | PlayerEvent::SurfaceChanged { .. }
+                | PlayerEvent::Detached(_)
+                | PlayerEvent::Respawned
         )
     }
 }
@@ -85,6 +101,7 @@ impl PlayerEvent {
             PlayerEvent::Detached(Detach::BootsOff) => "boots off".into(),
             PlayerEvent::Detached(Detach::RippedOff(a)) => format!("ripped off ({a:.1} m/s²)"),
             PlayerEvent::Detached(Detach::Yanked(n)) => format!("yanked off by rope ({n:.0} N)"),
+            PlayerEvent::Detached(Detach::Blasted) => "blown clear".into(),
             PlayerEvent::Landed { speed, .. } => format!("landed at {speed:.1} m/s"),
             PlayerEvent::Impact { speed, .. } => format!("bounced at {speed:.1} m/s"),
             PlayerEvent::SurfaceChanged { .. } => return None,
@@ -99,6 +116,9 @@ impl PlayerEvent {
             }
             PlayerEvent::ReferenceSet { distance } => format!("reference set at {distance:.0} m"),
             PlayerEvent::NoReferenceTarget => "no body under crosshair".into(),
+            PlayerEvent::Pressed { action, .. } => format!("pressed: {}", action.label()),
+            PlayerEvent::Respawned => return None,
+            PlayerEvent::BeamHit => "caught in a laser beam".into(),
         })
     }
 }
@@ -110,7 +130,8 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::Impact { body, .. }
             | PlayerEvent::SurfaceChanged { body }
             | PlayerEvent::BodyChanged { body }
-            | PlayerEvent::GrappleAttached { body, .. } => *body = mapper.get_mapped(*body),
+            | PlayerEvent::GrappleAttached { body, .. }
+            | PlayerEvent::Pressed { body, .. } => *body = mapper.get_mapped(*body),
             PlayerEvent::Detached(_)
             | PlayerEvent::GrappleMissed
             | PlayerEvent::GrappleReleased
@@ -118,7 +139,9 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::BootsToggled(_)
             | PlayerEvent::AssistToggled(_)
             | PlayerEvent::ReferenceSet { .. }
-            | PlayerEvent::NoReferenceTarget => {}
+            | PlayerEvent::NoReferenceTarget
+            | PlayerEvent::Respawned
+            | PlayerEvent::BeamHit => {}
         }
     }
 }

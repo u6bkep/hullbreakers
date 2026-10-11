@@ -108,6 +108,16 @@ tuning! {
             lurch_delta_v: 6.0, 0.0, 40.0;
             field_speed: 15.0, 0.0, 60.0;
         }
+        "Mission" {
+            home_survival_seconds: 210.0, 20.0, 1200.0;
+            raider_shielded_seconds: 900.0, 20.0, 3600.0;
+            raider_exposed_seconds: 12.0, 2.0, 120.0;
+            wreck_return_seconds: 6.0, 1.0, 60.0;
+            beam_push_speed: 8.0, 0.0, 40.0;
+            duel_near: 40.0, 15.0, 200.0;
+            duel_far: 200.0, 50.0, 600.0;
+            duel_pass_seconds: 30.0, 5.0, 120.0;
+        }
         "Camera" {
             mouse_sensitivity: 0.0022, 0.0002, 0.01;
             fov_deg: 85.0, 50.0, 120.0;

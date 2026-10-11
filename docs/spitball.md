@@ -77,6 +77,25 @@ These are the hooks to keep leaning on.
   anchor point.
 - Open question: fixed classes, or open loadouts?
 
+### Resistance on a boarding action
+
+Two routes, both deferred until the boarding scenario gives them a place to
+live (decided 2026-10-10).
+
+- **Defenders.** Turrets that track EVA players, crawlers, boarders. Needs the
+  enemy system built out first.
+- **Puzzles.** Jump Space has an engineering panel where tetris-like pieces
+  get shuffled around to power ship components. The user thinks this idea can
+  be pushed much further. Directions to explore:
+  - Power routing that is physical: the pieces are real objects in the ship,
+    carried or roped around, rather than a 2D panel.
+  - Panels spread across the ship, so one player reads the state while
+    another acts, talking through the hull.
+  - On a boarding action, the enemy's panel is the lock: re-route their power
+    to drop the shield rather than pressing one button.
+  - On our own ship, a hit knocks pieces loose and someone has to fix it mid
+    fight.
+
 ### Enemies
 
 - **Hull crawlers.** They walk on magnetic feet using the players' own booted

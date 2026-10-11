@@ -22,6 +22,7 @@ use crate::sim::tuning::Tuning;
 #[derive(Resource)]
 pub struct Materials {
     hull: Handle<StandardMaterial>,
+    hostile_hull: Handle<StandardMaterial>,
     trim: Handle<StandardMaterial>,
     rock: Handle<StandardMaterial>,
 }
@@ -32,6 +33,12 @@ pub fn setup_materials(mut commands: Commands, mut materials: ResMut<Assets<Stan
             base_color: Color::srgb(0.55, 0.57, 0.6),
             metallic: 0.6,
             perceptual_roughness: 0.5,
+            ..default()
+        }),
+        hostile_hull: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.32, 0.1, 0.1),
+            metallic: 0.7,
+            perceptual_roughness: 0.4,
             ..default()
         }),
         trim: materials.add(StandardMaterial {
@@ -120,6 +127,7 @@ pub fn attach_meshes(
     };
     let material = match kind {
         SimMaterial::Hull => materials.hull.clone(),
+        SimMaterial::HostileHull => materials.hostile_hull.clone(),
         SimMaterial::Trim => materials.trim.clone(),
         SimMaterial::Rock => materials.rock.clone(),
     };

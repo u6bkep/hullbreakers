@@ -9,7 +9,7 @@ use space_game::sim::SimPlugin;
 use space_game::sim::frame::BodyFrame;
 use space_game::sim::input::PlayerInput;
 use space_game::sim::player::{Mode, Player};
-use space_game::sim::ship::{Ship, ShipCommand};
+use space_game::sim::ship::{HomeShip, ShipCommand};
 use space_game::sim::tuning::Tuning;
 
 fn app_with(tuning: Tuning) -> App {
@@ -97,7 +97,7 @@ fn ticks(app: &mut App, n: usize) {
 
 fn ship(app: &mut App) -> Entity {
     app.world_mut()
-        .query_filtered::<Entity, With<Ship>>()
+        .query_filtered::<Entity, With<HomeShip>>()
         .single(app.world())
         .unwrap()
 }
@@ -111,7 +111,7 @@ fn ship_frame(app: &mut App) -> BodyFrame {
             &LinearVelocity,
             &AngularVelocity,
             &ComputedCenterOfMass,
-        ), With<Ship>>()
+        ), With<HomeShip>>()
         .single(world)
         .unwrap();
     BodyFrame {
