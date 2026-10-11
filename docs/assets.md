@@ -19,7 +19,7 @@ tools/assets/
   build               # the driver: build + verify one asset or all of them
   hb/                 # the library build scripts import
   materials.json      # the material roles
-  kinds.json          # budgets per kind (the art-style table)
+  kinds.json          # per kind: budget, bevel guide, near distance, bevel segments (the art-style table)
   verify_glb.py       # the verifier (plain python3, no Blender)
   run_build.py        # Blender entry point the driver uses
 ```
@@ -68,7 +68,9 @@ tools/assets/
 
 4. **Build and verify:** `tools/assets/build weapons/smg_frame` (the path is relative to
    `assets/`). It deletes the old outputs, runs the script in Blender, renders four
-   previews, then runs the verifier. It exits non-zero on any failure. Use `--fast` to skip
+   previews, then runs the verifier. The build prints each part's triangles, the total,
+   and how many bevels fell under the detail size and how many buried edges went
+   unbevelled. It exits non-zero on any failure. Use `--fast` to skip
    the previews (export alone takes about a second; the previews take about 15 s). Run it with
    no argument to rebuild everything.
 
@@ -111,7 +113,7 @@ a = hb.Asset(__file__)        # reads asset.json beside the script; fresh empty 
 
 | call | makes |
 |---|---|
-| `a.part(name, parent=None, pivot=(0,0,0), forward=None, up=None, bevel=None, smooth_angle=30, bevel_segments=2)` | A mesh node, pivoted at `pivot`. The pivot is the joint or socket it moves about. |
+| `a.part(name, parent=None, pivot=(0,0,0), forward=None, up=None, bevel=None, smooth_angle=30, bevel_segments=None)` | A mesh node, pivoted at `pivot`. The pivot is the joint or socket it moves about. |
 | `a.socket("SOCKET_x", parent=None, at=(0,0,0), forward=None, up=None)` | An empty attachment point. |
 | `a.collider("COL_x", points=None, around=None, parent=None)` | A convex hull of `points`, or of the vertices of the part(s) in `around`. It has no material. |
 | `a.export()` | Finishes and exports everything. It must be the last call. |
@@ -125,6 +127,8 @@ a = hb.Asset(__file__)        # reads asset.json beside the script; fresh empty 
   attach point.
 - `bevel` is the part's bevel width in metres. It defaults to the kind's `default_bevel`;
   outside the kind's range you get a note, not an error. `bevel=0` gives no bevel.
+- `bevel_segments` defaults to the kind's (1, a chamfer; 2 for handhelds). See
+  "Spending triangles" in art-style.md before raising it.
 - Names: parts are `snake_case`; then `SOCKET_<snake>` and `COL_<snake>`. A duplicate name
   is an error, never a silent `.001`.
 
@@ -139,9 +143,16 @@ for thin strips and small details).
 | `p.prism(points, plane="zy", span=(a, b), mat=, smooth=False)` | A closed 2D outline extruded. `plane` names the two axes the points are in, in order. `"zy"` means the points are `(z, y)`, a side view, and the extrusion runs across x from `a` to `b`. |
 | `p.box(lo, hi, mat=)` | An axis-aligned box from two opposite corners, in any order. |
 | `p.frame(lo, hi, wall, axis, mat=)` | A rectangular sleeve: outer box `lo..hi`, open along `axis`, with walls `wall` thick. |
-| `p.lathe(profile, axis="z", center=(0,0), mat= or mats=[...], segments=20)` | A surface of revolution. `profile` is `[(radius, t)]` with `t` along the axis. `center` gives the other two axes' coordinates in xyz order (`axis="z"` → `(x, y)`). `mats` takes one role per profile segment. Open ends are capped. |
-| `p.cylinder(axis, center, radius, span, mat=, segments=20)` | A capped cylinder. |
+| `p.lathe(profile, axis="z", center=(0,0), mat= or mats=[...], segments=None)` | A surface of revolution. `profile` is `[(radius, t)]` with `t` along the axis. `center` gives the other two axes' coordinates in xyz order (`axis="z"` → `(x, y)`). `mats` takes one role per profile segment. Open ends are capped. |
+| `p.cylinder(axis, center, radius, span, mat=, segments=None)` | A capped cylinder. |
 | `p.hull(points, mat=)` | The convex hull of `points` (at least 4, not flat). Every face is flat and coplanar sides merge into one face. For wedges, sloped plates and chamfered blocks that a box or prism can't tilt into. |
+
+`segments` (lathe, cylinder): leave it out for a round surface. hb picks the fewest
+segments (even, at least 8) that keep the widest radius within one detail size (a pixel
+at the kind's near distance; see below) of a true circle, or half of one if any of its
+materials is emissive, and its facets always shade smooth. Give it only for a deliberate polygon: then the facets are hard (and bevelled)
+wherever the angle between neighbouring facets is at least `smooth_angle` (avoid an
+exact tie, such as 12 segments at 30°: float rounding decides it).
 
 Primitives are separate closed shells. They may overlap, but they are never welded or
 booleaned together. There's no boolean operation; build cut-outs from separate pieces.
@@ -155,15 +166,30 @@ Every face is tagged **flat** or **curved** by the primitive that made it:
 - Curved: lathe bands (cylinders and cones), and the side faces of `prism(..., smooth=True)`.
   Use that for an outline that approximates a curve.
 
+The **detail size** is one pixel at the kind's `near` distance (`kinds.json`): `near` ×
+1.27 mm, for the game's 85° vertical field of view at 1440 lines (`hb/asset.py`
+`VIEW_FOV_DEG`, `VIEW_LINES`). The rules in art-style.md "Spending triangles" are built
+on it, and hb applies them as it goes:
+
+- A bevel width (the part's or a primitive's) under the detail size becomes 0 when the
+  primitive is added.
+- A lathe or cylinder without `segments` gets its count from its radius (above).
+
 Then:
 
 1. **Hard edges.** Every edge of a flat face is marked sharp, so flat faces always shade
    exactly flat; no angle threshold can leave a shallow chamfer smoothed. Curved surfaces
-   stay smooth across edges shallower than `smooth_angle` (30° by default: a 20-segment
-   lathe has 18° facets) and are hard across sharper ones.
+   stay smooth across edges shallower than `smooth_angle` (30° by default) and are hard
+   across sharper ones. The seams between an auto-segment lathe's facets are always
+   smooth, whatever the angle.
 2. **Bevel.** Hard edges sharper than 1° are bevelled. Each primitive gets its own width,
-   through bevel weights on a weight-limited Bevel modifier. `harden_normals` is on, the
-   outer miter is Arc, and widths clamp where they would overlap.
+   through bevel weights on a weight-limited Bevel modifier with the part's
+   `bevel_segments`. `harden_normals` is on, the outer miter is Arc, and widths clamp
+   where they would overlap. An edge buried inside another primitive of the same part
+   (deeper than its bevel width at nine points along it, ends included) gets weight 0,
+   but only if every bevelled edge at both its ends is buried too: where a bevelled and an
+   unbevelled edge meet, the modifier bends the unbevelled faces' normals, and the
+   verifier catches it. It stays a hard edge.
 3. **Weighted normals** (face area, keep sharp).
 
 All three are applied on export (`export_apply`). The `.glb` is then read back and its node

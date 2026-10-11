@@ -4,7 +4,8 @@ Every face is tagged flat or curved by the primitive that made it, never by a gu
   - flat faces (box sides, prism caps and sides, lathe end caps and radial steps) get all
     their edges marked hard, so they always shade exactly flat;
   - curved faces (lathe bands, smooth prism sides) are smooth across edges sharper than
-    nothing, and hard across edges sharper than the primitive's smooth_angle.
+    nothing, and hard across edges sharper than the primitive's smooth_angle, except
+    a lathe's seams made with smooth_seams, which are always smooth.
 Primitives are never welded to each other, so their edges never mix.
 """
 import math
@@ -15,7 +16,7 @@ from .space import axis_index, vec3
 
 
 class Prim:
-    __slots__ = ("kind", "verts", "faces", "bevel", "smooth_angle")
+    __slots__ = ("kind", "verts", "faces", "bevel", "smooth_angle", "seams")
 
     def __init__(self, kind, bevel, smooth_angle):
         self.kind = kind
@@ -23,6 +24,7 @@ class Prim:
         self.faces = []        # (vertex indices, flat?, material role)
         self.bevel = bevel
         self.smooth_angle = smooth_angle
+        self.seams = []        # vertex index pairs: edges that stay smooth whatever their angle
 
     def v(self, p):
         self.verts.append(Vector(p))
@@ -140,12 +142,24 @@ def frame(lo, hi, wall, axis, mat, bevel):
     return pr
 
 
-def lathe(profile, axis, center, mats, segments, bevel, smooth_angle):
+def auto_segments(radius, tol):
+    """Fewest segments (even, at least 8) for which a circle of `radius` is within `tol` of
+    its polygon (the sagitta r(1 - cos(pi/n)) <= tol), so the silhouette stays round."""
+    if radius <= tol:
+        return 8
+    n = math.ceil(math.pi / math.acos(1.0 - tol / radius))
+    return max(8, n + (n % 2))
+
+
+def lathe(profile, axis, center, mats, segments, bevel, smooth_angle, smooth_seams=False):
     """Surface of revolution. profile: [(radius, t)] with t the coordinate along `axis`.
 
     Open ends are capped flat. A radius-0 end at the same t as its neighbour is a flat
     cap; at a different t it is a cone tip (curved). Segments with constant t (radial
     steps) are flat; the rest (cylinders, cones) are curved.
+    smooth_seams: the edges running along the profile between neighbouring segments of a
+    curved band stay smooth whatever their angle (a round surface); otherwise they are
+    hard where the facet angle 360/segments reaches smooth_angle (a faceted one).
     """
     a = axis_index(axis)
     o1, o2 = _others(a)
@@ -214,6 +228,8 @@ def lathe(profile, axis, center, mats, segments, bevel, smooth_angle):
                 pr.face((ra[k], ra[kn], rb[0]), flat, mats[i])
             else:
                 pr.face((ra[k], ra[kn], rb[kn], rb[k]), flat, mats[i])
+            if smooth_seams and not flat:
+                pr.seams.append((ra[k] if len(ra) > 1 else ra[0], rb[k] if len(rb) > 1 else rb[0]))
     if cap_start is not None:
         pr.face(rings[0], True, cap_start)
     if cap_end is not None:

@@ -60,17 +60,71 @@ asked for.
 
 ## Budgets (triangles)
 
-| Kind | Triangles | Bevel width |
-|---|---|---|
-| Handheld (weapon, tool) | 2k–6k | 2–4 mm |
-| Small robot or creature (≤ 1 m) | 3k–8k | 5–10 mm |
-| Large robot (2–4 m) | 8k–20k | 1–3 cm |
-| Prop, console, crate | 0.5k–3k | 5–20 mm |
-| Flora cluster | 1k–5k | (organic, none) |
-| Ship module | 5k–30k | 3–15 cm |
+| Kind | Triangles | Bevel width | Near | Bevel segments |
+|---|---|---|---|---|
+| Handheld (weapon, tool) | 2k–6k | 2–4 mm | 0.3 m | 2 |
+| Small robot or creature (≤ 1 m) | 3k–8k | 5–10 mm | 2 m | 1 |
+| Large robot (2–4 m) | 5k–12k | 1–3 cm | 3 m | 1 |
+| Prop, console, crate | 0.5k–3k | 5–20 mm | 1.5 m | 1 |
+| Flora cluster | 1k–5k | (organic, none) | 2 m | 1 |
+| Ship module | 5k–30k | 3–15 cm | 5 m | 1 |
 
 Bevels scale with the object: a bevel should read as a highlight from the
-distance the object is usually seen from.
+distance the object is usually seen from. **Near** is the closest a kind is
+usually seen from (a held weapon's rear is about 0.3 m from the eye); the
+rules below are judged there.
+
+The large-robot budget was 8k–20k until the rules below; the Gunner, unchanged
+in look, went from 19.3k to 8.2k under them. The other kinds have no asset that
+measures them yet, so their numbers are unchanged.
+
+## Spending triangles
+
+Triangles go where they can be seen. The game shows everything at an 85°
+vertical field of view, so at 1440 lines **one pixel at distance d is
+d × 1.27 mm** (3.8 mm at a large robot's 3 m near; 2.5 mm at a small robot's
+2 m; 0.4 mm for a weapon in first person). That pixel at the kind's near distance
+is its **detail size**, and the rules follow from it. hb applies all of them;
+the numbers live in `tools/assets/kinds.json`.
+
+Measured on the Gunner before the rules (19,320 triangles): the unbevelled
+shapes were 4,416 of them; the bevels were the other 14,904, and the second
+bevel segment alone was 8,912. Small things cost as much as big ones: a 2 cm
+vent slat took 108 triangles, the same as the torso's core box.
+
+1. **Chamfer, don't round.** One bevel segment is the default (two for
+   handhelds). A 2-segment arc costs about 2.5× a chamfer's triangles and only
+   differs where the bevel is several pixels wide: a 12 mm bevel is 3 px at 3 m
+   and less than 1 px at 12 m. On the Gunner it was 46% of the model; renders
+   at 12 m differ by barely more than render noise, at 35 m by less, and at
+   3 m only the highlight inside the chamfers changes. On a first-person weapon the bevels
+   are 4–10 px wide all game and an arc catches highlights a chamfer doesn't, so
+   handhelds keep 2.
+2. **No bevel narrower than the detail size.** A bevel under one pixel at the
+   near distance is never seen, but costs as much as a visible one. hb drops it
+   (the edge stays hard, so the face still shades flat). Small lights, strips
+   and lens rims usually fall here; a bevel authored below it is silently dropped.
+3. **Round things get their segment count from their radius.** Leave
+   `segments` out of a lathe or cylinder: hb picks the fewest (even, at least 8)
+   that keep the silhouette within one pixel of a true circle at the near
+   distance, or half a pixel if it glows, because a lit edge against a dark one
+   shows its corners. On a large robot a bolt of 3 cm radius gets 8,
+   a knuckle of 9 cm 12, and the Gunner's 6.6 cm eye lens 14. Those facets always shade smooth. Give `segments`
+   only for a deliberate polygon, such as the Swarmer's octagonal pods.
+4. **Hidden edges aren't bevelled.** An edge buried inside another primitive
+   of the same part, deeper than its own bevel, is left unbevelled
+   automatically, as long as every bevelled edge at both its ends is buried
+   too (where a bevelled and an unbevelled edge meet, Blender bends the
+   normals). In practice that means a whole buried primitive, or a buried end
+   ring of a cylinder (its smooth seams separate it from the rest); a box half
+   sunk into another keeps all its bevels. Parts move, so only the part's own
+   primitives count. This one is small (184 triangles on the Gunner) but free.
+
+What these rules don't cover, and are still the builder's call: how many
+primitives a detail needs (a 3-box vent costs three boxes), and deliberate
+faceting. A hard facet seam is bevelled like any hard edge, so a faceted lathe
+pays a bevel along every segment: the Swarmer's faceted lathes are 4.9k of its
+6.8k triangles, 3.2k of that in bevels.
 
 ## Lighting the models are judged under
 The game is mostly dark: one sun, a dim fill from the sky, suit headlamps, and

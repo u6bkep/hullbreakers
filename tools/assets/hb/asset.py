@@ -9,6 +9,14 @@ import verify_glb as V
 from . import _state, geometry
 from .space import frame, vec3
 
+# The view the triangle rules are judged at (docs/art-style.md, "Spending triangles"):
+# the game's vertical field of view (tuning.ron fov_deg) on a 1440-line screen. One pixel
+# at distance d is d * PX_PER_M metres. Each kind's `near` (kinds.json) is the closest it is
+# usually seen from; a pixel there is the kind's smallest visible detail.
+VIEW_FOV_DEG = 85.0
+VIEW_LINES = 1440
+PX_PER_M = 2.0 * math.tan(math.radians(VIEW_FOV_DEG) / 2.0) / VIEW_LINES
+
 
 class Node:
     """A node of the exported tree: the root, a part, a socket or a collider.
@@ -52,7 +60,24 @@ class Part(Node):
         b = self.bevel if bevel is None else float(bevel)
         if b < 0:
             raise ValueError(f"{self.name}: bevel {b} is negative")
+        if 0 < b < self.asset.detail:          # under a pixel at the kind's near distance
+            self.asset._dropped_bevels += 1
+            return 0.0
         return b
+
+    def _segments(self, segments, profile, mats):
+        """Explicit segments, or the fewest that keep the widest radius round to within a
+        pixel at the kind's near distance (half a pixel if it glows: a lit edge against a
+        dark one shows its corners). Returns (segments, smooth_seams)."""
+        if segments is not None:
+            return int(segments), False
+        try:
+            r = max(float(p[0]) for p in profile)
+        except (TypeError, ValueError, IndexError):
+            raise ValueError(f"{self.name}: lathe profile points must be (radius, t), got {profile!r}") from None
+        roles = V.load_roles()
+        glows = any("emissive_strength" in roles[m] for m in mats)
+        return geometry.auto_segments(r, self.asset.detail / (2 if glows else 1)), True
 
     def _smooth(self, smooth_angle):
         return math.radians(self.smooth_angle if smooth_angle is None else float(smooth_angle))
@@ -79,19 +104,23 @@ class Part(Node):
         """Rectangular sleeve: outer box lo..hi, open along axis ('x', 'y' or 'z'), walls `wall` thick."""
         return self._add(geometry.frame(lo, hi, wall, axis, self._mat(mat), self._bevel(bevel)))
 
-    def lathe(self, profile, axis="z", center=(0.0, 0.0), mat=None, mats=None, segments=20, bevel=None,
+    def lathe(self, profile, axis="z", center=(0.0, 0.0), mat=None, mats=None, segments=None, bevel=None,
               smooth_angle=None):
         """Surface of revolution. profile: [(radius, t)], t along `axis`. center: the other two
         axes' coordinates of the axis line, in xyz order (axis 'z' -> (x, y)). One mat, or
-        mats with one role per profile segment. Open ends are capped."""
+        mats with one role per profile segment. Open ends are capped.
+        segments: leave it out for a round surface (the count comes from the widest radius
+        and the kind's `near`, and the facets always shade smooth); give it for a deliberate
+        polygon (then facets are hard where their angle is at least smooth_angle)."""
         if (mat is None) == (mats is None):
             raise ValueError(f"{self.name}: lathe takes mat= or mats=, not both or neither")
         n = len(profile) - 1
         mats = [self._mat(mat)] * n if mats is None else [self._mat(m) for m in mats]
+        segments, seams = self._segments(segments, profile, mats)
         return self._add(geometry.lathe(profile, axis, center, mats, segments, self._bevel(bevel),
-                                        self._smooth(smooth_angle)))
+                                        self._smooth(smooth_angle), smooth_seams=seams))
 
-    def cylinder(self, axis, center, radius, span, mat=None, segments=20, bevel=None, smooth_angle=None):
+    def cylinder(self, axis, center, radius, span, mat=None, segments=None, bevel=None, smooth_angle=None):
         """Capped cylinder along axis. center as for lathe; span is (from, to) along the axis."""
         a, b = sorted(float(s) for s in span)
         return self.lathe([(radius, a), (radius, b)], axis, center, mat=mat, segments=segments, bevel=bevel,
@@ -131,6 +160,11 @@ class Asset:
         self.kind = self.sidecar["kind"]
         self.kind_spec = V.load_kinds()[self.kind]
         self.palette = self.sidecar.get("palette", {})
+        # The smallest detail worth geometry: one pixel at the kind's near distance. Bevels
+        # narrower than this are dropped; auto lathes keep their silhouette within it.
+        self.detail = self.kind_spec["near"] * PX_PER_M
+        self._dropped_bevels = 0
+        self._buried_edges = 0
         self.nodes = {}
         self._exported = False
 
@@ -175,17 +209,21 @@ class Asset:
         return parent.world_g.to_3x3().normalized()
 
     def part(self, name, parent=None, pivot=(0.0, 0.0, 0.0), forward=None, up=None, bevel=None,
-             smooth_angle=30.0, bevel_segments=2):
+             smooth_angle=30.0, bevel_segments=None):
         """A mesh node pivoted at `pivot` (Bevy world). Parent defaults to the root.
         Orientation: local -Z along forward, +Y toward up; default is the parent's.
         bevel: width in metres for this part's edges (default: the kind's default_bevel).
-        smooth_angle: curved surfaces stay smooth across edges shallower than this (degrees)."""
+        smooth_angle: curved surfaces stay smooth across edges shallower than this (degrees).
+        bevel_segments: default the kind's (kinds.json). 1 is a chamfer; 2 rounds the edge, at
+        about 2.5x the bevel's triangles (worth it only for bevels several pixels wide)."""
         parent = self._parent(parent)
         if bevel is None:
             bevel = self.kind_spec["default_bevel"]
         lo, hi = self.kind_spec["bevel"]
         if bevel and not (lo <= bevel <= hi):
             print(f"hb: note: {name} bevel {bevel} m is outside the {self.kind} guide {lo}-{hi} m")
+        if bevel_segments is None:
+            bevel_segments = self.kind_spec["bevel_segments"]
         p = Part(self, name, parent, frame(pivot, forward, up, self._rot(parent)), float(bevel), float(smooth_angle),
                  int(bevel_segments))
         return self._register(p)

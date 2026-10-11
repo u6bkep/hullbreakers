@@ -5,9 +5,14 @@ Finishing a part (all applied on export via export_apply):
      than its smooth_angle, is marked sharp (edge.smooth = False -> the 'sharp_edge'
      attribute). Mesh.set_sharp_from_angle(angle=) does exist in 5.2, on mesh instances
      (not bpy.types.Mesh), but it takes one angle per mesh; hb decides per face instead.
+     Lathe seams made with smooth_seams (auto segments) are always smooth.
   2. Bevel: those hard edges (above 1 degree) get a bevel weight = primitive bevel / the
      part's widest bevel, and a Bevel modifier with limit_method WEIGHT and that widest
      width, so each primitive gets its own width. harden_normals keeps flat faces flat.
+     An edge buried inside another primitive of the same part (deeper than its bevel, all
+     along its length) stays hard but gets no bevel: nobody can see it, and its bevel would
+     cost as much as a visible one. Only where every bevelled edge at both its ends is
+     buried too, since mixed vertices bend normals. Other parts don't count: parts move.
   3. Weighted Normal modifier (face area, keep sharp) for the curved surfaces.
 """
 import json
@@ -17,6 +22,7 @@ import os
 import bmesh
 import bpy
 from mathutils import Matrix
+from mathutils.bvhtree import BVHTree
 
 import verify_glb as V
 
@@ -35,8 +41,10 @@ def _part_mesh(part, world_b, mat_cache, palette):
     flat_l = bm.faces.layers.int.new("hb_flat")
     bev_l = bm.faces.layers.float.new("hb_bevel")
     sm_l = bm.faces.layers.float.new("hb_smooth")
+    seam_l = bm.edges.layers.int.new("hb_seam")
     inv = world_b.inverted()
     roles = []
+    shells = []                                # per primitive: its verts and faces
     for pr in part.prims:
         vs = [bm.verts.new(inv @ to_blender(p)) for p in pr.verts]
         faces = []
@@ -53,7 +61,10 @@ def _part_mesh(part, world_b, mat_cache, palette):
             f[sm_l] = pr.smooth_angle
             f.smooth = True
             faces.append(f)
+        for i, j in pr.seams:
+            bm.edges.get((vs[i], vs[j]))[seam_l] = 1
         bmesh.ops.recalc_face_normals(bm, faces=faces)
+        shells.append((vs, faces))
     bm.normal_update()
     for f in bm.faces:
         if f.calc_area() < 1e-12:
@@ -68,11 +79,13 @@ def _part_mesh(part, world_b, mat_cache, palette):
             raise ExportError(f"{part.name}: an edge has {len(lf)} faces; primitives must be closed shells")
         f1, f2 = lf
         ang = e.calc_face_angle(0.0)
-        if not f1[flat_l] and not f2[flat_l] and ang < min(f1[sm_l], f2[sm_l]):
+        if e[seam_l] or (not f1[flat_l] and not f2[flat_l] and ang < min(f1[sm_l], f2[sm_l])):
             continue                           # smooth across a curved surface
         e.smooth = False                       # hard edge
         if widest > 0 and ang > BEVEL_MIN_ANGLE:
             e[bw] = min(f1[bev_l], f2[bev_l]) / widest
+    if widest > 0 and len(shells) > 1:
+        part.asset._buried_edges += _unbevel_buried(bm, bw, widest, shells)
 
     # Planes of the faces modelled flat, in the part's local glTF frame. Bevelling shrinks a
     # face within its own plane, so the verifier can find these planes in the .glb.
@@ -88,13 +101,65 @@ def _part_mesh(part, world_b, mat_cache, palette):
     me = bpy.data.meshes.new(part.name)
     bm.to_mesh(me)
     bm.free()
-    for nm in ("hb_flat", "hb_bevel", "hb_smooth"):
+    for nm in ("hb_flat", "hb_bevel", "hb_smooth", "hb_seam"):
         me.attributes.remove(me.attributes[nm])
     for role in roles:
         if role not in mat_cache:
             mat_cache[role] = materials.make(role, palette)
         me.materials.append(mat_cache[role])
     return me, widest, sorted(planes.values())
+
+
+BURIED_SAMPLES = 9                             # points tested along an edge, ends included
+
+
+def _unbevel_buried(bm, bw, widest, shells):
+    """Zero the bevel weight of every edge that lies inside another primitive's closed
+    shell, deeper than the edge's own bevel width, at every sample point along it (ends
+    included). The bevel stays within its width of the edge, so it would be hidden.
+    Primitives are closed shells with outward normals (recalc_face_normals), so a point is
+    inside one when the nearest surface point's normal faces away from it."""
+    trees = []
+    for vs, faces in shells:
+        lo = [min(v.co[k] for v in vs) for k in range(3)]
+        hi = [max(v.co[k] for v in vs) for k in range(3)]
+        index = {v: n for n, v in enumerate(vs)}
+        tree = BVHTree.FromPolygons([v.co.copy() for v in vs], [[index[v] for v in f.verts] for f in faces])
+        trees.append((set(vs), lo, hi, tree))
+
+    def buried_in(tree, lo, hi, pts, depth):
+        if any(p[k] < lo[k] + depth or p[k] > hi[k] - depth for p in pts for k in range(3)):
+            return False
+        for p in pts:
+            loc, nrm, _, dist = tree.find_nearest(p)
+            if loc is None or dist <= depth or (p - loc).dot(nrm) >= 0:
+                return False
+        return True
+
+    buried = set()
+    for e in bm.edges:
+        if e[bw] <= 0:
+            continue
+        depth = e[bw] * widest + 1e-5
+        a, b = e.verts[0].co, e.verts[1].co
+        pts = [a.lerp(b, t / (BURIED_SAMPLES - 1)) for t in range(BURIED_SAMPLES)]
+        for own, lo, hi, tree in trees:
+            if e.verts[0] not in own and buried_in(tree, lo, hi, pts, depth):
+                buried.add(e)
+                break
+    # A vertex where a bevelled edge meets an unbevelled one makes the Bevel modifier bend
+    # the unbevelled faces' normals there. Only unbevel an edge when every bevelled edge at
+    # both its ends is buried too (repeated until nothing changes).
+    changed = True
+    while changed:
+        changed = False
+        for e in list(buried):
+            if any(o[bw] > 0 and o not in buried for v in e.verts for o in v.link_edges):
+                buried.discard(e)
+                changed = True
+    for e in buried:
+        e[bw] = 0.0
+    return len(buried)
 
 
 def _collider_mesh(col, world_b):
@@ -312,6 +377,8 @@ def export(asset):
             print(f"hb:   {node.name:20s} {t:6d} tris{'  (collider)' if node.kind == 'collider' else ''}")
     lo, hi = asset.kind_spec["tris"]
     print(f"hb:   {'TOTAL':20s} {total:6d} tris (budget {lo}-{hi})")
+    print(f"hb:   detail {asset.detail * 1000:.1f} mm (1 px at {asset.kind_spec['near']} m): {asset._dropped_bevels}"
+          f" primitive bevels under it dropped; {asset._buried_edges} buried edges not bevelled")
     _state.exported = glb_path
 
     if _state.preview:
