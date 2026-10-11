@@ -76,6 +76,16 @@ impl HullKind {
         }
     }
 
+    /// Its model (under `assets/`), drawn in place of its collision boxes
+    /// where there is one. The boxes stay its collision: the model is built
+    /// on them (see `layout_dump`).
+    pub fn model(self) -> Option<&'static str> {
+        match self {
+            HullKind::Home => None,
+            HullKind::Carrier => Some("ships/carrier/carrier.glb"),
+        }
+    }
+
     /// The name on the HUD.
     pub fn name(self) -> &'static str {
         match self {
@@ -352,7 +362,7 @@ pub struct Turret {
 }
 
 /// The controls fitted to each kind of hull: (action, center, half size).
-fn controls(kind: HullKind) -> Vec<(ControlAction, Vec3, Vec3)> {
+pub fn controls(kind: HullKind) -> Vec<(ControlAction, Vec3, Vec3)> {
     let v = Vec3::new;
     match kind {
         HullKind::Home => {

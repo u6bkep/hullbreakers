@@ -59,6 +59,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
             .add_observer(render::add_ship_lights)
+            .add_observer(render::add_ship_model)
             .add_observer(sky::add_sky_to_cameras)
             .add_observer(gallery::set_out_gallery)
             .add_systems(

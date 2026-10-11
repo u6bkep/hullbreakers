@@ -108,14 +108,23 @@ fn append_shape(
 /// [`HullPart`] box for visual-only ship pieces.
 pub fn attach_meshes(
     add: On<Add, SimMaterial>,
-    query: Query<(Option<&Collider>, Option<&HullPart>, &SimMaterial)>,
+    query: Query<(Option<&Collider>, Option<&HullPart>, &SimMaterial, Option<&ChildOf>)>,
+    hulls: Query<&crate::sim::ship::ShipHull>,
     materials: Res<Materials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
 ) {
-    let Ok((collider, part, kind)) = query.get(add.entity) else {
+    let Ok((collider, part, kind, parent)) = query.get(add.entity) else {
         return;
     };
+    // A ship with a model is drawn by that instead (see `add_ship_model`).
+    if part.is_some()
+        && parent
+            .and_then(|p| hulls.get(p.parent()).ok())
+            .is_some_and(|h| ship_model(h.0).is_some())
+    {
+        return;
+    }
     let mesh = match (collider, part) {
         (Some(collider), _) => collider_mesh(collider),
         (None, Some(part)) => Some(Cuboid::from_size(part.size).into()),
@@ -159,6 +168,29 @@ pub fn setup_lighting(mut commands: Commands) {
 pub struct ShipLight {
     pub color: Color,
     pub intensity: f32,
+}
+
+/// A hull kind's model, if it has one and it's been built.
+pub fn ship_model(kind: crate::sim::ship::HullKind) -> Option<&'static str> {
+    let path = kind.model()?;
+    super::gallery::asset_root().join(path).exists().then_some(path)
+}
+
+/// A ship with a model gets it, in place of its boxes.
+pub fn add_ship_model(
+    add: On<Add, crate::sim::ship::ShipHull>,
+    hulls: Query<&crate::sim::ship::ShipHull>,
+    assets: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    let Some(path) = hulls.get(add.entity).ok().and_then(|h| ship_model(h.0)) else {
+        return;
+    };
+    commands.entity(add.entity).with_child((
+        Name::new("Ship model"),
+        WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
+        Transform::default(),
+    ));
 }
 
 /// Interior lights ride along with the ship.
