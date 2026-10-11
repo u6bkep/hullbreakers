@@ -35,6 +35,8 @@ pub fn spawn_camera(mut commands: Commands, tuning: Res<Tuning>) {
         Name::new("Camera"),
         PlayerCamera,
         Camera3d::default(),
+        // HDR with bloom, so lasers, alarms and explosions glow.
+        bevy::post_process::bloom::Bloom::NATURAL,
         Projection::Perspective(PerspectiveProjection {
             fov: tuning.fov_deg.to_radians(),
             near: 0.05,

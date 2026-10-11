@@ -3,6 +3,7 @@
 //! actions). Which player is local is the network layer's business.
 
 pub mod camera;
+pub mod combat_fx;
 pub mod debug_shots;
 pub mod events;
 pub mod hud;
@@ -41,7 +42,7 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(EguiPlugin::default())
+        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin))
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<camera::CameraFx>()
             .insert_resource(ViewCorrection {

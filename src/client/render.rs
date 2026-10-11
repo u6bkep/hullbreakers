@@ -154,16 +154,29 @@ pub fn setup_lighting(mut commands: Commands) {
     ));
 }
 
+/// An interior light of a ship, and how it shines when nothing is wrong
+/// (combat alerts recolor it; see `combat_fx`).
+#[derive(Component, Clone, Copy)]
+pub struct ShipLight {
+    pub color: Color,
+    pub intensity: f32,
+}
+
 /// Interior lights ride along with the ship.
 pub fn add_ship_lights(add: On<Add, crate::sim::ship::ShipHull>, mut commands: Commands) {
     let ship = add.entity;
+    let normal = ShipLight {
+        color: Color::srgb(1.0, 0.92, 0.8),
+        intensity: 60_000.0,
+    };
     for z in [-10.0, -4.0, 5.0, 11.0] {
         let light = commands
             .spawn((
+                normal,
                 PointLight {
-                    intensity: 60_000.0,
+                    intensity: normal.intensity,
                     range: 12.0,
-                    color: Color::srgb(1.0, 0.92, 0.8),
+                    color: normal.color,
                     ..default()
                 },
                 Transform::from_xyz(0.0, 2.7, z),
