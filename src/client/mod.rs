@@ -16,6 +16,7 @@ pub mod render;
 pub mod sfx;
 pub mod sky;
 pub mod stress;
+pub mod viewmodel;
 pub mod weapons_fx;
 
 use bevy::prelude::*;
@@ -64,6 +65,7 @@ impl Plugin for ClientPlugin {
             .add_observer(render::add_ship_model)
             .add_observer(sky::add_sky_to_cameras)
             .add_observer(gallery::set_out_gallery)
+            .add_observer(viewmodel::spawn_view_hands)
             .add_systems(
                 PreStartup,
                 (
@@ -97,6 +99,8 @@ impl Plugin for ClientPlugin {
                     animate::rig_robots,
                     animate::animate_robots,
                     camera::update_camera,
+                    viewmodel::pose_view_hands,
+                    viewmodel::dress_view_hands,
                     render::update_dust,
                 )
                     .chain()

@@ -185,7 +185,7 @@ impl Stance {
 
 pub const STANCES: usize = 4;
 /// Seconds to change stance.
-const SWITCH_SECONDS: f32 = 0.4;
+pub const SWITCH_SECONDS: f32 = 0.4;
 
 /// A hand's state: time to its next shot, and a reload in progress.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
