@@ -763,7 +763,7 @@ fn draw_shields(
 
 /// A spark (or a bit of burning wreckage): flies, shrinks, goes out.
 #[derive(Component)]
-struct Spark {
+pub(crate) struct Spark {
     velocity: Vec3,
     life: f32,
     age: f32,
@@ -772,7 +772,7 @@ struct Spark {
 
 /// A burn left on a hull by a beam, cooling from white hot to black.
 #[derive(Component)]
-struct Scorch {
+pub(crate) struct Scorch {
     age: f32,
     stage: usize,
 }

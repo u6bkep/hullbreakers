@@ -17,11 +17,12 @@
 #   tools/hl stop               kill the game and sway
 #   tools/hl env                print the env to talk to the compositor
 #
-# State lives in target/headless/.
+# State lives in target/headless/ ($HL_STATE overrides it, for a second
+# harness alongside). $HL_EXE runs that binary instead of target/debug/$HL_BIN.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STATE="$ROOT/target/headless"
+STATE="${HL_STATE:-$ROOT/target/headless}"
 RENDER_NODE="${HL_RENDER_NODE:-/dev/dri/renderD128}" # RX 6800 XT
 mkdir -p "$STATE"
 
@@ -83,7 +84,7 @@ game)
         printf 'pcm.!default { type null }\nctl.!default { type hw card 0 }\n' >"$STATE/asound.conf"
         export ALSA_CONFIG_PATH="/usr/share/alsa/alsa.conf:$STATE/asound.conf"
         cd "$ROOT"
-        exec "./target/debug/${HL_BIN:-hullbreakers}" "$@" >"$log" 2>&1
+        exec "${HL_EXE:-./target/debug/${HL_BIN:-hullbreakers}}" "$@" >"$log" 2>&1
     ) &
     echo "GAME_PID=$!" >>"$STATE/env"
     # Wait for the window to map.

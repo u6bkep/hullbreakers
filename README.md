@@ -84,6 +84,17 @@ tools/hl stop
 
 Games launched by `tools/hl` play into an ALSA null device, not your speakers.
 
+### Performance runs
+
+`tools/stress` builds the game (release and dev), runs scenarios (`gallery`,
+`field`, `boarding`, `firefight`: 30 robots fighting a player who never
+stops firing; `coop`: host plus client) in a harness of its own on port
+5977, with vsync on and off, and prints a table: frame time percentiles,
+fixed-tick time, GPU utilisation and power, CPU use, and counts. A traced
+build (`--features profile-trace`) gives per-system time. `--ab` prices
+rendering features by switching them off (`tools/stress --help`). The game
+side is `HULLBREAKERS_PROFILE=<dir>` (`src/client/profile.rs`), off by default.
+
 Run `tools/hl game` again (e.g. `tools/hl game --connect 127.0.0.1`) for more
 instances; sway tiles them side by side (`tools/hl start 2560x720` gives each
 a 1280-wide half). `tools/hl focus <title>` picks which one gets input; the

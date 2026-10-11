@@ -8,7 +8,9 @@
 //! ```
 //!
 //! `HULLBREAKERS_SCENARIO=boarding` starts a host in the boarding action
-//! rather than the asteroid field.
+//! rather than the asteroid field. `HULLBREAKERS_PRESENT=novsync` (or
+//! `vsync`, `immediate`, `mailbox`, `fifo`) overrides the window's present
+//! mode, for measuring (see `tools/stress`).
 
 use std::net::{SocketAddr, ToSocketAddrs};
 use core::time::Duration;
@@ -35,10 +37,15 @@ fn main() {
             NetMode::Client { server } => format!("Hullbreakers — {server}"),
             _ => "Hullbreakers".into(),
         };
+        let present_mode = present_mode_from_env();
         app.add_plugins((
             DefaultPlugins
                 .set(WindowPlugin {
-                    primary_window: Some(Window { title, ..default() }),
+                    primary_window: Some(Window {
+                        title,
+                        present_mode,
+                        ..default()
+                    }),
                     ..default()
                 })
                 .set(AssetPlugin {
@@ -68,6 +75,23 @@ fn main() {
         }
     }
     app.run();
+}
+
+/// `HULLBREAKERS_PRESENT`: the window's present mode (Bevy's default,
+/// `AutoVsync`, when unset).
+fn present_mode_from_env() -> bevy::window::PresentMode {
+    use bevy::window::PresentMode;
+    match std::env::var("HULLBREAKERS_PRESENT").as_deref() {
+        Err(_) | Ok("") | Ok("vsync") => PresentMode::AutoVsync,
+        Ok("novsync") => PresentMode::AutoNoVsync,
+        Ok("immediate") => PresentMode::Immediate,
+        Ok("mailbox") => PresentMode::Mailbox,
+        Ok("fifo") => PresentMode::Fifo,
+        Ok(other) => {
+            eprintln!("hullbreakers: unknown HULLBREAKERS_PRESENT {other:?} (vsync, novsync, immediate, mailbox, fifo)");
+            PresentMode::AutoVsync
+        }
+    }
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<NetMode, String> {

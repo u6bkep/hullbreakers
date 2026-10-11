@@ -25,6 +25,9 @@ mock_instant = "0.6"
 
 [features]
 dev = ["bevy/dynamic_linking"]
+# Per-system timing for `tools/stress`: Bevy's tracing spans, written as a
+# Chrome trace (to `$TRACE_CHROME`). Off by default: it costs frame time.
+profile-trace = ["bevy/trace_chrome"]
 
 [profile.dev]
 opt-level = 1

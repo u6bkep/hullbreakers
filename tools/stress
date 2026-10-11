@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# Repeatable performance runs: builds the game, runs each stress scenario in
+# its own headless harness (tools/hl, state in target/headless-stress, so it
+# doesn't disturb another), collects each run's measurements (see
+# src/client/profile.rs) and prints a summary table, plus per-system time
+# from a traced build.
+#
+#   tools/stress [options] [scenario...]
+#
+# Scenarios (default: gallery field boarding firefight):
+#   gallery    the model gallery, as you arrive at it
+#   field      the asteroid field (baseline)
+#   boarding   the boarding action: carrier, robots, beams
+#   firefight  the field with 10 Gunners + 20 Swarmers around our ship and
+#              the player on the roof firing continuously (HULLBREAKERS_STRESS)
+#   coop       the field with a host and a client (both measured)
+#
+# Options:
+#   --builds LIST    release,dev (default release,dev; dev = `cargo run`'s profile)
+#   --present LIST   vsync,novsync (default both): as shipped, and uncapped
+#   --trace LIST     scenarios to trace for per-system time (default
+#                    gallery,firefight; "none" to skip). Traced runs use a
+#                    release build with the profile-trace feature, vsync on.
+#   --secs N         measure for N s (default 15); --warmup N (default 8)
+#   --size WxH       harness output size (default 1920x1080)
+#   --port N         game port (default 5977, away from the default 5888)
+#   --out DIR        results (default target/stress/<date>)
+#   --keep-traces    keep the raw Chrome traces (about 100 MB/s of run)
+#   --ab "V1 V2..."  also run each scenario with rendering features off, one
+#                    run per variant; a variant is a comma list of
+#                    HULLBREAKERS_PROFILE_AB switches (static_envmap, no_envmap,
+#                    no_shadows, no_bloom, no_msaa, no_skybox)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+export HL_STATE="$ROOT/target/headless-stress"
+
+builds=release,dev
+presents=vsync,novsync
+traces=gallery,firefight
+secs=15
+warmup=8
+size=1920x1080
+port=5977
+out="$ROOT/target/stress/$(date +%Y%m%d-%H%M%S)"
+keep_traces=0
+ab_variants=()
+scenarios=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --builds) builds="$2"; shift 2 ;;
+    --present) presents="$2"; shift 2 ;;
+    --trace) traces="$2"; shift 2 ;;
+    --secs) secs="$2"; shift 2 ;;
+    --warmup) warmup="$2"; shift 2 ;;
+    --size) size="$2"; shift 2 ;;
+    --port) port="$2"; shift 2 ;;
+    --out) out="$2"; shift 2 ;;
+    --keep-traces) keep_traces=1; shift ;;
+    --ab) read -ra ab_variants <<<"$2"; shift 2 ;;
+    -h | --help) sed -n '2,36p' "$0"; exit 0 ;;
+    -*) echo "stress: unknown option $1" >&2; exit 2 ;;
+    *) scenarios+=("$1"); shift ;;
+    esac
+done
+[[ ${#scenarios[@]} -gt 0 ]] || scenarios=(gallery field boarding firefight)
+[[ "$traces" == none ]] && traces=""
+mkdir -p "$out"
+
+# The GPU the harness renders on, for its utilisation and power.
+render_node="${HL_RENDER_NODE:-/dev/dri/renderD128}"
+gpu_sysfs="/sys/class/drm/$(basename "$render_node")/device"
+[[ -r "$gpu_sysfs/gpu_busy_percent" ]] || gpu_sysfs=""
+
+# Build everything first: a failed build must never leave a stale binary
+# to run.
+IFS=, read -ra build_list <<<"$builds"
+for b in "${build_list[@]}"; do
+    case "$b" in
+    release) cargo build --release ;;
+    dev) cargo build ;;
+    *) echo "stress: unknown build $b" >&2; exit 2 ;;
+    esac
+done
+[[ -n "$traces" ]] && cargo build --release --features profile-trace --target-dir target/trace
+exe_of() {
+    case "$1" in
+    release) echo "$ROOT/target/release/hullbreakers" ;;
+    dev) echo "$ROOT/target/debug/hullbreakers" ;;
+    trace) echo "$ROOT/target/trace/release/hullbreakers" ;;
+    esac
+}
+
+tools/hl start "$size" >/dev/null
+trap 'tools/hl stop >/dev/null' EXIT
+
+# Waits for every game in the harness to exit (each writes its results and
+# quits after warmup + secs), or kills them after a deadline.
+wait_games() {
+    local deadline=$((SECONDS + warmup + secs + 90))
+    local pids
+    pids=$(grep '^GAME_PID=' "$HL_STATE/env" | cut -d= -f2)
+    for pid in $pids; do
+        while kill -0 "$pid" 2>/dev/null; do
+            if ((SECONDS > deadline)); then
+                echo "stress: game $pid overran; killing it" >&2
+                kill "$pid" 2>/dev/null || true
+                break
+            fi
+            sleep 0.5
+        done
+    done
+    # Forget them, so the next run's windows tile afresh.
+    sed -i '/^GAME_PID=/d' "$HL_STATE/env"
+}
+
+# run <label> <build> <present> <scenario> [trace file] [A/B switches]
+run() {
+    local label="$1" build="$2" present="$3" scenario="$4" trace="${5:-}" ab="${6:-}"
+    local env=(
+        HULLBREAKERS_PROFILE_LABEL="$label"
+        HULLBREAKERS_PROFILE="$out"
+        HULLBREAKERS_PROFILE_WARMUP="$warmup"
+        HULLBREAKERS_PROFILE_SECS="$secs"
+        HULLBREAKERS_PROFILE_GPU_SYSFS="$gpu_sysfs"
+        HULLBREAKERS_PRESENT="$present"
+        HULLBREAKERS_PROFILE_AB="$ab"
+        HL_EXE="$(exe_of "$build")"
+    )
+    case "$scenario" in
+    gallery | field | boarding) env+=(HULLBREAKERS_SCENARIO="$scenario") ;;
+    firefight) env+=(HULLBREAKERS_SCENARIO=field HULLBREAKERS_STRESS=firefight) ;;
+    coop) env+=(HULLBREAKERS_SCENARIO=field) ;;
+    *) echo "stress: unknown scenario $scenario" >&2; exit 2 ;;
+    esac
+    if [[ -n "$trace" ]]; then
+        # Spans per system; executor and query internals left out (volume).
+        env+=(TRACE_CHROME="$trace" RUST_LOG="info,wgpu=error,naga=warn,bevy_ecs::query::state=warn,bevy_ecs::schedule::executor=warn")
+    fi
+    echo "stress: $label"
+    if [[ "$scenario" == coop ]]; then
+        env HULLBREAKERS_PROFILE_LABEL="$label-host" "${env[@]:1}" tools/hl game --port "$port" >/dev/null
+        sleep 2
+        env HULLBREAKERS_PROFILE_LABEL="$label-client" "${env[@]:1}" tools/hl game --connect "127.0.0.1:$port" >/dev/null
+    else
+        env "${env[@]}" tools/hl game --port "$port" >/dev/null
+    fi
+    wait_games
+    for log in "$HL_STATE"/game*.log; do
+        cp "$log" "$out/$label-$(basename "$log")"
+    done
+    rm -f "$HL_STATE"/game*.log
+}
+
+IFS=, read -ra present_list <<<"$presents"
+for scenario in "${scenarios[@]}"; do
+    for build in "${build_list[@]}"; do
+        for present in "${present_list[@]}"; do
+            run "$scenario-$build-$present" "$build" "$present" "$scenario"
+            for v in "${ab_variants[@]}"; do
+                run "$scenario-$build-$present-${v//,/+}" "$build" "$present" "$scenario" "" "$v"
+            done
+        done
+    done
+done
+IFS=, read -ra trace_list <<<"$traces"
+for scenario in "${trace_list[@]}"; do
+    [[ -n "$scenario" ]] || continue
+    run "$scenario-trace" trace vsync "$scenario" "$out/$scenario.trace.json"
+done
+
+{
+    runs=()
+    for f in "$out"/*.json; do [[ "$f" == *.trace.json ]] || runs+=("$f"); done
+    echo "# $(date)  ${size}, ${secs} s measured after ${warmup} s, $(grep -h -m1 '"adapter"' "${runs[@]}" | head -1 | cut -d'"' -f4)"
+    echo
+    python3 "$ROOT/tools/stress-summary.py" table "${runs[@]}"
+    for scenario in "${trace_list[@]}"; do
+        [[ -n "$scenario" && -f "$out/$scenario.trace.json" ]] || continue
+        echo
+        echo "## $scenario: per-system time (traced release build, vsync)"
+        python3 "$ROOT/tools/stress-summary.py" trace "$out/$scenario.trace.json" 25
+        [[ "$keep_traces" == 1 ]] || rm -f "$out/$scenario.trace.json"
+    done
+} | tee "$out/summary.txt"
+echo "stress: results in $out"

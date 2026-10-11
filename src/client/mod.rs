@@ -11,9 +11,11 @@ pub mod events;
 pub mod gallery;
 pub mod hud;
 pub mod input;
+pub mod profile;
 pub mod render;
 pub mod sfx;
 pub mod sky;
+pub mod stress;
 pub mod weapons_fx;
 
 use bevy::prelude::*;
@@ -143,6 +145,13 @@ impl Plugin for ClientPlugin {
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
                 .add_systems(Update, debug_shots::run_shot_script);
+        }
+        // Measurement and stress set-ups for `tools/stress`; off by default.
+        if let Some(config) = profile::profile_from_env() {
+            app.add_plugins(profile::ProfilePlugin(config));
+        }
+        if let Some(stress) = stress::stress_from_env() {
+            app.add_plugins(stress::StressPlugin(stress));
         }
     }
 }
