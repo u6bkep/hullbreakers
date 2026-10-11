@@ -16,7 +16,7 @@ use crate::sim::SimMaterial;
 use crate::sim::asteroids::FIELD_DIRECTION;
 use crate::sim::frame::BodyFrame;
 use crate::sim::player::{Grapple, Mode, Player};
-use crate::sim::ship::HullPart;
+use crate::sim::ship::{Control, ControlAction, HullPart};
 use crate::sim::tuning::Tuning;
 
 #[derive(Resource)]
@@ -568,4 +568,32 @@ pub fn update_avatars(
                 Transform::from_xyz(0.0, eye, -tuning.capsule_radius),
             ));
     }
+}
+
+/// Gives a ship's button a glowing cap, so there is something to aim at.
+/// Its box is the sim's own (what the sim tests a click against), and the
+/// colour says how much to worry about pressing it.
+pub fn attach_control_caps(
+    add: On<Add, Control>,
+    controls: Query<&Control>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+) {
+    let Ok(control) = controls.get(add.entity) else {
+        return;
+    };
+    let glow = match control.action {
+        ControlAction::Scenario(_) => LinearRgba::rgb(0.1, 1.2, 0.5),
+        ControlAction::Lurch => LinearRgba::rgb(2.0, 0.1, 0.05),
+        ControlAction::DisableShields => LinearRgba::rgb(2.0, 1.2, 0.1),
+    };
+    commands.entity(add.entity).insert((
+        Mesh3d(meshes.add(Cuboid::from_size(control.half_size * 2.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            emissive: glow,
+            ..default()
+        })),
+    ));
 }

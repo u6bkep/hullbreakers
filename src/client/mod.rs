@@ -52,6 +52,7 @@ impl Plugin for ClientPlugin {
             .add_message::<events::Presented>()
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
+            .add_observer(render::attach_control_caps)
             .add_observer(render::add_ship_lights)
             .add_systems(PreStartup, render::setup_materials)
             .add_systems(
@@ -90,13 +91,13 @@ impl Plugin for ClientPlugin {
                     sfx::play_continuous_sounds,
                     events::present_events,
                     sfx::play_remote_sounds,
-                    (sfx::play_event_sounds, camera::camera_fx_events)
+                    (sfx::play_event_sounds, camera::camera_fx_events, camera::beam_shake)
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
                 )
                     .in_set(Present),
             )
-            .add_systems(EguiPrimaryContextPass, (hud::reference_overlay, hud::hud));
+            .add_systems(EguiPrimaryContextPass, (hud::reference_overlay, hud::hud, hud::mission_hud));
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
                 .add_systems(Update, debug_shots::run_shot_script);

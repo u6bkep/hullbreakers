@@ -10,6 +10,7 @@ use bevy::prelude::*;
 
 use super::events::Presented;
 use super::sfx::STEP_LENGTH;
+use crate::sim::combat::Beams;
 use crate::sim::events::{Detach, PlayerEvent};
 use crate::sim::frame::BodyFrame;
 use super::{LocalInput, LocalPlayer, ViewCorrection};
@@ -69,6 +70,15 @@ pub struct CameraFx {
     dip: f32,
     /// Extra FOV from boosting, in degrees.
     fov_kick: f32,
+    /// 0..1 black overlay, fading out after a hard cut.
+    fade: f32,
+}
+
+impl CameraFx {
+    /// Opacity of the black overlay (see [`PlayerEvent::Respawned`]).
+    pub fn fade(&self) -> f32 {
+        self.fade
+    }
 }
 
 pub fn camera_fx_events(mut fx: ResMut<CameraFx>, mut events: MessageReader<Presented>) {
@@ -81,10 +91,36 @@ pub fn camera_fx_events(mut fx: ResMut<CameraFx>, mut events: MessageReader<Pres
             PlayerEvent::Impact { speed, .. } => fx.trauma += speed * 0.1,
             PlayerEvent::Detached(Detach::RippedOff(_) | Detach::Yanked(_)) => fx.trauma += 0.5,
             PlayerEvent::RopeSnapped => fx.trauma += 0.3,
+            PlayerEvent::Detached(Detach::Blasted) => fx.trauma += 1.0,
+            PlayerEvent::BeamHit => fx.trauma += 0.6,
+            // A hard cut: start black and fade in so it reads as a jump.
+            PlayerEvent::Respawned => fx.fade = 1.0,
             _ => {}
         }
         fx.trauma = fx.trauma.min(1.0);
     }
+}
+
+/// Shakes the view when a beam starts hitting the ship the local player
+/// stands on. Beams are a function of the tick on every peer, so this needs
+/// no event: it watches [`Beams`] for the rising edge.
+pub fn beam_shake(
+    beams: Res<Beams>,
+    player: Single<&Player, With<LocalPlayer>>,
+    mut fx: ResMut<CameraFx>,
+    mut was_hit: Local<bool>,
+) {
+    let hit = player
+        .mode
+        .body()
+        .and_then(|body| beams.0.iter().find(|b| b.target == body));
+    if let Some(beam) = hit
+        && !*was_hit
+    {
+        // Shields soak most of it.
+        fx.trauma = (fx.trauma + if beam.shielded { 0.3 } else { 0.55 }).min(1.0);
+    }
+    *was_hit = hit.is_some();
 }
 
 pub fn update_camera(
@@ -195,6 +231,7 @@ pub fn update_camera(
     );
     fx.dip *= (-dt * 7.0).exp();
     fx.trauma = (fx.trauma - dt * 1.6).max(0.0);
+    fx.fade = (fx.fade - dt * 1.5).max(0.0);
     let boosting = matches!(current, Mode::Eva { .. }) && input.sprint && telemetry.thrust > 0.1;
     let kick_target = if boosting { 8.0 } else { 0.0 };
     fx.fov_kick += (kick_target - fx.fov_kick) * (1.0 - (-dt * 4.0).exp());
