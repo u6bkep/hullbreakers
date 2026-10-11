@@ -61,9 +61,14 @@ pub fn hide_colliders(mut nodes: Query<(&Name, &mut Visibility), Added<Name>>) {
 #[derive(Component)]
 pub struct Exhibit {
     label: String,
+    /// How far it reaches from its turning axis (m), once loaded.
+    radius: Option<f32>,
+    /// Its place in the row: alternate labels sit higher, so neighbours'
+    /// don't overlap.
+    index: usize,
 }
 
-/// Space between exhibits (m).
+/// Space between exhibits as first set out, before they're measured (m).
 const SPACING: f32 = 4.0;
 /// Labels show within this range (m), sizes within the nearer one.
 const LABEL_RANGE: f32 = 25.0;
@@ -81,7 +86,11 @@ pub fn set_out_gallery(add: On<Add, GalleryAnchor>, assets: Res<AssetServer>, mu
     anchor.with_children(|row| {
         for (i, model) in models.iter().enumerate() {
             row.spawn((
-                Exhibit { label: model.trim_end_matches(".glb").to_string() },
+                Exhibit {
+                    label: model.trim_end_matches(".glb").to_string(),
+                    radius: None,
+                    index: i,
+                },
                 WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(model.clone()))),
                 Transform::from_xyz(first + i as f32 * SPACING, 0.0, 0.0),
             ));
@@ -90,11 +99,83 @@ pub fn set_out_gallery(add: On<Add, GalleryAnchor>, assets: Res<AssetServer>, mu
     info!("gallery: {} models", models.len());
 }
 
-pub fn turn_exhibits(time: Res<Time>, mut exhibits: Query<&mut Transform, With<Exhibit>>) {
-    for mut transform in &mut exhibits {
-        transform.rotate_y(TURN_RATE * time.delta_secs());
+/// Big things turn slowly: no faster at their rim than this (m/s).
+const RIM_SPEED: f32 = 1.5;
+
+pub fn turn_exhibits(time: Res<Time>, mut exhibits: Query<(&Exhibit, &mut Transform)>) {
+    for (exhibit, mut transform) in &mut exhibits {
+        let rate = exhibit.radius.map_or(TURN_RATE, |r| TURN_RATE.min(RIM_SPEED / r.max(0.1)));
+        transform.rotate_y(rate * time.delta_secs());
     }
 }
+
+/// Exhibits bigger than this (m from their axis) go in a row of their own,
+/// behind the others.
+const BIG: f32 = 5.0;
+
+/// Once every exhibit has loaded, sets them out by size: a row of the
+/// smaller ones, side by side with room to turn, and the big ones (ships)
+/// behind them.
+pub fn arrange_exhibits(
+    mut exhibits: Query<(Entity, &mut Exhibit, &mut Transform)>,
+    children: Query<&Children>,
+    meshes: Query<(&GlobalTransform, &Aabb)>,
+    globals: Query<&GlobalTransform>,
+    mut arranged: Local<bool>,
+) {
+    if *arranged || exhibits.is_empty() {
+        return;
+    }
+    for (entity, mut exhibit, _) in &mut exhibits {
+        if exhibit.radius.is_some() {
+            continue;
+        }
+        let Ok(at) = globals.get(entity) else { continue };
+        let to_local = at.affine().inverse();
+        let mut reach = 0.0f32;
+        let mut any = false;
+        for part in children.iter_descendants(entity) {
+            let Ok((transform, aabb)) = meshes.get(part) else { continue };
+            any = true;
+            for corner in 0..8 {
+                let sign = Vec3::new(
+                    if corner & 1 == 0 { -1.0 } else { 1.0 },
+                    if corner & 2 == 0 { -1.0 } else { 1.0 },
+                    if corner & 4 == 0 { -1.0 } else { 1.0 },
+                );
+                let world = transform.transform_point(Vec3::from(aabb.center) + Vec3::from(aabb.half_extents) * sign);
+                let p = to_local.transform_point3(world);
+                reach = reach.max(Vec2::new(p.x, p.z).length());
+            }
+        }
+        if any {
+            exhibit.radius = Some(reach);
+        }
+    }
+    if exhibits.iter().any(|(_, e, _)| e.radius.is_none()) {
+        return;
+    }
+    let mut small: Vec<_> = exhibits.iter_mut().filter(|(_, e, _)| e.radius.unwrap() <= BIG).collect();
+    let width: f32 = small.iter().map(|(_, e, _)| 2.0 * e.radius.unwrap() + GAP).sum();
+    let mut x = -width / 2.0;
+    for (_, e, t) in &mut small {
+        let r = e.radius.unwrap();
+        t.translation = Vec3::new(x + r + GAP / 2.0, 0.0, 0.0);
+        x += 2.0 * r + GAP;
+    }
+    let big: Vec<_> = exhibits.iter_mut().filter(|(_, e, _)| e.radius.unwrap() > BIG).collect();
+    let width: f32 = big.iter().map(|(_, e, _)| 2.0 * e.radius.unwrap() + GAP).sum();
+    let mut x = -width / 2.0;
+    for (_, e, mut t) in big {
+        let r = e.radius.unwrap();
+        t.translation = Vec3::new(x + r + GAP / 2.0, 0.0, -(r + 6.0));
+        x += 2.0 * r + GAP;
+    }
+    *arranged = true;
+}
+
+/// Room between exhibits (m).
+const GAP: f32 = 1.5;
 
 /// Sockets as small axes: red along the socket's +X, green +Y, blue its
 /// forward (−Z).
@@ -149,7 +230,8 @@ pub fn label_exhibits(
             }
         }
         let (top, size) = if lo.x <= hi.x {
-            (at.translation() + Vec3::Y * (hi.y + 0.25), hi - lo)
+            let stagger = if exhibit.index % 2 == 1 { 0.45 } else { 0.0 };
+            (at.translation() + Vec3::Y * (hi.y + 0.25 + stagger), hi - lo)
         } else {
             (at.translation() + Vec3::Y, Vec3::ZERO)
         };

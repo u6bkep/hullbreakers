@@ -117,7 +117,7 @@ impl Plugin for ClientPlugin {
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
                     sfx::play_hit_sounds,
-                    (gallery::hide_colliders, gallery::turn_exhibits, gallery::draw_sockets, gallery::pulse_cores),
+                    (gallery::hide_colliders, gallery::arrange_exhibits, gallery::turn_exhibits, gallery::draw_sockets, gallery::pulse_cores),
                     (
                         weapons_fx::spawn_tracers,
                         weapons_fx::fly_tracers,
