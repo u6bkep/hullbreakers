@@ -20,7 +20,7 @@ use super::bodies::{Bodies, PreviousVelocity, dynamic_mass};
 use super::combat::Combatant;
 use super::events::PlayerEvent;
 use super::flight::{Duel, Flight, Path};
-use super::player::{DeckSlot, Player, PreviousMode};
+use super::player::{DeckSlot, Mode, Player, PreviousMode};
 use super::ship::{self, ControlAction, HomeShip, HullKind, ShipCommand, ShipHull};
 use super::tuning::Tuning;
 use super::{SimMaterial, SimTick, TICK_HZ};
@@ -32,16 +32,19 @@ pub enum ScenarioKind {
     Field,
     /// Under attack: cross to the enemy ship and drop its shield.
     Boarding,
+    /// Every model in the game set out behind our ship, for review.
+    Gallery,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 2] = [ScenarioKind::Field, ScenarioKind::Boarding];
+    pub const ALL: [ScenarioKind; 3] = [ScenarioKind::Field, ScenarioKind::Boarding, ScenarioKind::Gallery];
 
     pub fn button_label(self) -> &'static str {
         match self {
             ScenarioKind::Field => "Asteroid field",
             ScenarioKind::Boarding => "Boarding action",
+            ScenarioKind::Gallery => "Model gallery",
         }
     }
 }
@@ -266,7 +269,7 @@ pub fn switch_scenario(
     tuning: Res<Tuning>,
     mut director: ResMut<Director>,
     mut commands: Commands,
-    old_world: Query<Entity, Or<(With<ShipHull>, With<Asteroid>, With<Debris>)>>,
+    old_world: Query<Entity, Or<(With<ShipHull>, With<Asteroid>, With<Debris>, With<GalleryAnchor>)>>,
     homes: Query<(), With<HomeShip>>,
     mut mission: Single<&mut Mission>,
     mut players: Query<(&mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>)>,
@@ -310,6 +313,14 @@ pub fn switch_scenario(
             home
         }
         ScenarioKind::Boarding => spawn_duel(&mut commands, &tuning, tick.0),
+        ScenarioKind::Gallery => {
+            commands.spawn((
+                Name::new("Gallery"),
+                GalleryAnchor,
+                Transform::from_translation(GALLERY_AT),
+            ));
+            commands.spawn(ship::drifting_home_ship()).id()
+        }
     };
     **mission = Mission {
         kind,
@@ -322,11 +333,51 @@ pub fn switch_scenario(
     for (index, (mut player, slot, previous, _)) in players.iter_mut().enumerate() {
         let slot = slot.map_or(index as u32, |s| s.0);
         player.respawn(home, slot);
+        if kind == ScenarioKind::Gallery {
+            to_gallery(&mut player, slot);
+        }
         if let Some(mut previous) = previous {
             previous.0 = player.mode;
         }
     }
 }
+
+/// Where the model gallery starts: a row behind our ship's stern, centred
+/// on its cargo door, at standing eye height.
+pub const GALLERY_AT: Vec3 = Vec3::new(0.0, 1.5, 24.0);
+
+/// Puts a player in front of the gallery's row, facing it (−Z), floating
+/// beside the others.
+fn to_gallery(player: &mut Player, slot: u32) {
+    player.mode = Mode::Eva {
+        position: GALLERY_AT + Vec3::new(slot as f32 * 1.5, 0.0, 7.0),
+        velocity: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
+        pitch: 0.0,
+    };
+    player.boots_on = false;
+}
+
+/// Authority: players who join during the gallery start at it too.
+pub fn gallery_arrivals(
+    mission: Single<&Mission>,
+    mut players: Query<(&mut Player, &DeckSlot, Option<&mut PreviousMode>), Added<Player>>,
+) {
+    if mission.kind != ScenarioKind::Gallery {
+        return;
+    }
+    for (mut player, slot, previous) in &mut players {
+        to_gallery(&mut player, slot.0);
+        if let Some(mut previous) = previous {
+            previous.0 = player.mode;
+        }
+    }
+}
+
+/// Where the gallery's models are set out (by the client, which knows what
+/// models there are).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GalleryAnchor;
 
 /// Rocks around a battle.
 const BATTLE_ROCKS: usize = 320;

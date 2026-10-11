@@ -28,7 +28,7 @@ use crate::sim::combat::Combatant;
 use crate::sim::vitals::Vitals;
 use crate::sim::flight::Flight;
 use crate::sim::input::PlayerInput;
-use crate::sim::mission::{Debris, Mission};
+use crate::sim::mission::{Debris, GalleryAnchor, Mission};
 use crate::sim::player::{DeckSlot, Mode, Player, PlayerTelemetry, PreviousMode, new_player};
 use crate::sim::ship::{Drift, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
@@ -154,6 +154,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_body::<Debris>)
             .add_observer(replicate_flight)
             .add_observer(replicate_mission)
+            .add_observer(replicate_gallery)
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players))
             .add_systems(
@@ -260,6 +261,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<HomeShip>().replicate_once();
         app.component::<Asteroid>().replicate_once();
         app.component::<Debris>().replicate_once();
+        app.component::<GalleryAnchor>().replicate_once();
         app.component::<Flight>().replicate();
         app.component::<Combatant>().replicate();
         app.component::<Vitals>().replicate();
@@ -585,6 +587,14 @@ fn replicate_flight(add: On<Add, Flight>, mut commands: Commands) {
 }
 
 fn replicate_mission(add: On<Add, Mission>, mut commands: Commands) {
+    commands
+        .entity(add.entity)
+        .insert(Replicate::to_clients(NetworkTarget::All));
+}
+
+/// The gallery reaches clients as just its anchor; each sets out the models
+/// it has (see `client::gallery`).
+fn replicate_gallery(add: On<Add, GalleryAnchor>, mut commands: Commands) {
     commands
         .entity(add.entity)
         .insert(Replicate::to_clients(NetworkTarget::All));

@@ -36,10 +36,15 @@ fn main() {
             _ => "Hullbreakers".into(),
         };
         app.add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window { title, ..default() }),
-                ..default()
-            }),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window { title, ..default() }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    file_path: hullbreakers::client::gallery::asset_root().to_string_lossy().into(),
+                    ..default()
+                }),
             ClientPlugin,
         ));
     }
@@ -52,8 +57,9 @@ fn main() {
         let kind = match name.as_str() {
             "field" => ScenarioKind::Field,
             "boarding" => ScenarioKind::Boarding,
+            "gallery" => ScenarioKind::Gallery,
             other => {
-                eprintln!("hullbreakers: unknown scenario {other:?} (field, boarding)");
+                eprintln!("hullbreakers: unknown scenario {other:?} (field, boarding, gallery)");
                 std::process::exit(2);
             }
         };

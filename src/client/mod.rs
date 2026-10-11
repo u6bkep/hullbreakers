@@ -7,6 +7,7 @@ pub mod camera;
 pub mod combat_fx;
 pub mod debug_shots;
 pub mod events;
+pub mod gallery;
 pub mod hud;
 pub mod input;
 pub mod render;
@@ -58,6 +59,7 @@ impl Plugin for ClientPlugin {
             .add_observer(render::attach_meshes)
             .add_observer(render::add_ship_lights)
             .add_observer(sky::add_sky_to_cameras)
+            .add_observer(gallery::set_out_gallery)
             .add_systems(
                 PreStartup,
                 (
@@ -108,6 +110,7 @@ impl Plugin for ClientPlugin {
                     )
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
+                    (gallery::hide_colliders, gallery::turn_exhibits, gallery::draw_sockets),
                     (
                         weapons_fx::spawn_tracers,
                         weapons_fx::fly_tracers,
@@ -126,6 +129,7 @@ impl Plugin for ClientPlugin {
                     hud::mission_hud,
                     hud::vitals_hud,
                     hud::loadout_hud,
+                    gallery::label_exhibits,
                 ),
             );
         if let Some(script) = debug_shots::shot_script_from_env() {

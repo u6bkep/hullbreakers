@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use hullbreakers::client::{render, sky};
+use hullbreakers::client::{gallery, render, sky};
 
 /// Distance between models (m).
 const SPACING: f32 = 0.6;
@@ -52,7 +52,7 @@ fn main() {
                     ..default()
                 })
                 .set(AssetPlugin {
-                    file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into(),
+                    file_path: gallery::asset_root().to_string_lossy().into(),
                     ..default()
                 }),
         )
@@ -74,16 +74,8 @@ fn main() {
             }
             commands.spawn((Camera3d::default(), Bloom::NATURAL, Transform::default()));
         })
-        .add_systems(Update, (hide_colliders, shoot))
+        .add_systems(Update, (gallery::hide_colliders, shoot))
         .run();
-}
-
-fn hide_colliders(mut nodes: Query<(&Name, &mut Visibility), Added<Name>>) {
-    for (name, mut visibility) in &mut nodes {
-        if name.as_str().starts_with("COL_") {
-            *visibility = Visibility::Hidden;
-        }
-    }
 }
 
 fn shoot(

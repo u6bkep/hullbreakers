@@ -16,7 +16,7 @@ HULLBREAKERS_SCENARIO=boarding cargo run   # host straight into a scenario
 The crew's ship has a **mission wall** on the port side of the bridge: click
 a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
-**asteroid field**, and its button takes you back there.
+**asteroid field**, and its button takes you back there. `HULLBREAKERS_SCENARIO=boarding` (or `gallery`) starts in another.
 
 - **Boarding action**: our ship and a raider duel among rocks, weaving in to
   about 100 m and back out to 400 m every 40 s. Laser turrets on both ships fire slow,
@@ -27,6 +27,11 @@ world and puts everyone back on the deck. The game starts in the
   into space. Beams shove and burn anyone in EVA who crosses them: three
   hits kill. Lose our ship and the crew drifts a while, then returns to the
   field.
+
+- **Model gallery** (debug): every model under `assets/` in a row behind
+  our ship, turning slowly, labelled with its path and size, sockets drawn
+  as small axes (red +X, green +Y, blue forward). You start floating in
+  front of it.
 
 Players carry an SMG and a rifle. Each hand holds one item and a stance
 (1-4) sets what's in each; a one-handed gun with the other hand empty is

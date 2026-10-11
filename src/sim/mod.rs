@@ -198,6 +198,7 @@ impl Plugin for SimPlugin {
                     mission::handle_presses,
                     mission::settle_battle,
                     mission::switch_scenario,
+                    mission::gallery_arrivals,
                 )
                     .chain()
                     .in_set(SimSystems::Mission),
