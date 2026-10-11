@@ -10,10 +10,10 @@ use bevy::prelude::*;
 
 use super::events::Presented;
 use super::sfx::STEP_LENGTH;
+use super::{LocalInput, LocalPlayer, ViewCorrection};
 use crate::sim::combat::Beams;
 use crate::sim::events::{Detach, PlayerEvent};
 use crate::sim::frame::BodyFrame;
-use super::{LocalInput, LocalPlayer, ViewCorrection};
 use crate::sim::player::{Mode, Player, PlayerTelemetry, PreviousMode};
 use crate::sim::tuning::Tuning;
 
@@ -51,7 +51,22 @@ pub fn spawn_camera(mut commands: Commands, tuning: Res<Tuning>) {
         // Ears for other players' sounds (see `sfx::play_remote_sounds`).
         SpatialListener::new(0.2),
         Transform::default(),
+        // A little right of and below the eye, so what it lights shows some shape.
+        children![(headlamp(true), Transform::from_xyz(0.2, -0.15, 0.0))],
     ));
+}
+
+/// A suit's headlamp: a spot along the view. Only your own casts shadows.
+pub fn headlamp(shadows: bool) -> SpotLight {
+    SpotLight {
+        intensity: 2_000_000.0,
+        range: 60.0,
+        color: Color::srgb(1.0, 0.95, 0.88),
+        inner_angle: 0.22,
+        outer_angle: 0.5,
+        shadow_maps_enabled: shadows,
+        ..default()
+    }
 }
 
 /// Pose-only frame from a body's interpolated render transform.

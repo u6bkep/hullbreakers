@@ -11,6 +11,7 @@ pub mod hud;
 pub mod input;
 pub mod render;
 pub mod sfx;
+pub mod sky;
 
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
@@ -55,13 +56,20 @@ impl Plugin for ClientPlugin {
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
             .add_observer(render::add_ship_lights)
-            .add_systems(PreStartup, (render::setup_materials, bindings::load_bindings))
+            .add_observer(sky::add_sky_to_cameras)
+            .add_systems(
+                PreStartup,
+                (
+                    render::setup_materials,
+                    bindings::load_bindings,
+                    sky::setup_sky,
+                ),
+            )
             .add_systems(
                 Startup,
                 (
                     camera::spawn_camera,
                     render::setup_lighting,
-                    render::setup_starfield,
                     render::setup_dust,
                     sfx::setup_sounds,
                 ),
@@ -77,7 +85,6 @@ impl Plugin for ClientPlugin {
                 (
                     render::update_avatars,
                     camera::update_camera,
-                    render::follow_starfield,
                     render::update_dust,
                 )
                     .chain()
@@ -92,13 +99,25 @@ impl Plugin for ClientPlugin {
                     sfx::play_continuous_sounds,
                     events::present_events,
                     sfx::play_remote_sounds,
-                    (sfx::play_event_sounds, camera::camera_fx_events, camera::beam_shake)
+                    (
+                        sfx::play_event_sounds,
+                        camera::camera_fx_events,
+                        camera::beam_shake,
+                    )
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
                 )
                     .in_set(Present),
             )
-            .add_systems(EguiPrimaryContextPass, (hud::ship_markers, hud::reference_overlay, hud::hud, hud::mission_hud));
+            .add_systems(
+                EguiPrimaryContextPass,
+                (
+                    hud::ship_markers,
+                    hud::reference_overlay,
+                    hud::hud,
+                    hud::mission_hud,
+                ),
+            );
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
                 .add_systems(Update, debug_shots::run_shot_script);

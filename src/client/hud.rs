@@ -10,6 +10,7 @@ use super::LocalPlayer;
 use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
 use super::input::MouseCaptured;
+use crate::sim::combat::{SHIELD_CENTER, SHIELD_RADII};
 use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
 use crate::sim::mission::{Mission, Phase, ScenarioKind};
@@ -293,7 +294,12 @@ pub fn ship_markers(
     let screen = ctx.content_rect();
     let font = egui::FontId::monospace(13.0);
     for (entity, hull, transform, visibility) in &ships {
-        if player.mode.body() == Some(entity) || *visibility == Visibility::Hidden {
+        // Not the ship you're on or in.
+        let inside = ((transform.rotation.inverse() * (cam.translation - transform.translation) - SHIELD_CENTER)
+            / SHIELD_RADII)
+            .length()
+            < 1.0;
+        if player.mode.body() == Some(entity) || inside || *visibility == Visibility::Hidden {
             continue;
         }
         let (name, color) = match hull.0 {

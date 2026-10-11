@@ -1,12 +1,10 @@
-//! Greybox visuals: meshes derived from colliders, lighting, starfield, and
+//! Greybox visuals: meshes derived from colliders, the sun, ship lights, and
 //! space dust for a sense of motion.
 
 use avian3d::prelude::*;
 use bevy::asset::RenderAssetUsages;
-use bevy::image::Image;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
@@ -150,7 +148,7 @@ pub fn setup_lighting(mut commands: Commands) {
             shadow_maps_enabled: true,
             ..default()
         },
-        Transform::default().looking_to(Vec3::new(-0.4, -0.5, 0.3), Vec3::Y),
+        Transform::default().looking_to(-super::sky::SUN_DIRECTION, Vec3::Y),
     ));
 }
 
@@ -163,8 +161,21 @@ pub struct ShipLight {
 }
 
 /// Interior lights ride along with the ship.
-pub fn add_ship_lights(add: On<Add, crate::sim::ship::ShipHull>, mut commands: Commands) {
+pub fn add_ship_lights(
+    add: On<Add, crate::sim::ship::ShipHull>,
+    sky: Res<super::sky::Sky>,
+    mut commands: Commands,
+) {
     let ship = add.entity;
+    // The cabin, out to the middle of its walls (see `ship::hull_layout`).
+    let cabin = commands
+        .spawn(super::sky::interior_light(
+            &sky,
+            Vec3::new(0.0, 1.5, 0.0),
+            Vec3::new(7.8, 3.3, 29.8),
+        ))
+        .id();
+    commands.entity(ship).add_child(cabin);
     let normal = ShipLight {
         color: Color::srgb(1.0, 0.92, 0.8),
         intensity: 60_000.0,
@@ -184,73 +195,6 @@ pub fn add_ship_lights(add: On<Add, crate::sim::ship::ShipHull>, mut commands: C
             .id();
         commands.entity(ship).add_child(light);
     }
-}
-
-#[derive(Component)]
-pub struct Starfield;
-
-const STARFIELD_RADIUS: f32 = 15_000.0;
-
-pub fn setup_starfield(
-    mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let (w, h) = (4096u32, 2048u32);
-    let mut data = vec![0u8; (w * h * 4) as usize];
-    for px in data.chunks_exact_mut(4) {
-        px[3] = 255;
-    }
-    let mut rng = ChaCha8Rng::seed_from_u64(7);
-    for _ in 0..14_000 {
-        // Uniform on the sphere, mapped to equirectangular.
-        let u: f32 = rng.random();
-        let lat = (2.0 * rng.random::<f32>() - 1.0).asin();
-        let x = (u * w as f32) as u32 % w;
-        let y = ((0.5 - lat / std::f32::consts::PI) * h as f32) as u32 % h;
-        let brightness = rng.random::<f32>().powi(6);
-        let tint: [f32; 3] = match rng.random_range(0..4) {
-            0 => [0.8, 0.85, 1.0],
-            1 => [1.0, 0.9, 0.75],
-            _ => [1.0, 1.0, 1.0],
-        };
-        let i = ((y * w + x) * 4) as usize;
-        for c in 0..3 {
-            data[i + c] = data[i + c].max((40.0 + 215.0 * brightness * tint[c]) as u8);
-        }
-    }
-    let image = Image::new(
-        Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    commands.spawn((
-        Name::new("Starfield"),
-        Starfield,
-        Mesh3d(meshes.add(Sphere::new(STARFIELD_RADIUS).mesh().uv(64, 32))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color_texture: Some(images.add(image)),
-            unlit: true,
-            cull_mode: None,
-            ..default()
-        })),
-        Transform::default(),
-        bevy::light::NotShadowCaster,
-    ));
-}
-
-pub fn follow_starfield(
-    camera: Single<&Transform, (With<PlayerCamera>, Without<Starfield>)>,
-    mut stars: Single<&mut Transform, With<Starfield>>,
-) {
-    stars.translation = camera.translation;
 }
 
 /// Specks at rest in the asteroid field's frame. They stream past at your
@@ -339,9 +283,10 @@ pub fn draw_gizmos(
     };
     // Other players' ropes, from their avatars.
     for (entity, other) in &others {
-        let (Some(grapple), Some((_, avatar))) =
-            (other.grapple, avatars.iter().find(|(a, _)| a.player == entity))
-        else {
+        let (Some(grapple), Some((_, avatar))) = (
+            other.grapple,
+            avatars.iter().find(|(a, _)| a.player == entity),
+        ) else {
             continue;
         };
         if let Some(anchor) = rope_anchor(&grapple) {
@@ -579,6 +524,10 @@ pub fn update_avatars(
                 Mesh3d(meshes.add(Cuboid::new(0.4, 0.15, 0.1))),
                 MeshMaterial3d(visor),
                 Transform::from_xyz(0.0, eye, -tuning.capsule_radius),
+            ))
+            .with_child((
+                super::camera::headlamp(false),
+                Transform::from_xyz(0.0, eye, -tuning.capsule_radius - 0.1),
             ));
     }
 }

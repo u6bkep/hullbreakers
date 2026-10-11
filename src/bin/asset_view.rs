@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use hullbreakers::client::{render, sky};
 
 /// Distance between models (m).
 const SPACING: f32 = 0.6;
@@ -56,13 +57,10 @@ fn main() {
                     ..default()
                 }),
         )
-        .insert_resource(ClearColor(Color::BLACK))
-        // The same light as the game (see `client::render::setup_lighting`).
-        .insert_resource(GlobalAmbientLight {
-            color: Color::srgb(0.6, 0.7, 1.0),
-            brightness: 60.0,
-            ..default()
-        })
+        // The game's own sky and lights.
+        .add_observer(sky::add_sky_to_cameras)
+        .add_systems(PreStartup, sky::setup_sky)
+        .add_systems(Startup, render::setup_lighting)
         .insert_resource(Plan {
             out: PathBuf::from(out),
             width: SPACING * (models.len().max(1) - 1) as f32,
@@ -76,14 +74,6 @@ fn main() {
                     Transform::from_xyz(i as f32 * SPACING, 0.0, 0.0),
                 ));
             }
-            commands.spawn((
-                DirectionalLight {
-                    illuminance: 12_000.0,
-                    shadow_maps_enabled: true,
-                    ..default()
-                },
-                Transform::default().looking_to(Vec3::new(-0.4, -0.5, 0.3), Vec3::Y),
-            ));
             commands.spawn((Camera3d::default(), Bloom::NATURAL, Transform::default()));
         })
         .add_systems(Update, (hide_colliders, shoot))
