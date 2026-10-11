@@ -12,6 +12,7 @@ pub mod input;
 pub mod render;
 pub mod sfx;
 pub mod sky;
+pub mod weapons_fx;
 
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
@@ -71,6 +72,7 @@ impl Plugin for ClientPlugin {
                     camera::spawn_camera,
                     render::setup_lighting,
                     render::setup_dust,
+                    weapons_fx::setup_weapon_fx,
                     sfx::setup_sounds,
                 ),
             )
@@ -106,6 +108,12 @@ impl Plugin for ClientPlugin {
                     )
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
+                    (
+                        weapons_fx::spawn_tracers,
+                        weapons_fx::fly_tracers,
+                        weapons_fx::fade_sparks,
+                    )
+                        .chain(),
                 )
                     .in_set(Present),
             )
@@ -117,6 +125,7 @@ impl Plugin for ClientPlugin {
                     hud::hud,
                     hud::mission_hud,
                     hud::vitals_hud,
+                    hud::loadout_hud,
                 ),
             );
         if let Some(script) = debug_shots::shot_script_from_env() {

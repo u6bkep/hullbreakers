@@ -10,6 +10,8 @@ use std::f32::consts::TAU;
 
 use bevy::audio::{AudioSinkPlayback, PlaybackMode, Volume};
 use bevy::prelude::*;
+
+use crate::sim::weapons::GunKind;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
@@ -375,6 +377,9 @@ pub struct Sounds {
     land_rock: Handle<AudioSource>,
     release: Handle<AudioSource>,
     impact: Handle<AudioSource>,
+    /// Your own gun, through your hand and suit: a thump more than a bang.
+    shot_smg: Handle<AudioSource>,
+    shot_rifle: Handle<AudioSource>,
     grapple_fire: Handle<AudioSource>,
     grapple_attach: Handle<AudioSource>,
     grapple_release: Handle<AudioSource>,
@@ -456,6 +461,14 @@ pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         impact: add(mix(
             synth.thud(0.3, 16.0, 450.0, 1.0),
             synth.clank(0.3, 140.0, 18.0, 0.4),
+        )),
+        shot_smg: add(mix(
+            synth.thud(0.09, 60.0, 900.0, 0.9),
+            synth.clank(0.06, 600.0, 60.0, 0.3),
+        )),
+        shot_rifle: add(mix(
+            synth.thud(0.16, 45.0, 700.0, 1.0),
+            synth.clank(0.1, 400.0, 40.0, 0.45),
         )),
         grapple_fire: add(synth.sweep(0.18, 2200.0, 700.0, 0.55, 0.5)),
         grapple_attach: add(synth.clank(0.25, 880.0, 25.0, 0.6)),
@@ -731,6 +744,13 @@ pub fn play_event_sounds(
             }
             // The suit gives out: an alarm, then the respawn's warp.
             PlayerEvent::Died => play(&mut commands, &sounds.warning, 1.0, 0.7),
+            PlayerEvent::Fired { gun, .. } => {
+                let sound = match gun {
+                    GunKind::Smg => &sounds.shot_smg,
+                    GunKind::Rifle => &sounds.shot_rifle,
+                };
+                play(&mut commands, sound, 0.7, pitch);
+            }
         }
     }
 }

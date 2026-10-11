@@ -25,6 +25,7 @@ use super::events::{Detach, EventLog, PlayerEvent};
 use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
 use super::combat::{Beams, beam_shove};
+use super::weapons::{Loadout, ShotOut};
 use super::rope::{RopeEnd, solve_rope};
 use super::ship::Control;
 use super::tuning::Tuning;
@@ -185,6 +186,8 @@ pub struct Player {
     /// The body velocities are reported (and braked) relative to.
     pub reference_body: Option<Entity>,
     pub detach_timer: f32,
+    /// What the hands hold.
+    pub loadout: Loadout,
     /// How much of [`PlayerInput`] has been applied.
     pub input: InputCursor,
     pub events: EventLog,
@@ -218,6 +221,9 @@ impl Player {
         self.grapple = None;
         self.reference_body = Some(ship);
         self.detach_timer = 0.0;
+        // A fresh kit. (What was carried before stays behind, once there's
+        // anything to pick up.)
+        self.loadout = Loadout::default();
         self.emit(PlayerEvent::Respawned);
     }
 
@@ -357,6 +363,7 @@ pub fn new_player(ship: Entity, index: u32) -> impl Bundle {
             grapple: None,
             reference_body: Some(ship),
             detach_timer: 0.0,
+            loadout: Loadout::default(),
             input: InputCursor::default(),
             events: EventLog::default(),
         },
@@ -796,7 +803,7 @@ pub fn player_tick(
         };
         let player = &mut *player;
         player.events.begin_tick(tick.0);
-        let cmd = player.input.advance(input);
+        let mut cmd = player.input.advance(input);
         player.detach_timer = (player.detach_timer - ctx.dt).max(0.0);
         telemetry.thrust = 0.0;
         if cmd.toggle_boots {
@@ -820,12 +827,19 @@ pub fn player_tick(
                 action: control.control.action,
             });
         }
-        if cmd.grapple {
+        let hands = player.loadout.tick(&cmd, ctx.dt);
+        if hands.grapple_trigger {
             if player.grapple.take().is_none() {
                 fire_grapple(&ctx, &bodies, entity, player);
             } else {
                 player.emit(PlayerEvent::GrappleReleased);
             }
+        }
+        // The winch only answers while its launcher is in hand.
+        cmd.reel_in = hands.grapple_held && (cmd.reel_in || hands.reel_in);
+        cmd.pay_out = hands.grapple_held && (cmd.pay_out || hands.pay_out);
+        for shot in &hands.shots {
+            fire_shot(&ctx, &bodies, player, shot);
         }
         if cmd.set_reference {
             // Only bodies serve as reference frames; the aim sees through players.
@@ -979,6 +993,26 @@ pub fn ray_box(origin: Vec3, dir: Vec3, half: Vec3) -> Option<f32> {
         far = far.min(a.max(b));
     }
     (near <= far).then_some(near)
+}
+
+/// Sends a shot from the eye along the crosshair (off by the gun's spread),
+/// at the gun's muzzle speed plus the shooter's own velocity, and pushes the
+/// shooter back by the bullet's momentum if they're floating free.
+fn fire_shot(ctx: &TickContext, bodies: &Bodies, player: &mut Player, shot: &ShotOut) {
+    let frame = player.mode.body().and_then(|b| bodies.frame(b));
+    let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
+    let (_, own_velocity) = player.mode.world_kinematics(ctx.tuning, frame.as_ref());
+    let dir = (view * Vec3::new(shot.deviation.x, shot.deviation.y, -1.0)).normalize();
+    let stats = shot.gun.stats();
+    player.emit(PlayerEvent::Fired {
+        hand: shot.hand,
+        gun: shot.gun,
+        origin: eye,
+        velocity: own_velocity + dir * stats.muzzle_speed,
+    });
+    if let Mode::Eva { velocity, .. } = &mut player.mode {
+        *velocity -= dir * stats.bullet_mass * stats.muzzle_speed / ctx.tuning.player_mass;
+    }
 }
 
 fn fire_grapple(ctx: &TickContext, bodies: &Bodies, entity: Entity, player: &mut Player) {

@@ -11,9 +11,12 @@
 //! | T                | set reference body to the one under the crosshair |
 //! | X (hold)         | —                 | brake vs. last body    |
 //! | F                | press the button under the crosshair       |
-//! | LMB              | fire / release grapple                     |
-//! | Mouse4, Ctrl+LMB (hold) | reel in                             |
-//! | Mouse5, Alt+LMB (hold)  | pay out rope                        |
+//! | LMB / RMB        | use the main / off hand's item (gun: fire; grapple: fire or let go) |
+//! | Ctrl+LMB / Ctrl+RMB | that hand's alternate (grapple: reel in) |
+//! | Alt+LMB / Alt+RMB   | that hand's second alternate (grapple: pay out) |
+//! | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple |
+//! | R                | reload (main hand first)                   |
+//! | 1-4              | stance: SMG+grapple, rifle+grapple, rifle braced, grapple only |
 //! | F1               | tuning panel (frees cursor)                |
 //! | Escape           | free the cursor                            |
 //! | L                | debug: ship lurch                          |
@@ -24,6 +27,7 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::LocalInput;
 use super::bindings::{Action, Bindings, Held};
+use crate::sim::input::HandHeld;
 use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::Tuning;
 
@@ -74,6 +78,8 @@ pub fn read_input(
         cmd.brake = false;
         cmd.reel_in = false;
         cmd.pay_out = false;
+        cmd.main = HandHeld::default();
+        cmd.off = HandHeld::default();
         return;
     }
     let held = Held { keys: &keys, mouse: &mouse };
@@ -89,6 +95,24 @@ pub fn read_input(
     cmd.brake = on(Action::Brake);
     cmd.reel_in = on(Action::ReelIn);
     cmd.pay_out = on(Action::PayOut);
+    cmd.main = HandHeld {
+        held: on(Action::MainUse),
+        alt: on(Action::MainAlt),
+        alt2: on(Action::MainAlt2),
+    };
+    cmd.off = HandHeld {
+        held: on(Action::OffUse),
+        alt: on(Action::OffAlt),
+        alt2: on(Action::OffAlt2),
+    };
+    for (i, action) in [Action::Stance1, Action::Stance2, Action::Stance3, Action::Stance4]
+        .into_iter()
+        .enumerate()
+    {
+        if held.started(&bindings, action) {
+            cmd.stance = i as u8;
+        }
+    }
     cmd.add_look(motion.delta * tuning.mouse_sensitivity);
     let presses = &mut cmd.presses;
     for (action, counter) in [
@@ -97,7 +121,11 @@ pub fn read_input(
         (Action::ToggleAssist, &mut presses.toggle_assist),
         (Action::SetReference, &mut presses.set_reference),
         (Action::Interact, &mut presses.interact),
-        (Action::Grapple, &mut presses.grapple),
+        (Action::MainUse, &mut presses.main),
+        (Action::OffUse, &mut presses.off),
+        (Action::Reload, &mut presses.reload),
+        (Action::ReloadMain, &mut presses.reload_main),
+        (Action::ReloadOff, &mut presses.reload_off),
     ] {
         if held.started(&bindings, action) {
             counter.press();

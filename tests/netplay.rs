@@ -234,7 +234,7 @@ fn grappling_and_reeling_a_light_rock() {
     let start = rock_at + rotation * Vec3::new(-15.0, -eye_above_center, 0.0);
     s.teleport(start, Vec3::ZERO, rotation * Vec3::X);
     s.step(60);
-    s.input().0.presses.grapple.press();
+    s.input().0.presses.off.press();
     s.step(30);
     let grappled = s.local_player().unwrap().grapple.is_some();
     s.input().0.reel_in = true;

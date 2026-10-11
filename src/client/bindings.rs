@@ -42,16 +42,31 @@ pub enum Action {
     ToggleAssist,
     SetReference,
     Interact,
-    Grapple,
+    /// The main hand's item (primary) and the off hand's (secondary).
+    MainUse,
+    OffUse,
+    /// Each hand's alternate functions (for the grapple: reel in, pay out).
+    MainAlt,
+    OffAlt,
+    MainAlt2,
+    OffAlt2,
+    /// Reel in and pay out, whichever hand holds the grapple.
     ReelIn,
     PayOut,
+    Reload,
+    ReloadMain,
+    ReloadOff,
+    Stance1,
+    Stance2,
+    Stance3,
+    Stance4,
     TuningPanel,
     ReleaseMouse,
     DebugLurch,
 }
 
 impl Action {
-    pub const ALL: [Action; 21] = [
+    pub const ALL: [Action; 33] = [
         Action::Forward,
         Action::Back,
         Action::Left,
@@ -67,9 +82,21 @@ impl Action {
         Action::ToggleAssist,
         Action::SetReference,
         Action::Interact,
-        Action::Grapple,
+        Action::MainUse,
+        Action::OffUse,
+        Action::MainAlt,
+        Action::OffAlt,
+        Action::MainAlt2,
+        Action::OffAlt2,
         Action::ReelIn,
         Action::PayOut,
+        Action::Reload,
+        Action::ReloadMain,
+        Action::ReloadOff,
+        Action::Stance1,
+        Action::Stance2,
+        Action::Stance3,
+        Action::Stance4,
         Action::TuningPanel,
         Action::ReleaseMouse,
         Action::DebugLurch,
@@ -92,9 +119,21 @@ impl Action {
             Action::ToggleAssist => &["V"],
             Action::SetReference => &["T"],
             Action::Interact => &["F"],
-            Action::Grapple => &["LMB"],
-            Action::ReelIn => &["Mouse4", "Ctrl+LMB"],
-            Action::PayOut => &["Mouse5", "Alt+LMB"],
+            Action::MainUse => &["LMB"],
+            Action::OffUse => &["RMB"],
+            Action::MainAlt => &["Ctrl+LMB"],
+            Action::OffAlt => &["Ctrl+RMB"],
+            Action::MainAlt2 => &["Alt+LMB"],
+            Action::OffAlt2 => &["Alt+RMB"],
+            Action::ReelIn => &["Mouse4"],
+            Action::PayOut => &["Mouse5"],
+            Action::Reload => &["R"],
+            Action::ReloadMain => &[],
+            Action::ReloadOff => &[],
+            Action::Stance1 => &["1"],
+            Action::Stance2 => &["2"],
+            Action::Stance3 => &["3"],
+            Action::Stance4 => &["4"],
             Action::TuningPanel => &["F1"],
             Action::ReleaseMouse => &["Escape"],
             Action::DebugLurch => &["L"],
@@ -434,21 +473,21 @@ mod tests {
         let bindings = Bindings::default();
         let (keys, mouse) = held(&[KeyCode::ControlLeft], &[MouseButton::Left]);
         let h = Held { keys: &keys, mouse: &mouse };
-        assert!(h.active(&bindings, Action::ReelIn));
-        assert!(!h.active(&bindings, Action::Grapple));
+        assert!(h.active(&bindings, Action::MainAlt));
+        assert!(!h.active(&bindings, Action::MainUse));
         let (keys, mouse) = held(&[], &[MouseButton::Left]);
         let h = Held { keys: &keys, mouse: &mouse };
-        assert!(h.active(&bindings, Action::Grapple));
-        assert!(!h.active(&bindings, Action::ReelIn));
+        assert!(h.active(&bindings, Action::MainUse));
+        assert!(!h.active(&bindings, Action::MainAlt));
     }
 
     #[test]
     fn unbound_modifiers_are_ignored() {
-        // Sprinting while clicking still grapples: Shift+LMB isn't bound.
+        // Sprinting while clicking still fires: Shift+LMB isn't bound.
         let bindings = Bindings::default();
         let (keys, mouse) = held(&[KeyCode::ShiftLeft], &[MouseButton::Left]);
         let h = Held { keys: &keys, mouse: &mouse };
-        assert!(h.active(&bindings, Action::Grapple));
+        assert!(h.active(&bindings, Action::MainUse));
         assert!(h.active(&bindings, Action::Sprint));
     }
 
@@ -458,7 +497,7 @@ mod tests {
             Bindings::from_ron(r#"{ "ReelIn": ["RMB"], "Interact": [], "Bogus": ["A"], "Jump": ["Nope"] }"#);
         assert_eq!(bindings.label(Action::ReelIn), "RMB");
         assert_eq!(bindings.label(Action::Interact), "unbound");
-        assert_eq!(bindings.label(Action::Grapple), "LMB");
+        assert_eq!(bindings.label(Action::MainUse), "LMB");
         assert_eq!(problems.len(), 2, "{problems:?}");
     }
 }

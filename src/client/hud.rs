@@ -11,6 +11,7 @@ use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
 use super::input::MouseCaptured;
 use crate::sim::vitals::Vitals;
+use crate::sim::weapons::{Hand, Slot};
 use crate::sim::combat::{SHIELD_CENTER, SHIELD_RADII};
 use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
@@ -737,5 +738,67 @@ pub fn vitals_hud(
         egui::FontId::monospace(12.0),
         color,
     );
+    Ok(())
+}
+
+/// What's in each hand, ammo and reloads, and the stances, bottom right.
+pub fn loadout_hud(
+    mut contexts: EguiContexts,
+    bindings: Res<Bindings>,
+    player: Option<Single<&Player, With<LocalPlayer>>>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let Some(player) = player else {
+        return Ok(());
+    };
+    let loadout = &player.loadout;
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("loadout")));
+    let font = egui::FontId::monospace(13.0);
+    let ink = egui::Color32::from_rgb(200, 225, 235);
+    let dim = egui::Color32::from_rgb(110, 125, 135);
+    let name = |slot: Slot| match slot {
+        Slot::Empty => "—".to_string(),
+        Slot::Grapple => "Grapple".to_string(),
+        Slot::Gun(i) => loadout
+            .guns
+            .get(i as usize)
+            .map_or("?".into(), |g| g.kind.stats().name.to_string()),
+    };
+    let mut y = screen.max.y - 24.0;
+    let x = screen.max.x - 16.0;
+    // Hands, off hand above main.
+    for (hand, action) in [(Hand::Main, Action::MainUse), (Hand::Off, Action::OffUse)] {
+        let slot = loadout.stance().slot(hand);
+        let state = loadout.hands[hand as usize];
+        let mut line = format!("[{}] {}", bindings.label(action), name(slot));
+        if let Some(gun) = loadout.gun(hand) {
+            line += &format!("  {:>2} | {}", gun.mag, gun.reserve);
+            if state.reloading.is_some() {
+                line += "  reloading";
+            } else if state.reload_queued {
+                line += "  queued";
+            }
+            if loadout.braced(hand) {
+                line += "  braced";
+            }
+        }
+        painter.text(egui::pos2(x, y), egui::Align2::RIGHT_BOTTOM, line, font.clone(), ink);
+        y -= 18.0;
+    }
+    // Stances.
+    y -= 6.0;
+    for (i, stance) in loadout.stances.iter().enumerate().rev() {
+        let current = i == loadout.current as usize;
+        let text = format!("{} {} + {}", i + 1, name(stance.main), name(stance.off));
+        let color = if current { ink } else { dim };
+        let text = if current && loadout.switching > 0.0 {
+            format!("{text}  …")
+        } else {
+            text
+        };
+        painter.text(egui::pos2(x, y), egui::Align2::RIGHT_BOTTOM, text, egui::FontId::monospace(11.0), color);
+        y -= 14.0;
+    }
     Ok(())
 }

@@ -364,7 +364,7 @@ fn a_player_can_cross_to_the_raider() {
     {
         let world = app.world_mut();
         let mut input = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
-        input.presses.grapple.press();
+        input.presses.off.press();
     }
     ticks(&mut app, 1);
     let grapple = player(&mut app).grapple.expect("missed the raider");

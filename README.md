@@ -28,6 +28,12 @@ world and puts everyone back on the deck. The game starts in the
   hits kill. Lose our ship and the crew drifts a while, then returns to the
   field.
 
+Players carry an SMG and a rifle. Each hand holds one item and a stance
+(1-4) sets what's in each; a one-handed gun with the other hand empty is
+braced and shoots tighter. Bullets fly at realistic speeds and keep the
+shooter's velocity, and firing in EVA pushes you back. Only the grapple's
+hand works its rope; stow it and the rope holds its length.
+
 Players have suit health (bottom of the screen). It comes back after a few
 seconds unhurt; at zero you respawn aboard the home ship.
 
@@ -73,9 +79,12 @@ client's title is `Hullbreakers — HOST:PORT`.
 | T            | set reference body (what assist/brake match) to the one under the crosshair ||
 | X (hold)     | —                | brake relative to last body touched/grappled |
 | F            | press the button under the crosshair (within reach) ||
-| LMB          | fire / release grapple              ||
-| Mouse4 or Ctrl+LMB (hold) | reel in                ||
-| Mouse5 or Alt+LMB (hold)  | pay out rope           ||
+| LMB / RMB    | use the main / off hand's item (gun: fire; grapple: fire or let go) ||
+| Ctrl+LMB / Ctrl+RMB (hold) | that hand's alternate: for the grapple, reel in ||
+| Alt+LMB / Alt+RMB (hold)   | that hand's second alternate: for the grapple, pay out ||
+| Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple ||
+| R            | reload (main hand first; a dry gun reloads itself) ||
+| 1-4          | stance: SMG + grapple, rifle + grapple, rifle braced, grapple alone ||
 | F1           | tuning panel (frees the mouse)      ||
 | Escape       | free the mouse                      ||
 | L            | debug: ship lurches forward         ||

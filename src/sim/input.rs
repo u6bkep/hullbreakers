@@ -35,7 +35,13 @@ pub struct Presses {
     pub jump: Press,
     pub toggle_boots: Press,
     pub toggle_assist: Press,
-    pub grapple: Press,
+    /// The hands' buttons (main: primary, off: secondary).
+    pub main: Press,
+    pub off: Press,
+    /// Reload everything; reload one hand.
+    pub reload: Press,
+    pub reload_main: Press,
+    pub reload_off: Press,
     /// Press the control under the crosshair.
     pub interact: Press,
     /// Make the body under the crosshair the reference frame.
@@ -58,7 +64,30 @@ pub struct PlayerInput {
     pub brake: bool,
     pub reel_in: bool,
     pub pay_out: bool,
+    /// What's held on each hand's buttons.
+    pub main: HandHeld,
+    pub off: HandHeld,
+    /// The stance asked for (0-based).
+    pub stance: u8,
     pub presses: Presses,
+}
+
+/// A hand's buttons held: its own, and its two alternate chords.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+pub struct HandHeld {
+    pub held: bool,
+    pub alt: bool,
+    pub alt2: bool,
+}
+
+/// A hand's input for one tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HandInput {
+    pub held: bool,
+    /// Pressed since the last tick.
+    pub pressed: bool,
+    pub alt: bool,
+    pub alt2: bool,
 }
 
 /// Input names no entities; required to send it over the network.
@@ -98,9 +127,23 @@ pub struct TickInput {
     pub jump: bool,
     pub toggle_boots: bool,
     pub toggle_assist: bool,
-    pub grapple: bool,
+    pub main: HandInput,
+    pub off: HandInput,
+    pub reload: bool,
+    pub reload_main: bool,
+    pub reload_off: bool,
+    pub stance: u8,
     pub interact: bool,
     pub set_reference: bool,
+}
+
+impl TickInput {
+    pub fn hand(&self, hand: super::weapons::Hand) -> HandInput {
+        match hand {
+            super::weapons::Hand::Main => self.main,
+            super::weapons::Hand::Off => self.off,
+        }
+    }
 }
 
 impl InputCursor {
@@ -124,7 +167,22 @@ impl InputCursor {
             jump: p.jump.since(seen.jump),
             toggle_boots: p.toggle_boots.since(seen.toggle_boots),
             toggle_assist: p.toggle_assist.since(seen.toggle_assist),
-            grapple: p.grapple.since(seen.grapple),
+            main: HandInput {
+                held: input.main.held,
+                pressed: p.main.since(seen.main),
+                alt: input.main.alt,
+                alt2: input.main.alt2,
+            },
+            off: HandInput {
+                held: input.off.held,
+                pressed: p.off.since(seen.off),
+                alt: input.off.alt,
+                alt2: input.off.alt2,
+            },
+            reload: p.reload.since(seen.reload),
+            reload_main: p.reload_main.since(seen.reload_main),
+            reload_off: p.reload_off.since(seen.reload_off),
+            stance: input.stance,
             interact: p.interact.since(seen.interact),
             set_reference: p.set_reference.since(seen.set_reference),
         };
@@ -169,10 +227,10 @@ mod tests {
         let mut input = PlayerInput::default();
         input.add_look(Vec2::new(0.1, 0.0));
         input.add_look(Vec2::new(0.1, 0.0));
-        input.presses.grapple.press();
+        input.presses.off.press();
         let tick = cursor.advance(&input);
         assert!((tick.look.x - 0.2).abs() < 1e-6);
-        assert!(tick.grapple);
+        assert!(tick.off.pressed);
     }
 
     #[test]

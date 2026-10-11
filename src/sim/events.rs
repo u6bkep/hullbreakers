@@ -14,6 +14,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::ship::ControlAction;
+use super::weapons::{GunKind, Hand};
 
 /// How long entries stay in the log, in ticks. Readers must look at least
 /// this often.
@@ -77,6 +78,13 @@ pub enum PlayerEvent {
     BeamHit,
     /// Ran out of health (a respawn follows).
     Died,
+    /// A shot left a gun: from `origin` (the eye), at `velocity`.
+    Fired {
+        hand: Hand,
+        gun: GunKind,
+        origin: Vec3,
+        velocity: Vec3,
+    },
 }
 
 impl PlayerEvent {
@@ -122,6 +130,7 @@ impl PlayerEvent {
             PlayerEvent::Respawned => return None,
             PlayerEvent::BeamHit => "caught in a laser beam".into(),
             PlayerEvent::Died => "killed".into(),
+            PlayerEvent::Fired { .. } => return None,
         })
     }
 }
@@ -145,7 +154,8 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::NoReferenceTarget
             | PlayerEvent::Respawned
             | PlayerEvent::BeamHit
-            | PlayerEvent::Died => {}
+            | PlayerEvent::Died
+            | PlayerEvent::Fired { .. } => {}
         }
     }
 }

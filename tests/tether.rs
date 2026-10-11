@@ -105,7 +105,7 @@ fn floating_pair() -> (App, Entity, Entity) {
 #[test]
 fn grapple_hooks_another_player() {
     let (mut app, a, b) = floating_pair();
-    input(&mut app, a, |i| i.presses.grapple.press());
+    input(&mut app, a, |i| i.presses.off.press());
     ticks(&mut app, 1);
     let grapple = player(&app, a).grapple.expect("missed the other player");
     assert_eq!(grapple.target, b);
@@ -118,7 +118,7 @@ fn grapple_hooks_another_player() {
 #[test]
 fn reeling_in_a_free_player_pulls_both_equally() {
     let (mut app, a, b) = floating_pair();
-    input(&mut app, a, |i| i.presses.grapple.press());
+    input(&mut app, a, |i| i.presses.off.press());
     ticks(&mut app, 1);
     input(&mut app, a, |i| i.reel_in = true);
     let (a0, b0) = (position(&app, a), position(&app, b));
@@ -146,7 +146,7 @@ fn assisted_reel_to_a_player_arrives_without_passing_through() {
     for e in [a, b] {
         set(&mut app, e, |p| p.flight_assist = true);
     }
-    input(&mut app, a, |i| i.presses.grapple.press());
+    input(&mut app, a, |i| i.presses.off.press());
     ticks(&mut app, 1);
     input(&mut app, a, |i| i.reel_in = true);
     let mut closest = f32::MAX;
@@ -192,7 +192,7 @@ fn reeling_yanks_a_booted_player_off_the_hull() {
         p.flight_assist = false;
     });
     ticks(&mut app, 2);
-    input(&mut app, a, |i| i.presses.grapple.press());
+    input(&mut app, a, |i| i.presses.off.press());
     ticks(&mut app, 1);
     assert_eq!(player(&app, a).grapple.map(|g| g.target), Some(b));
     input(&mut app, a, |i| i.reel_in = true);
@@ -219,8 +219,8 @@ fn reeling_yanks_a_booted_player_off_the_hull() {
 #[test]
 fn mutual_ropes_catch_and_settle() {
     let (mut app, a, b) = floating_pair();
-    input(&mut app, a, |i| i.presses.grapple.press());
-    input(&mut app, b, |i| i.presses.grapple.press());
+    input(&mut app, a, |i| i.presses.off.press());
+    input(&mut app, b, |i| i.presses.off.press());
     ticks(&mut app, 1);
     assert_eq!(player(&app, a).grapple.map(|g| g.target), Some(b));
     assert_eq!(player(&app, b).grapple.map(|g| g.target), Some(a));

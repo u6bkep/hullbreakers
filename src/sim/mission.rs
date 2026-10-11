@@ -270,10 +270,13 @@ pub fn switch_scenario(
     homes: Query<(), With<HomeShip>>,
     mut mission: Single<&mut Mission>,
     mut players: Query<(&mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>)>,
+    mut shots: ResMut<super::shots::Shots>,
 ) {
     let Some(kind) = director.next.take() else {
         return;
     };
+    // Bullets in flight belonged to the old world.
+    shots.0.clear();
     info!("starting scenario {kind:?}");
     let debrief = (mission.phase != Phase::Underway).then(|| {
         let ended = mission.ended.unwrap_or(tick.0);
