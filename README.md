@@ -1,6 +1,6 @@
 # space-game
 
-First-person movement sandbox for a boarding-combat roguelite. Bevy 0.19 + Avian 0.7.
+First-person co-op boarding-combat roguelite, early days. Bevy 0.19 + Avian 0.7.
 
 ```
 cargo run                                # host a game and play (UDP port 5888)
@@ -8,7 +8,24 @@ cargo run -- --connect 192.168.1.20      # join a host (HOST[:PORT])
 cargo run -- --server [--port 5888]      # dedicated headless server
 cargo test                               # movement, client-world and netplay tests
 SPACE_GAME_SHOTS=dir cargo run           # scripted screenshot tour, then exit
+SPACE_GAME_SCENARIO=boarding cargo run   # host straight into a scenario
 ```
+
+## Scenarios
+
+The crew's ship has a **mission wall** on the port side of the bridge: click
+a button (LMB, within reach) to start a scenario. Every switch rebuilds the
+world and puts everyone back on the deck. The game starts in the
+**asteroid field**, and its button takes you back there.
+
+- **Boarding action**: our ship and a raider duel, weaving in to about 40 m
+  and back out to 200 m every 30 s. Laser turrets on both ships fire slow,
+  shielded beams: our hull lasts about 3.5 minutes. Cross to the raider
+  (grapple and reel, or jump on a close pass), get in through its stern
+  cargo door, and press the shield console on its bridge. Our beams then
+  finish it in seconds, so get clear: it breaks apart and throws boarders
+  into space. Beams shove anyone in EVA who crosses them. Lose our ship and
+  the crew drifts a while, then returns to the field.
 
 Co-op is host-authoritative: the host (or server) simulates everything and
 replicates it. Its tuning is authoritative too; each player keeps their own
@@ -51,7 +68,7 @@ client's title is `space-game — HOST:PORT`.
 | V            | toggle flight assist (on by default) ||
 | T            | set reference body (what assist/brake match) to the one under the crosshair ||
 | X (hold)     | —                | brake relative to last body touched/grappled |
-| LMB          | fire / release grapple              ||
+| LMB          | press the button under the crosshair (within reach); otherwise fire / release grapple ||
 | RMB (hold)   | reel in                             ||
 | R (hold)     | pay out rope                        ||
 | Tab          | tuning panel (frees the mouse)      ||
@@ -71,8 +88,18 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   - **Events** (`sim/events.rs`) are tick-stamped entries in each player's
     `EventLog`, not messages. A re-simulated tick rewrites its own entries.
     The client presents each one once (`client/events.rs`).
-  - Time-dependent behaviour (ship wobble, lurch) derives from `SimTick`.
-    Orders to the ship arrive as `ShipCommand` messages.
+  - Time-dependent behaviour (ship wobble, lurch, turret fire, scripted
+    flight) derives from `SimTick`. Orders to a drifting ship arrive as
+    `ShipCommand` messages.
+  - **Scenarios** (`sim/mission.rs`) are the authority's: button presses are
+    player events (`Pressed`) that the `Director` acts on after the players
+    move; a switch despawns the world, spawns the scenario's, and respawns
+    every player on deck (`Respawned`, a view relocation). `Mission` is
+    replicated for the HUD.
+  - **Combat** (`sim/combat.rs`): which turrets fire is a function of the
+    tick, and where a beam stops is a function of the ships' poses and the
+    target's shield, so every peer traces the same `Beams` each tick and a
+    client predicts being shoved by one. Only damage is the authority's.
 - `src/client/` is input, camera, greybox rendering, the HUD, and the tuning
   panel. It presents the `LocalPlayer` and writes only `LocalInput`.
 - `src/net/` is lightyear: `--host` (listen server, the default), `--connect`,
@@ -102,6 +129,13 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   isotropic inertia so free tumbling is torque-free and exactly predictable.
   Measured: ~16 KB/s to one client (was ~400 KB/s streaming poses), about 3
   motion updates/s for the whole field.
+- **Scripted flight** (`sim/flight.rs`): a ship in a fight flies a path that
+  is a pure function of the tick. Every peer poses it from its `Flight`
+  (sent once), as a static body moved before each physics step with the
+  path's velocities, so it is exactly where the authority has it and a
+  client standing on it predicts itself without corrections (measured: 0
+  rollbacks/s at 100 ms). Hits shake it, gently: a shake is an
+  acceleration at the boots.
 - **Body mass** (`BodyInertia`) is derived from the collider identically on
   every peer, so clients have real reference frames without simulating.
 - **Reference frames** (`sim/frame.rs`): a booted player is simulated in the
@@ -110,8 +144,8 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   feet (including centripetal), so hard maneuvers can rip you off. Every
   transition (jump, landing, rope yank, stepping between bodies) goes through
   `BodyFrame` so world momentum is continuous.
-- **World frame**: the ship is (on average) at rest and the asteroid field
-  streams past. Physics is Galilean-invariant, so this is the same as flying
+- **World frame**: in the field, the ship is (on average) at rest and the
+  asteroid field streams past. Physics is Galilean-invariant, so this is the same as flying
   through a static field, but it keeps coordinates small.
 - The player is a kinematic capsule driven by Avian's move-and-slide and
   spatial queries, not a rigid body. EVA contacts exchange impulses with rocks
