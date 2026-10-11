@@ -263,3 +263,35 @@ mod tests {
         }
     }
 }
+
+/// Frames a generated environment map is left to filter before it's kept
+/// as it is.
+const FILTER_FRAMES: u32 = 30;
+
+/// How many frames a generated environment map has had to filter.
+#[derive(Component)]
+pub struct Filtering(u32);
+
+/// Bevy re-filters a generated environment map every frame (about 4 ms of
+/// GPU for the sky and a ship's cabin together, measured). Ours never
+/// change, so once one has been filtered, its generator is removed and the
+/// light it made stays.
+pub fn settle_environment_maps(
+    mut commands: Commands,
+    mut maps: Query<
+        (Entity, Option<&mut Filtering>),
+        (With<GeneratedEnvironmentMapLight>, With<bevy::light::EnvironmentMapLight>),
+    >,
+) {
+    for (entity, filtering) in &mut maps {
+        match filtering {
+            None => {
+                commands.entity(entity).insert(Filtering(0));
+            }
+            Some(mut f) if f.0 < FILTER_FRAMES => f.0 += 1,
+            Some(_) => {
+                commands.entity(entity).remove::<(GeneratedEnvironmentMapLight, Filtering)>();
+            }
+        }
+    }
+}
