@@ -308,3 +308,30 @@ fn standing_on_a_duelling_ship_is_predicted() {
     assert!(player.is_some(), "not standing on anything");
     assert!(rate <= 0.5, "standing on the duelling ship mispredicted {rate:.1}/s");
 }
+
+/// Firing, reloading and switching stance on the deck: all predicted player
+/// state, so none of it should need correcting.
+#[test]
+fn shooting_is_predicted() {
+    use hullbreakers::sim::events::PlayerEvent;
+    let (_guard, mut s) = session(100);
+    s.step(60);
+    s.input().0.main.held = true;
+    let firing = s.rollback_rate(120);
+    s.input().0.main.held = false;
+    s.input().0.stance = 2;
+    s.input().0.presses.reload.press();
+    let switching = s.rollback_rate(120);
+    s.input().0.main.held = true;
+    let rifle = s.rollback_rate(120);
+    let fired = s
+        .local_player()
+        .unwrap()
+        .events
+        .iter()
+        .filter(|(_, e)| matches!(e, PlayerEvent::Fired { .. }))
+        .count();
+    eprintln!("shooting: {firing:.2} / {switching:.2} / {rifle:.2} rollbacks/s; {fired} shots in the log");
+    assert!(fired > 0, "never fired");
+    assert!(firing.max(switching).max(rifle) <= 0.5, "shooting mispredicted");
+}
