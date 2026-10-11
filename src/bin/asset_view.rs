@@ -23,7 +23,6 @@ const SHOT_SECONDS: f32 = 0.5;
 #[derive(Resource)]
 struct Plan {
     out: PathBuf,
-    width: f32,
     next: usize,
     timer: Timer,
 }
@@ -63,7 +62,6 @@ fn main() {
         .add_systems(Startup, render::setup_lighting)
         .insert_resource(Plan {
             out: PathBuf::from(out),
-            width: SPACING * (models.len().max(1) - 1) as f32,
             next: 0,
             timer: Timer::from_seconds(LOAD_SECONDS, TimerMode::Once),
         })
@@ -93,13 +91,34 @@ fn shoot(
     mut plan: ResMut<Plan>,
     mut commands: Commands,
     mut camera: Query<&mut Transform, With<Camera3d>>,
+    meshes: Query<(&GlobalTransform, &bevy::camera::primitives::Aabb, Option<&Visibility>), With<Mesh3d>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if !plan.timer.tick(time.delta()).just_finished() {
         return;
     }
-    let center = Vec3::new(plan.width / 2.0, 0.0, -0.1);
-    let distance = 0.55 + plan.width;
+    // Frame everything drawn: its bounding sphere fills most of the view.
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for (transform, aabb, visibility) in &meshes {
+        if visibility == Some(&Visibility::Hidden) {
+            continue;
+        }
+        for corner in [-1.0f32, 1.0] {
+            for (cx, cy) in [(-1.0f32, -1.0f32), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)] {
+                let local = Vec3::from(aabb.center) + Vec3::from(aabb.half_extents) * Vec3::new(cx, cy, corner);
+                let p = transform.transform_point(local);
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+        }
+    }
+    let (center, radius) = if lo.x <= hi.x {
+        ((lo + hi) / 2.0, (hi - lo).length() / 2.0)
+    } else {
+        (Vec3::ZERO, 0.3)
+    };
+    // The default 45° vertical field of view.
+    let distance = radius / (22.5f32.to_radians().sin()) * 1.05;
     // Steps alternate: put the camera at an angle, then (a frame later, so
     // the shot sees the move) photograph it.
     let (angle, shoot) = (plan.next / 2, plan.next % 2 == 1);

@@ -219,3 +219,34 @@ def lathe(profile, axis, center, mats, segments, bevel, smooth_angle):
     if cap_end is not None:
         pr.face(rings[-1], True, cap_end)
     return pr
+
+
+def hull(points, mat, bevel):
+    """Convex hull of `points` (Bevy world): a closed shell of flat faces. Coplanar hull
+    triangles are merged into one face, so each side of the hull is one flat plane. For
+    wedges, sloped plates and chamfered blocks that boxes and prisms can't tilt into."""
+    import bmesh
+
+    pts = [vec3(p, "hull point") for p in points]
+    if len(pts) < 4:
+        raise ValueError("hull needs at least 4 points")
+    bm = bmesh.new()
+    try:
+        for p in pts:
+            bm.verts.new(p)
+        res = bmesh.ops.convex_hull(bm, input=list(bm.verts), use_existing_faces=False)
+        drop = list({g for g in res["geom_interior"] + res["geom_unused"] if isinstance(g, bmesh.types.BMVert)})
+        bmesh.ops.delete(bm, geom=drop, context="VERTS")
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
+        if len(bm.faces) < 4:
+            raise ValueError(f"hull of {len(pts)} points is flat or collinear; it needs volume")
+        bmesh.ops.dissolve_limit(bm, angle_limit=math.radians(0.05), verts=list(bm.verts), edges=list(bm.edges))
+        pr = Prim("hull", bevel, 0.0)
+        index = {}
+        for v in bm.verts:
+            index[v] = pr.v(v.co)
+        for f in bm.faces:
+            pr.face([index[v] for v in f.verts], True, mat)
+    finally:
+        bm.free()
+    return pr

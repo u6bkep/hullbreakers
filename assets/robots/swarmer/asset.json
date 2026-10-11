@@ -1,0 +1,24 @@
+{
+  "name": "swarmer",
+  "kind": "small_robot",
+  "brief": "Swarmer: a small, fast, fragile hostile drone that rushes the crew in packs in zero-g. Compact armoured insect-like shell, a cluster of sensor eyes on the front, four small swivelling thruster pods, and a stubby twin gun turret under the body. Bone-white plates, black joints and underside, cyan eyes and thruster glows.",
+  "palette": {
+    "paint_primary": "#e4dccb",
+    "emissive": "#4fe8ff"
+  },
+  "expect": {
+    "size": {"x": [0.68, 0.8], "y": [0.3, 0.45], "z": [0.45, 0.65]},
+    "parts": ["body", "gun", "thruster_fl", "thruster_fr", "thruster_rl", "thruster_rr"],
+    "colliders": ["COL_body", "COL_pods"],
+    "sockets": {
+      "SOCKET_eye":        {"at": [0, -0.04, -0.2415], "forward": [0, 0, -1], "up": [0, 1, 0]},
+      "SOCKET_muzzle_l":   {"at": [-0.034, -0.152, -0.29], "forward": [0, 0, -1]},
+      "SOCKET_muzzle_r":   {"at": [0.034, -0.152, -0.29], "forward": [0, 0, -1]},
+      "SOCKET_thrust_fl":  {"at": [-0.31, -0.06, 0.006], "forward": [0, 0, 1]},
+      "SOCKET_thrust_fr":  {"at": [0.31, -0.06, 0.006], "forward": [0, 0, 1]},
+      "SOCKET_thrust_rl":  {"at": [-0.3, 0.06, 0.216], "forward": [0, 0, 1]},
+      "SOCKET_thrust_rr":  {"at": [0.3, 0.06, 0.216], "forward": [0, 0, 1]}
+    },
+    "tolerance": 0.01
+  }
+}

@@ -97,6 +97,11 @@ class Part(Node):
         return self.lathe([(radius, a), (radius, b)], axis, center, mat=mat, segments=segments, bevel=bevel,
                           smooth_angle=smooth_angle)
 
+    def hull(self, points, mat=None, bevel=None):
+        """Convex hull of `points` (Bevy world): every face flat, coplanar sides merged.
+        For wedges and sloped plates; one hull over an L shape is mostly air, so use several."""
+        return self._add(geometry.hull(points, self._mat(mat), self._bevel(bevel)))
+
     def points(self):
         """Every vertex of this part's primitives (Bevy world), before bevelling."""
         return [p for pr in self.prims for p in pr.verts]

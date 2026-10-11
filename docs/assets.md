@@ -141,6 +141,7 @@ for thin strips and small details).
 | `p.frame(lo, hi, wall, axis, mat=)` | A rectangular sleeve: outer box `lo..hi`, open along `axis`, with walls `wall` thick. |
 | `p.lathe(profile, axis="z", center=(0,0), mat= or mats=[...], segments=20)` | A surface of revolution. `profile` is `[(radius, t)]` with `t` along the axis. `center` gives the other two axes' coordinates in xyz order (`axis="z"` → `(x, y)`). `mats` takes one role per profile segment. Open ends are capped. |
 | `p.cylinder(axis, center, radius, span, mat=, segments=20)` | A capped cylinder. |
+| `p.hull(points, mat=)` | The convex hull of `points` (at least 4, not flat). Every face is flat and coplanar sides merge into one face. For wedges, sloped plates and chamfered blocks that a box or prism can't tilt into. |
 
 Primitives are separate closed shells. They may overlap, but they are never welded or
 booleaned together. There's no boolean operation; build cut-outs from separate pieces.
@@ -149,7 +150,7 @@ booleaned together. There's no boolean operation; build cut-outs from separate p
 
 Every face is tagged **flat** or **curved** by the primitive that made it:
 
-- Flat: box, frame and prism faces; lathe end caps; lathe radial steps (segments with
+- Flat: box, frame, prism and hull faces; lathe end caps; lathe radial steps (segments with
   constant `t`).
 - Curved: lathe bands (cylinders and cones), and the side faces of `prism(..., smooth=True)`.
   Use that for an outline that approximates a curve.
