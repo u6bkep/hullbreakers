@@ -108,6 +108,12 @@ tuning! {
             lurch_delta_v: 6.0, 0.0, 40.0;
             field_speed: 15.0, 0.0, 60.0;
         }
+        "Health" {
+            player_health: 100.0, 1.0, 1000.0;
+            health_regen_delay: 6.0, 0.0, 60.0;
+            health_regen_rate: 20.0, 0.0, 200.0;
+            beam_damage: 34.0, 0.0, 200.0;
+        }
         "Mission" {
             home_survival_seconds: 210.0, 20.0, 1200.0;
             raider_shielded_seconds: 900.0, 20.0, 3600.0;

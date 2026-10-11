@@ -17,6 +17,7 @@ pub mod player;
 pub mod rope;
 pub mod ship;
 pub mod tuning;
+pub mod vitals;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -147,7 +148,8 @@ impl Plugin for SimPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((SimSharedPlugin, PlayerSimPlugin));
         let in_field = resource_exists::<asteroids::FieldRng>;
-        app.init_resource::<asteroids::FieldInterest>()
+        app.add_message::<vitals::Damage>()
+            .init_resource::<asteroids::FieldInterest>()
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .add_systems(
                 FixedUpdate,
@@ -185,6 +187,9 @@ impl Plugin for SimPlugin {
                 FixedPostUpdate,
                 (
                     combat::apply_damage,
+                    vitals::beam_burns,
+                    vitals::apply_damage,
+                    vitals::settle_deaths,
                     mission::handle_presses,
                     mission::settle_battle,
                     mission::switch_scenario,

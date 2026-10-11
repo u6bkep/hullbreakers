@@ -116,6 +116,7 @@ impl Plugin for ClientPlugin {
                     hud::reference_overlay,
                     hud::hud,
                     hud::mission_hud,
+                    hud::vitals_hud,
                 ),
             );
         if let Some(script) = debug_shots::shot_script_from_env() {

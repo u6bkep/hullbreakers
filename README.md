@@ -18,14 +18,18 @@ a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
 **asteroid field**, and its button takes you back there.
 
-- **Boarding action**: our ship and a raider duel, weaving in to about 40 m
-  and back out to 200 m every 30 s. Laser turrets on both ships fire slow,
+- **Boarding action**: our ship and a raider duel among rocks, weaving in to
+  about 100 m and back out to 400 m every 40 s. Laser turrets on both ships fire slow,
   shielded beams: our hull lasts about 3.5 minutes. Cross to the raider
   (grapple and reel, or jump on a close pass), get in through its stern
   cargo door, and press the shield console on its bridge. Our beams then
   finish it in seconds, so get clear: it breaks apart and throws boarders
-  into space. Beams shove anyone in EVA who crosses them. Lose our ship and
-  the crew drifts a while, then returns to the field.
+  into space. Beams shove and burn anyone in EVA who crosses them: three
+  hits kill. Lose our ship and the crew drifts a while, then returns to the
+  field.
+
+Players have suit health (bottom of the screen). It comes back after a few
+seconds unhurt; at zero you respawn aboard the home ship.
 
 Co-op is host-authoritative: the host (or server) simulates everything and
 replicates it. Its tuning is authoritative too; each player keeps their own

@@ -14,6 +14,7 @@ use hullbreakers::sim::mission::{Debris, Mission, Phase, ScenarioKind};
 use hullbreakers::sim::player::{Mode, Player};
 use hullbreakers::sim::ship::{HomeShip, HullKind, ShipHull};
 use hullbreakers::sim::tuning::Tuning;
+use hullbreakers::sim::vitals::Vitals;
 
 fn app() -> App {
     let mut app = App::new();
@@ -261,6 +262,57 @@ fn a_beam_shoves_a_player_out_of_its_way() {
         .filter(|(_, e)| *e == PlayerEvent::BeamHit)
         .count();
     assert_eq!(hits, 1, "one crossing, one hit");
+}
+
+fn vitals(app: &mut App) -> Vitals {
+    let world = app.world_mut();
+    *world.query::<&Vitals>().single(world).unwrap()
+}
+
+#[test]
+fn beams_kill_and_the_dead_come_back_aboard() {
+    let mut app = app();
+    start_boarding(&mut app);
+    let home = home(&mut app);
+    // Keep putting the player back in the middle of whatever beam is firing.
+    let mut died = false;
+    for _ in 0..60 * 60 {
+        let beam = app.world().resource::<Beams>().0.first().copied();
+        if let Some(beam) = beam {
+            set_player(&mut app, |p| {
+                p.mode = Mode::Eva {
+                    position: (beam.from + beam.to) / 2.0,
+                    velocity: Vec3::ZERO,
+                    orientation: Quat::IDENTITY,
+                    pitch: 0.0,
+                };
+            });
+        }
+        ticks(&mut app, 1);
+        if player(&mut app).events.iter().any(|(_, e)| e == PlayerEvent::Died) {
+            died = true;
+            break;
+        }
+    }
+    assert!(died, "never died; health {}", vitals(&mut app).health);
+    assert!(matches!(player(&mut app).mode, Mode::Booted { body, .. } if body == home));
+    assert_eq!(vitals(&mut app).health, Tuning::default().player_health);
+}
+
+#[test]
+fn health_comes_back_after_a_while_unhurt() {
+    let mut app = app();
+    let full = Tuning::default().player_health;
+    {
+        let world = app.world_mut();
+        let mut v = world.query::<&mut Vitals>().single_mut(world).unwrap();
+        v.health = full / 2.0;
+        v.since_hurt = 0.0;
+    }
+    ticks(&mut app, (Tuning::default().health_regen_delay * 60.0) as usize - 10);
+    assert_eq!(vitals(&mut app).health, full / 2.0, "healed too soon");
+    ticks(&mut app, 60 * 10);
+    assert_eq!(vitals(&mut app).health, full);
 }
 
 fn frame(app: &mut App, ship: Entity) -> hullbreakers::sim::frame::BodyFrame {

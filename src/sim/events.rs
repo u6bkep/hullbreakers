@@ -75,6 +75,8 @@ pub enum PlayerEvent {
     Respawned,
     /// Shoved by a laser beam.
     BeamHit,
+    /// Ran out of health (a respawn follows).
+    Died,
 }
 
 impl PlayerEvent {
@@ -119,6 +121,7 @@ impl PlayerEvent {
             PlayerEvent::Pressed { action, .. } => format!("pressed: {}", action.label()),
             PlayerEvent::Respawned => return None,
             PlayerEvent::BeamHit => "caught in a laser beam".into(),
+            PlayerEvent::Died => "killed".into(),
         })
     }
 }
@@ -141,7 +144,8 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::ReferenceSet { .. }
             | PlayerEvent::NoReferenceTarget
             | PlayerEvent::Respawned
-            | PlayerEvent::BeamHit => {}
+            | PlayerEvent::BeamHit
+            | PlayerEvent::Died => {}
         }
     }
 }

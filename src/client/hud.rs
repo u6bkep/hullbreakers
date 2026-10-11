@@ -10,6 +10,7 @@ use super::LocalPlayer;
 use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
 use super::input::MouseCaptured;
+use crate::sim::vitals::Vitals;
 use crate::sim::combat::{SHIELD_CENTER, SHIELD_RADII};
 use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
@@ -675,5 +676,66 @@ pub fn mission_hud(
                     });
             });
     }
+    Ok(())
+}
+
+/// Your health, at the bottom of the screen, and a red flash when you're
+/// hurt.
+pub fn vitals_hud(
+    mut contexts: EguiContexts,
+    time: Res<Time>,
+    tuning: Res<Tuning>,
+    vitals: Option<Single<&Vitals, With<LocalPlayer>>>,
+    mut last: Local<Option<f32>>,
+    mut flash: Local<f32>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let Some(vitals) = vitals else {
+        return Ok(());
+    };
+    let health = vitals.health;
+    if last.is_some_and(|before| health < before) {
+        *flash = 1.0;
+    }
+    *last = Some(health);
+    *flash = (*flash - time.delta_secs() * 2.5).max(0.0);
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("vitals")));
+    if *flash > 0.0 {
+        // A red rim, strongest at the edges.
+        let alpha = (*flash * 110.0) as u8;
+        let red = egui::Color32::from_rgba_unmultiplied(200, 20, 10, alpha);
+        let edge = 60.0;
+        for rect in [
+            egui::Rect::from_min_max(screen.min, egui::pos2(screen.max.x, screen.min.y + edge)),
+            egui::Rect::from_min_max(egui::pos2(screen.min.x, screen.max.y - edge), screen.max),
+            egui::Rect::from_min_max(screen.min, egui::pos2(screen.min.x + edge, screen.max.y)),
+            egui::Rect::from_min_max(egui::pos2(screen.max.x - edge, screen.min.y), screen.max),
+        ] {
+            painter.rect_filled(rect, 0.0, red);
+        }
+    }
+    let fraction = (health / tuning.player_health).clamp(0.0, 1.0);
+    let size = egui::vec2(240.0, 10.0);
+    let at = egui::pos2(screen.center().x - size.x / 2.0, screen.max.y - 34.0);
+    let back = egui::Rect::from_min_size(at, size);
+    painter.rect_filled(back.expand(2.0), 3.0, egui::Color32::from_black_alpha(150));
+    let color = if fraction > 0.35 {
+        egui::Color32::from_rgb(120, 220, 160)
+    } else {
+        egui::Color32::from_rgb(240, 90, 70)
+    };
+    painter.rect_filled(
+        egui::Rect::from_min_size(at, egui::vec2(size.x * fraction, size.y)),
+        2.0,
+        color,
+    );
+    painter.text(
+        at + egui::vec2(size.x / 2.0, -4.0),
+        egui::Align2::CENTER_BOTTOM,
+        format!("SUIT {:.0}", health),
+        egui::FontId::monospace(12.0),
+        color,
+    );
     Ok(())
 }

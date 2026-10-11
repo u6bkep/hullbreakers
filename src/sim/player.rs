@@ -317,8 +317,12 @@ pub fn pose_player_hulls(
 }
 
 /// Spawns the one local player of a game without a network.
-pub fn spawn_player(mut commands: Commands, ship: Single<Entity, With<super::ship::HomeShip>>) {
-    commands.spawn(new_player(*ship, 0));
+pub fn spawn_player(
+    mut commands: Commands,
+    tuning: Res<Tuning>,
+    ship: Single<Entity, With<super::ship::HomeShip>>,
+) {
+    commands.spawn((new_player(*ship, 0), super::vitals::Vitals::full(&tuning)));
 }
 
 /// Which spot on the deck a player comes aboard at.

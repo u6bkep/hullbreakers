@@ -729,6 +729,8 @@ pub fn play_event_sounds(
                 play(&mut commands, &sounds.sizzle_burst, 0.9, pitch);
                 play(&mut commands, &sounds.impact, 1.0, 0.6);
             }
+            // The suit gives out: an alarm, then the respawn's warp.
+            PlayerEvent::Died => play(&mut commands, &sounds.warning, 1.0, 0.7),
         }
     }
 }

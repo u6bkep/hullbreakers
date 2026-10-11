@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sim::asteroids::Asteroid;
 use crate::sim::combat::Combatant;
+use crate::sim::vitals::Vitals;
 use crate::sim::flight::Flight;
 use crate::sim::input::PlayerInput;
 use crate::sim::mission::{Debris, Mission};
@@ -261,6 +262,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Debris>().replicate_once();
         app.component::<Flight>().replicate();
         app.component::<Combatant>().replicate();
+        app.component::<Vitals>().replicate();
         app.component::<Mission>().replicate();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();
@@ -529,6 +531,7 @@ fn spawn_players(
     clients: Query<(Entity, &RemoteId), (With<ClientOf>, With<Connected>, Without<HasPlayer>)>,
     ship: Query<Entity, With<HomeShip>>,
     slots: Query<&DeckSlot>,
+    tuning: Res<Tuning>,
     mut commands: Commands,
 ) {
     let Ok(ship) = ship.single() else { return };
@@ -547,6 +550,7 @@ fn spawn_players(
         ));
         let mut player = commands.spawn((
             new_player(ship, index),
+            Vitals::full(&tuning),
             ActionState::<PlayerInput>::default(),
             Replicate::to_clients(NetworkTarget::All),
             interpolate,

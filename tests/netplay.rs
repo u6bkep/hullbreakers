@@ -175,6 +175,14 @@ fn walking_and_turning_is_predicted() {
     let still = s.rollback_rate(120);
     eprintln!("walking: worst {rate:.2} rollbacks/s; standing {still:.2}");
     assert!(matches!(s.local_player().unwrap().mode, Mode::Booted { .. }));
+    // Health comes from the authority.
+    let world = s.client.world_mut();
+    let vitals = world
+        .query_filtered::<&hullbreakers::sim::vitals::Vitals, With<LocalPlayer>>()
+        .iter(world)
+        .next()
+        .copied();
+    assert_eq!(vitals.map(|v| v.health), Some(100.0), "client has no vitals");
     assert!(rate <= 2.0, "walking mispredicted {rate:.1}/s");
     assert!(still == 0.0, "standing mispredicted {still:.1}/s");
 }
