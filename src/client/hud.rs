@@ -5,13 +5,16 @@ use bevy_egui::{EguiContexts, egui};
 
 use avian3d::prelude::{ColliderAabb, SpatialQuery, SpatialQueryFilter};
 
-use super::camera::PlayerCamera;
+use super::camera::{CameraFx, PlayerCamera};
 use super::LocalPlayer;
 use super::events::EventCursor;
 use super::input::MouseCaptured;
 use crate::sim::bodies::Bodies;
-use crate::sim::player::{Mode, Player};
-use crate::sim::ship::ShipCommand;
+use crate::sim::combat::Combatant;
+use crate::sim::mission::{Mission, Phase, ScenarioKind};
+use crate::sim::player::{CONTROL_REACH, Mode, Player};
+use crate::sim::ship::{Control, HomeShip, ShipCommand};
+use crate::sim::{Layer, SimTick, TICK_HZ};
 use crate::sim::tuning::{TUNING_PATH, Tuning};
 
 #[derive(Resource, Default)]
@@ -31,6 +34,7 @@ pub fn hud(
     mut ship_orders: MessageWriter<ShipCommand>,
     camera: Single<&Transform, With<PlayerCamera>>,
     spatial: SpatialQuery,
+    controls: Query<(&Control, &Transform, &ChildOf)>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let (own, player) = *player;
@@ -64,7 +68,27 @@ pub fn hud(
                 &SpatialQueryFilter::default().with_excluded_entities([own]),
             )
         });
-    if let Some(hit) = in_range {
+    // A button under the crosshair wins over the grapple readout.
+    let prompt = control_prompt(&camera, own, &spatial, &bodies, &controls);
+    if let Some(label) = prompt {
+        let cyan = INK;
+        painter.circle_stroke(center, 11.0, egui::Stroke::new(1.5, cyan));
+        let galley = painter.layout_no_wrap(
+            format!("[LMB] {label}"),
+            egui::FontId::monospace(15.0),
+            cyan,
+        );
+        let at = center + egui::vec2(18.0, -galley.size().y / 2.0);
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                at - egui::vec2(4.0, 2.0),
+                galley.size() + egui::vec2(8.0, 4.0),
+            ),
+            3.0,
+            egui::Color32::from_black_alpha(150),
+        );
+        painter.galley(at, galley, cyan);
+    } else if let Some(hit) = in_range {
         let amber = egui::Color32::from_rgb(255, 190, 70);
         painter.circle_stroke(center, 11.0, egui::Stroke::new(1.5, amber));
         painter.text(
@@ -195,6 +219,63 @@ pub fn hud(
             });
         });
     Ok(())
+}
+
+/// The label of the button the crosshair is on, by the sim's own rule for
+/// whether a click would press it: the ray enters the button's box within
+/// reach with no world geometry in front. Buttons stand proud of their
+/// panel, so a hit just behind the button is the panel itself.
+fn control_prompt(
+    camera: &Transform,
+    own: Entity,
+    spatial: &SpatialQuery,
+    bodies: &Bodies,
+    controls: &Query<(&Control, &Transform, &ChildOf)>,
+) -> Option<&'static str> {
+    let dir = Dir3::new(camera.rotation * Vec3::NEG_Z).ok()?;
+    let eye = camera.translation;
+    let blocked = spatial
+        .cast_ray(
+            eye,
+            dir,
+            CONTROL_REACH,
+            true,
+            &SpatialQueryFilter::from_mask(Layer::World).with_excluded_entities([own]),
+        )
+        .map_or(f32::MAX, |hit| hit.distance + 0.15);
+    controls
+        .iter()
+        .filter_map(|(control, transform, ship)| {
+            let frame = bodies.frame(ship.parent())?;
+            let t = ray_box(
+                frame.point_to_local(eye) - transform.translation,
+                frame.dir_to_local(*dir),
+                control.half_size,
+            )?;
+            (t <= CONTROL_REACH && t <= blocked).then_some((t, control.action.label()))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, label)| label)
+}
+
+/// Distance along a ray (`origin` relative to the box center, `dir` unit) to
+/// where it enters an axis-aligned box of `half` extents; zero if inside.
+/// The same slab test the sim uses to pick buttons.
+fn ray_box(origin: Vec3, dir: Vec3, half: Vec3) -> Option<f32> {
+    let (mut near, mut far) = (0.0f32, f32::MAX);
+    for axis in 0..3 {
+        let (o, d, h) = (origin[axis], dir[axis], half[axis]);
+        if d.abs() < 1e-9 {
+            if o.abs() > h {
+                return None;
+            }
+            continue;
+        }
+        let (a, b) = ((-h - o) / d, (h - o) / d);
+        near = near.max(a.min(b));
+        far = far.min(a.max(b));
+    }
+    (near <= far).then_some(near)
 }
 
 /// Player position and velocity relative to the reference body, in world axes.
@@ -356,6 +437,184 @@ pub fn reference_overlay(
             font,
             REFERENCE_COLOR,
         );
+    }
+    Ok(())
+}
+
+const HULL_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 220, 140);
+const FOE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 110, 90);
+const SHIELD_COLOR: egui::Color32 = egui::Color32::from_rgb(110, 170, 255);
+const INK: egui::Color32 = egui::Color32::from_rgb(170, 230, 255);
+
+/// Seconds between two ticks of the (replicated) sim clock.
+fn seconds_since(now: u32, then: u32) -> f32 {
+    now.wrapping_sub(then) as f32 / TICK_HZ as f32
+}
+
+fn clock(seconds: f32) -> String {
+    let s = seconds as u32;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// A labelled bar with `fraction` of its width filled and a note beside it.
+fn bar(ui: &mut egui::Ui, label: &str, fraction: f32, color: egui::Color32, note: (&str, egui::Color32)) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(format!("{label:<6}")).monospace().size(13.0).color(INK));
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(220.0, 12.0), egui::Sense::hover());
+        let painter = ui.painter();
+        painter.rect_filled(rect, 2.0, egui::Color32::from_black_alpha(140));
+        let mut fill = rect;
+        fill.set_width(rect.width() * fraction.clamp(0.0, 1.0));
+        painter.rect_filled(fill, 2.0, color);
+        painter.rect_stroke(
+            rect,
+            2.0,
+            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(90)),
+            egui::StrokeKind::Outside,
+        );
+        ui.label(egui::RichText::new(note.0).monospace().size(13.0).color(note.1));
+    });
+}
+
+/// Scenario status from the replicated [`Mission`] and the two ships'
+/// [`Combatant`]s: hull bars and objective during a fight, banners when it
+/// ends, the debrief back in the field, and the fade after a hard cut.
+/// Nothing here reads authority-only state, so hosts and clients agree.
+pub fn mission_hud(
+    mut contexts: EguiContexts,
+    tick: Res<SimTick>,
+    fx: Res<CameraFx>,
+    missions: Query<&Mission>,
+    ships: Query<(&Combatant, Has<HomeShip>)>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let screen = ctx.content_rect();
+
+    if fx.fade() > 0.0 {
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("fade"),
+        ));
+        painter.rect_filled(
+            screen,
+            0.0,
+            egui::Color32::from_black_alpha((fx.fade() * 255.0) as u8),
+        );
+    }
+
+    let Ok(mission) = missions.single() else {
+        return Ok(());
+    };
+    let elapsed = seconds_since(tick.0, mission.started);
+
+    if mission.kind == ScenarioKind::Boarding {
+        let ours = ships.iter().find(|(_, home)| *home).map(|(c, _)| c);
+        let raider = ships.iter().find(|(_, home)| !*home).map(|(c, _)| c);
+        // A wrecked ship's entity is gone: no ship, no hull.
+        let ours_integrity = ours.map_or(0.0, |c| c.integrity);
+        let raider_integrity = raider.map_or(0.0, |c| c.integrity);
+        let shield_up = raider.is_some_and(|c| c.shield);
+        let objective = match mission.phase {
+            Phase::Won => "Raider destroyed — return to the mission wall",
+            Phase::Lost => "Hull breached — abandon ship",
+            Phase::Underway if shield_up => "Cross to the raider and disable its shield",
+            Phase::Underway => "Shield down — get clear!",
+        };
+        egui::Area::new(egui::Id::new("mission"))
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
+            .show(ctx, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                ui.vertical_centered(|ui| {
+                    let ours_color = if ours_integrity < 0.3 { FOE_COLOR } else { HULL_COLOR };
+                    let pct = format!("{:>3.0}%", ours_integrity * 100.0);
+                    bar(ui, "HULL", ours_integrity, ours_color, (&pct, ours_color));
+                    let note = match (raider.is_some(), shield_up) {
+                        (false, _) => ("DESTROYED", FOE_COLOR),
+                        (true, true) => ("SHIELDED", SHIELD_COLOR),
+                        (true, false) => ("SHIELD DOWN", egui::Color32::from_rgb(255, 190, 70)),
+                    };
+                    bar(ui, "RAIDER", raider_integrity, FOE_COLOR, note);
+                    ui.label(
+                        egui::RichText::new(format!("{objective}   {}", clock(elapsed)))
+                            .monospace()
+                            .size(15.0)
+                            .color(INK),
+                    );
+                });
+            });
+    }
+
+    // Banner for a few seconds after the fight is decided.
+    if let Some(ended) = mission.ended
+        && mission.kind == ScenarioKind::Boarding
+    {
+        let since = seconds_since(tick.0, ended);
+        if (0.0..5.0).contains(&since) {
+            let (text, color) = match mission.phase {
+                Phase::Won => ("RAIDER DESTROYED", HULL_COLOR),
+                Phase::Lost => ("SHIP LOST", FOE_COLOR),
+                Phase::Underway => ("", INK),
+            };
+            // Fades in fast, out slowly.
+            let alpha = (since * 6.0).min(1.0) * (5.0 - since).min(1.0);
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("banner"),
+            ));
+            painter.text(
+                screen.center() - egui::vec2(0.0, screen.height() * 0.2),
+                egui::Align2::CENTER_CENTER,
+                text,
+                egui::FontId::monospace(64.0),
+                color.gamma_multiply(alpha),
+            );
+        }
+    }
+
+    // Debrief for the mission before this one, for a while after the field starts.
+    if let Some(debrief) = &mission.debrief
+        && mission.kind == ScenarioKind::Field
+        && elapsed < 15.0
+    {
+        let won = debrief.phase == Phase::Won;
+        let (title, color) = if won {
+            ("RAIDER DESTROYED", HULL_COLOR)
+        } else {
+            ("SHIP LOST", FOE_COLOR)
+        };
+        egui::Area::new(egui::Id::new("debrief"))
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 120.0])
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha(190))
+                    .stroke(egui::Stroke::new(1.0, color))
+                    .corner_radius(4.0)
+                    .inner_margin(16.0)
+                    .show(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        let line = |ui: &mut egui::Ui, s: String| {
+                            ui.label(egui::RichText::new(s).monospace().size(15.0).color(INK));
+                        };
+                        ui.label(egui::RichText::new("DEBRIEF").monospace().size(12.0).color(egui::Color32::GRAY));
+                        ui.label(egui::RichText::new(title).monospace().size(28.0).color(color));
+                        line(ui, format!("{}  —  {}", debrief.scenario.button_label(), clock(debrief.seconds)));
+                        ui.separator();
+                        line(
+                            ui,
+                            match (&debrief.shield_breaker, won) {
+                                (Some(who), _) => format!("Shield dropped by {who}. Remember that name."),
+                                (None, true) => "Nobody dropped the shield; it fell on its own. Suspicious.".into(),
+                                (None, false) => "Nobody ever dropped the shield. Bold strategy.".into(),
+                            },
+                        );
+                        if !debrief.aboard.is_empty() {
+                            line(ui, format!("Made it home: {}", debrief.aboard.join(", ")));
+                        }
+                        if !debrief.adrift.is_empty() {
+                            line(ui, format!("Left drifting: {}. Send a postcard.", debrief.adrift.join(", ")));
+                        }
+                    });
+            });
     }
     Ok(())
 }
