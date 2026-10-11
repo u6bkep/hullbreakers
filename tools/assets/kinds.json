@@ -1,0 +1,16 @@
+{
+  "_doc": [
+    "Asset kinds: the budget table from docs/art-style.md, machine-readable.",
+    "tris: [min, max] render triangles (colliders excluded). Over max fails the verifier;",
+    "under min is a warning. bevel: [min, max] metres, a guide for main-body edges;",
+    "default_bevel is what a part gets when it doesn't say. Keep this in step with art-style.md."
+  ],
+  "kinds": {
+    "handheld":    {"doc": "Handheld (weapon, tool)",          "tris": [2000, 6000],  "bevel": [0.002, 0.004], "default_bevel": 0.003},
+    "small_robot": {"doc": "Small robot or creature (<= 1 m)", "tris": [3000, 8000],  "bevel": [0.005, 0.010], "default_bevel": 0.007},
+    "large_robot": {"doc": "Large robot (2-4 m)",              "tris": [8000, 20000], "bevel": [0.01, 0.03],   "default_bevel": 0.02},
+    "prop":        {"doc": "Prop, console, crate",             "tris": [500, 3000],   "bevel": [0.005, 0.02],  "default_bevel": 0.01},
+    "flora":       {"doc": "Flora cluster (organic, no bevel)", "tris": [1000, 5000], "bevel": [0.0, 0.0],     "default_bevel": 0.0},
+    "ship_module": {"doc": "Ship module",                      "tris": [5000, 30000], "bevel": [0.03, 0.15],   "default_bevel": 0.06}
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "_doc": [
+    "The shared material library. Every material in every asset is one of these roles,",
+    "exported under the role's name. Colours are sRGB hex, as a colour picker shows them;",
+    "the build converts them to linear for glTF.",
+    "An asset may override a role's colour in its asset.json palette, and nothing else.",
+    "Roles with \"palette\": true must be named in the palette of any asset that uses them,",
+    "because the defaults are neutral greys and the brief is meant to choose the colour.",
+    "For emissive, \"color\" is the emitted colour; the surface colour is derived from it",
+    "(base_from_emission x colour, linear), and the strength is exported as",
+    "KHR_materials_emissive_strength."
+  ],
+  "roles": {
+    "paint_primary": {
+      "doc": "Main painted body: the asset's identity colour, usually the lightest mass.",
+      "color": "#a8a9a5", "metallic": 0.0, "roughness": 0.55, "palette": true
+    },
+    "paint_secondary": {
+      "doc": "Second paint, for value contrast against paint_primary.",
+      "color": "#5c5e62", "metallic": 0.0, "roughness": 0.6, "palette": true
+    },
+    "metal_dark": {
+      "doc": "Dark machined or anodised metal: frames, joints, rails.",
+      "color": "#3f4245", "metallic": 1.0, "roughness": 0.4
+    },
+    "metal_bare": {
+      "doc": "Bright bare metal: wear surfaces, barrels, small fittings.",
+      "color": "#ceced1", "metallic": 1.0, "roughness": 0.28
+    },
+    "polymer": {
+      "doc": "Hard dark plastic: grips, housings.",
+      "color": "#2c2c30", "metallic": 0.0, "roughness": 0.85
+    },
+    "rubber": {
+      "doc": "Soft black rubber: pads, seals, tyres, cable sheaths.",
+      "color": "#1b1b1b", "metallic": 0.0, "roughness": 0.95
+    },
+    "glass": {
+      "doc": "Clear glass or visor: alpha-blended, smooth.",
+      "color": "#b4c8d2", "metallic": 0.0, "roughness": 0.05, "alpha": 0.3
+    },
+    "emissive": {
+      "doc": "Lights that mean something: indicators, sensors and eyes, weak spots, interactables.",
+      "color": "#ffffff", "metallic": 0.0, "roughness": 0.4, "palette": true,
+      "emissive_strength": 8.0, "base_from_emission": 0.1
+    }
+  }
+}

@@ -3,3 +3,4 @@ target/
 
 # Rendered by each asset build script
 assets/**/preview/
+__pycache__/

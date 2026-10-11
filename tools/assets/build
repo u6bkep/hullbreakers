@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Build and verify assets.
+
+    tools/assets/build                       every asset (each dir under assets/ with asset.json)
+    tools/assets/build weapons/smg_frame     one asset (relative to assets/, or any path to its dir)
+    tools/assets/build --fast ...            skip the preview renders
+
+For each asset: delete its old outputs, run its build.py in Blender (headless, factory
+settings), then run verify_glb.py on the result. Exits 1 if any build or verify fails.
+Blender's full log goes to <asset>/preview/build.log (git-ignored).
+Env: HB_BLENDER (default: blender on PATH, else /usr/bin/blender).
+"""
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+ASSETS = os.path.join(ROOT, "assets")
+
+
+def find_all():
+    out = []
+    for d, dirs, files in os.walk(ASSETS):
+        dirs[:] = sorted(x for x in dirs if x != "preview" and not x.startswith("."))
+        if "asset.json" in files:
+            out.append(d)
+    return out
+
+
+def resolve(arg):
+    for cand in (arg, os.path.join(ASSETS, arg)):
+        if os.path.isfile(os.path.join(cand, "asset.json")):
+            return os.path.abspath(cand)
+    raise SystemExit(f"build: no asset.json in {arg!r} or assets/{arg}")
+
+
+def build_one(asset_dir, blender, preview):
+    rel = os.path.relpath(asset_dir, ASSETS)
+    print(f"\n######## {rel}")
+    if not os.path.isfile(os.path.join(asset_dir, "build.py")):
+        print(f"build: {rel}/build.py missing")
+        return False
+    name = os.path.basename(asset_dir)
+    for f in (f"{name}.glb", f"{name}.intent.json"):
+        p = os.path.join(asset_dir, f)
+        if os.path.exists(p):
+            os.remove(p)
+    log_dir = os.path.join(asset_dir, "preview")
+    os.makedirs(log_dir, exist_ok=True)
+    for f in os.listdir(log_dir):             # no stale renders left behind by --fast
+        if f.endswith(".png"):
+            os.remove(os.path.join(log_dir, f))
+    log_path = os.path.join(log_dir, "build.log")
+    cmd = [blender, "--background", "--factory-startup", "--python-exit-code", "1",
+           "--python", os.path.join(HERE, "run_build.py"), "--", asset_dir]
+    if preview:
+        cmd.append("--preview")
+    t0 = time.time()
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ROOT)
+    with open(log_path, "w") as f:
+        f.write(proc.stdout)
+    lines = proc.stdout.splitlines()
+    ok = proc.returncode == 0 and any(l.startswith("hb: BUILD OK") for l in lines)
+    for line in lines:
+        if line.startswith("hb:"):
+            print(line)
+    if not ok:
+        # Show the last traceback if there is one, else the tail of the log.
+        tb = [i for i, l in enumerate(lines) if l.startswith("Traceback")]
+        print("\n".join(lines[tb[-1]:] if tb else lines[-40:]))
+        print(f"build: BUILD FAILED for {rel} (exit {proc.returncode}); full log {os.path.relpath(log_path, ROOT)}")
+        return False
+    print(f"build: built in {time.time() - t0:.1f} s; verifying")
+    v = subprocess.run([sys.executable, "-I", os.path.join(HERE, "verify_glb.py"), asset_dir], cwd=ROOT)
+    return v.returncode == 0
+
+
+def main(argv):
+    sys.stdout.reconfigure(line_buffering=True)   # our lines before the verifier's
+    args = argv[1:]
+    if any(a in ("-h", "--help") for a in args):
+        print(__doc__.strip())
+        return 0
+    preview = "--fast" not in args
+    names = [a for a in args if not a.startswith("--")]
+    unknown = [a for a in args if a.startswith("--") and a != "--fast"]
+    if unknown:
+        raise SystemExit(f"build: unknown option {unknown}")
+    blender = os.environ.get("HB_BLENDER") or shutil.which("blender") or "/usr/bin/blender"
+    dirs = [resolve(a) for a in names] if names else find_all()
+    if not dirs:
+        raise SystemExit("build: no assets found")
+    results = {os.path.relpath(d, ASSETS): build_one(d, blender, preview) for d in dirs}
+    print("\n######## summary")
+    for rel, ok in results.items():
+        print(f"  {'ok  ' if ok else 'FAIL'} {rel}")
+    return 0 if all(results.values()) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

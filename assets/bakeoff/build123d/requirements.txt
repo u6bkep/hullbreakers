@@ -1,9 +1,0 @@
-build123d==0.13.0
-cadquery-ocp-novtk==8.0.1.1.0
-numpy==2.5.4
-scipy==1.18.1
-pygltflib==1.16.5
-trimesh==5.1.1
-pyrender==0.1.45
-pyopengl==3.1.0
-pillow==12.2.0
