@@ -1,0 +1,19 @@
+{
+  "name": "carrier",
+  "kind": "ship",
+  "brief": "The enemy carrier of the boarding mission: 60 m, two decks, robot-crewed. Built on its collision layout (layout.json): every walkable surface and doorway matches the boxes. Boarded through the hangar door at the stern, fought forward to the shield console on the bridge at the bow. Industrial, machine-scaled: ribs and conduits overhead, bulkhead frames at doors, hazard-marked hangar door with edge lights, a green-screened bridge. Outside: blue-grey armour on a gunmetal hull, oxide-red jaw and accents, warm running lights and engine glow. No turrets or button (the game draws them).",
+  "palette": {
+    "paint_primary": "#6b7a87",
+    "paint_secondary": "#d2a52a",
+    "metal_dark": "#34383d",
+    "metal_bare": "#8e9297",
+    "polymer": "#7b3526",
+    "emissive": "#78ffa6",
+    "emissive_secondary": "#ffd9a6"
+  },
+  "expect": {
+    "size": {"x": [20.0, 20.6], "y": [8.7, 9.1], "z": [63.0, 64.0]},
+    "parts": ["exterior", "engines", "hangar", "ramp", "lower_deck", "upper_deck", "bridge", "console", "crates"],
+    "tolerance": 0.01
+  }
+}

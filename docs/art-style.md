@@ -71,6 +71,7 @@ asked for.
 | Prop, console, crate | 0.5k–3k | 5–20 mm | 1.5 m | 2 px = 3.8 mm | 1 |
 | Flora cluster | 1k–5k | (organic, none) | 2 m | 2 px = 5.1 mm | 1 |
 | Ship module | 5k–30k | 3–15 cm | 5 m | 2 px = 12.7 mm | 1 |
+| Whole ship, inside and out | 10k–25k | 1.5–6 cm | 1.5 m | 2 px = 3.8 mm | 1 |
 
 Bevels scale with the object: a bevel should read as a highlight from the
 distance the object is usually seen from. **Near** is the closest a kind is
@@ -88,6 +89,35 @@ not from a target:
 
 Props, flora and ship modules have no asset yet, so their budgets are
 unchanged; lower them when the first ones are measured.
+
+**Whole ships** were measured on the first one, the carrier (60 m, two decks, a
+hangar, a bridge, and nine rooms and corridors): 16,860 triangles, split into
+parts by region so the game can frustum-cull them:
+
+| exterior | engines | hangar | ramp | lower deck | upper deck | bridge | console | crates |
+|---|---|---|---|---|---|---|---|---|
+| 4,604 | 1,272 | 1,828 | 412 | 3,604 | 3,344 | 984 | 232 | 580 |
+
+The budget's top, 25k, is about 1.5x the carrier: room for a bigger ship or
+more dressed rooms, not a target. Where the carrier's triangles go: a deck's
+walls, floor and ceiling are about 600; the other 3k is its dressing (ribs and
+beams overhead, conduits, light fixtures, door frames, wall plates). Outside,
+its 60-odd bevelled armour plates are 2.6k of the 4.6k. Hazard stripes were the one
+surprise: with both colours as prisms, 22 cm wide, they were 2.1k of the
+hangar's 3.0k. A black backing plate with only the yellow stripes as prisms,
+30 cm wide, looks the same and brought the hangar to 1.8k (the ship from 19.1k
+to 17.1k). Under 10k, a ship this size is bare walls.
+
+A ship's **near is 1.5 m**, because its inside is seen from a step away; its
+outside is seen from 10–400 m. One kind can't serve both, so a ship finishes
+its parts differently: interior parts bevel 1.5 cm and leave small details
+unbevelled; exterior parts bevel 3–5 cm. Round parts give `segments`
+explicitly (the octagonal engine bells, hexagonal pipes): left to the 3.8 mm
+detail size, a 1.3 m nozzle would get over 40 segments to look round from
+1.5 m, where nobody sees it.
+
+A ship is drawn instead of its collision boxes, so its walkable surfaces are
+fixed by the layout, not by the builder; see "Ships" in assets.md.
 
 ## Spending triangles
 

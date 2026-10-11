@@ -72,7 +72,8 @@ impl HullKind {
     pub fn turret_mounts(self) -> [Vec3; 2] {
         match self {
             HullKind::Home => [Vec3::new(0.0, 4.6, -4.0), Vec3::new(0.0, -0.8, -6.0)],
-            HullKind::Carrier => [Vec3::new(0.0, 7.1, -8.0), Vec3::new(0.0, -0.8, 4.0)],
+            // On top of the dorsal spine (whose top is at y = 7.6).
+            HullKind::Carrier => [Vec3::new(0.0, 8.1, -8.0), Vec3::new(0.0, -0.8, 4.0)],
         }
     }
 
@@ -249,14 +250,16 @@ fn carrier_layout() -> Vec<HullBox> {
         span(v(-w - t, top, -30.0 - t), v(w + t, top + t, 30.0 + t)),
         span(v(-w - t, 0.0, -30.0), v(-w, top, 30.0)),
         span(v(w, 0.0, -30.0), v(w + t, top, 30.0)),
-        // The deck between, forward of the hangar.
-        span(v(-w, 3.0, -30.0), v(w, UPPER, 14.0)),
+        // The deck between, forward of the hangar (on under the hangar's
+        // bulkhead, to meet the ramp's landing).
+        span(v(-w, 3.0, -30.0), v(w, UPPER, 14.15)),
     ];
-    // Bow: a window slit across the bridge.
-    boxes.push(span(v(-w, 0.0, -30.0 - t), v(w, UPPER + 1.2, -30.0)));
-    boxes.push(span(v(-w, UPPER + 2.0, -30.0 - t), v(w, top, -30.0)));
+    // Bow: a window slit across the bridge. (Bow and stern walls run out to
+    // the outer skin, closing the corners.)
+    boxes.push(span(v(-w - t, 0.0, -30.0 - t), v(w + t, UPPER + 1.2, -30.0)));
+    boxes.push(span(v(-w - t, UPPER + 2.0, -30.0 - t), v(w + t, top, -30.0)));
     // Stern: the hangar door, 6 m wide and 2.8 m high.
-    boxes.extend(wall_across(30.0 + t / 2.0, (-w, w), (0.0, top), t, &[(-3.0, 3.0, 2.8)]));
+    boxes.extend(wall_across(30.0 + t / 2.0, (-w - t, w + t), (0.0, top), t, &[(-3.0, 3.0, 2.8)]));
     // Hangar's forward bulkhead: a door to the lower deck, and one to the
     // upper deck at the top of the ramp.
     boxes.extend(wall_across(14.0, (-w, w), (0.0, 3.0), t, &[(-1.0, 1.0, 2.4)]));
@@ -301,8 +304,9 @@ fn carrier_layout() -> Vec<HullBox> {
     boxes.extend([
         hull(v(-8.5, 3.0, 24.0), v(3.0, 3.0, 14.0)),
         hull(v(8.5, 3.0, 24.0), v(3.0, 3.0, 14.0)),
-        trim(v(-6.8, 3.0, 24.0), v(0.6, 0.6, 6.0)),
-        trim(v(6.8, 3.0, 24.0), v(0.6, 0.6, 6.0)),
+        // Pylons, from the hull's skin to the pods.
+        trim(v(-6.65, 3.0, 24.0), v(0.7, 0.6, 6.0)),
+        trim(v(6.65, 3.0, 24.0), v(0.7, 0.6, 6.0)),
         trim(v(0.0, top + t + 0.5, -2.0), v(3.0, 1.0, 30.0)),
     ]);
     for b in &mut boxes {

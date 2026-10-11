@@ -17,6 +17,7 @@
     "large_robot": {"doc": "Large robot (2-4 m)",              "tris": [3000, 8000], "bevel": [0.01, 0.03],   "default_bevel": 0.02, "near": 3.0, "detail_px": 2, "bevel_segments": 1},
     "prop":        {"doc": "Prop, console, crate",             "tris": [500, 3000],   "bevel": [0.005, 0.02],  "default_bevel": 0.01, "near": 1.5, "detail_px": 2, "bevel_segments": 1},
     "flora":       {"doc": "Flora cluster (organic, no bevel)", "tris": [1000, 5000], "bevel": [0.0, 0.0],     "default_bevel": 0.0, "near": 2.0, "detail_px": 2, "bevel_segments": 1},
-    "ship_module": {"doc": "Ship module",                      "tris": [5000, 30000], "bevel": [0.03, 0.15],   "default_bevel": 0.06, "near": 5.0, "detail_px": 2, "bevel_segments": 1}
+    "ship_module": {"doc": "Ship module",                      "tris": [5000, 30000], "bevel": [0.03, 0.15],   "default_bevel": 0.06, "near": 5.0, "detail_px": 2, "bevel_segments": 1},
+    "ship":        {"doc": "Whole ship, inside and out",       "tris": [10000, 25000], "bevel": [0.015, 0.06], "default_bevel": 0.02, "near": 1.5, "detail_px": 2, "bevel_segments": 1}
   }
 }

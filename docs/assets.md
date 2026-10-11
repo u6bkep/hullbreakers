@@ -27,7 +27,7 @@ tools/assets/
 ## Making an asset, end to end
 
 1. **Brief.** You need: what it is, its kind (`handheld`, `small_robot`, `large_robot`,
-   `prop`, `flora`, `ship_module`), rough size, the parts that move or swap, the sockets,
+   `prop`, `flora`, `ship_module`, `ship`), rough size, the parts that move or swap, the sockets,
    and a palette. If the brief names no palette, ask; don't default to orange and cyan.
 
 2. **`asset.json`, before modelling.** Write the expectations from the brief, not from
@@ -95,6 +95,35 @@ tools/assets/
    If a model is a black blob from the shadow side, fix its emissives or value contrast.
 
 7. **Commit** `asset.json`, `build.py`, `<name>.glb` and `<name>.intent.json` together.
+
+## Ships: built on a collision layout
+
+A ship's collision is boxes in code (`src/sim/ship.rs`); the game draws the ship's model
+(`HullKind::model`) *instead of* the boxes and still collides against the boxes. So the
+model is built on the boxes, not the other way round:
+
+- `cargo run --bin layout_dump -- <hull> > assets/ships/<hull>/layout.json` writes the
+  layout: boxes (centre, size, rotation, `hull` or `trim`), controls, turret mounts,
+  shield. It is generated; never edit it.
+- `build.py` reads `layout.json` and models the walls, floors and furniture on their
+  boxes, asserting the ones it models by hand, so a layout change fails the build
+  instead of drifting.
+- **Walkable surfaces match the boxes to 2 cm**, doorways are exactly the gaps. Inside,
+  details stand off a surface at most 3 cm below 2.3 m above a deck; overhead and
+  outside the hull they're free. Don't model turrets or buttons: the game draws them.
+- No `COL_` nodes (the verifier WARNs about that; the warning doesn't apply).
+- `python3 assets/ships/<hull>/check_layout.py` (needs numpy) ray-casts the `.glb`
+  against `layout.json`: a surface at every face a player can touch, nothing in the space
+  they move through, every doorway's measured opening, a lit fixture over each of the
+  game's ceiling lights. Deliberate deviations are listed in its `KNOWN`, with why.
+  It takes about 40 s.
+- The hb previews are auto-framed from outside. `render_views.py` beside the carrier
+  renders named views from inside and out, with point lights where the game's are:
+  `blender --background --factory-startup --python-exit-code 1 --python
+  assets/ships/carrier/render_views.py [-- view ...]`. The build clears `preview/`, so
+  run it after building.
+- Hull skins are split into an inner layer owned by the room it faces and an outer one
+  owned by `exterior`, so each side can have its own paint and part.
 
 ## The hb API
 
