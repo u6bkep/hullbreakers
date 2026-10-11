@@ -32,6 +32,8 @@ const STEP: f32 = 0.3;
 /// Within this of the floor, solid things don't count as in the way (a
 /// lip, the slope of a ramp under the walker's edge).
 const FOOT: f32 = 0.35;
+/// How far below a goal its floor may be (m): under a deck's height.
+const GOAL_DROP: f32 = 2.6;
 /// How far the floor between two linked places may stray from a straight
 /// line between them (m).
 const SMOOTH: f32 = 0.1;
@@ -220,6 +222,12 @@ impl NavGrid {
                     .collect()
             })
             .collect();
+        // Only both ways: a link one way only (its diagonal's side cells
+        // judged from one end's height) would make regions lie.
+        let both: Vec<Vec<u32>> = (0..grid.links.len())
+            .map(|n| grid.links[n].iter().copied().filter(|&m| grid.links[m as usize].contains(&(n as u32))).collect())
+            .collect();
+        grid.links = both;
         // Regions: who can reach whom.
         grid.region = vec![u32::MAX; grid.nodes.len()];
         let mut next = 0;
@@ -278,6 +286,13 @@ impl NavGrid {
     /// cell, or the nearest one about (it may stand closer to a wall than
     /// the grid allows).
     pub fn standing_on(&self, feet: Vec3) -> Option<u32> {
+        self.floor_under(feet, 1.0)
+    }
+
+    /// The place under `p` (at most `drop` below it, or a step above), in
+    /// its cell or the nearest one about.
+    fn floor_under(&self, p: Vec3, drop: f32) -> Option<u32> {
+        let feet = p;
         let (ci, ck) = self.cell_of(feet);
         let mut best: Option<(f32, u32)> = None;
         for r in 0..=4 {
@@ -289,7 +304,7 @@ impl NavGrid {
                     for &n in self.column(i, k) {
                         let p = self.point(n);
                         // A floor below the feet, or barely above them.
-                        if p.y > feet.y + STEP || p.y < feet.y - 1.0 {
+                        if p.y > feet.y + STEP || p.y < feet.y - drop {
                             continue;
                         }
                         let d = p.distance_squared(feet);
@@ -306,11 +321,36 @@ impl NavGrid {
         best.map(|(_, n)| n)
     }
 
-    /// The node in `region` nearest `p`, anywhere.
+    /// The node in `region` nearest `p`, anywhere: searched outward a ring
+    /// of cells at a time, until no further ring could hold a nearer one.
     fn nearest_in(&self, region: u32, p: Vec3) -> Option<u32> {
-        (0..self.nodes.len() as u32)
-            .filter(|&n| self.region[n as usize] == region)
-            .min_by(|&a, &b| self.point(a).distance_squared(p).total_cmp(&self.point(b).distance_squared(p)))
+        let (ci, ck) = self.cell_of(p);
+        let mut best: Option<(f32, u32)> = None;
+        let rings = self.size.0.max(self.size.1) + ci.abs().max(ck.abs());
+        for r in 0..=rings {
+            // Everything in ring r is at least (r − 1) cells away across.
+            if best.is_some_and(|(d, _)| ((r - 1) as f32 * CELL).powi(2) > d) {
+                break;
+            }
+            for k in ck - r..=ck + r {
+                // The ring's edge: whole rows top and bottom, the two ends
+                // between.
+                let edge = (k - ck).abs() == r;
+                let row: Vec<i32> = if edge { (ci - r..=ci + r).collect() } else { vec![ci - r, ci + r] };
+                for i in row {
+                    for &n in self.column(i, k) {
+                        if self.region[n as usize] != region {
+                            continue;
+                        }
+                        let d = self.point(n).distance_squared(p);
+                        if best.is_none_or(|(b, _)| d < b) {
+                            best = Some((d, n));
+                        }
+                    }
+                }
+            }
+        }
+        best.map(|(_, n)| n)
     }
 
     /// A path from where a walker stands (`feet`) toward `goal`, as points
@@ -321,8 +361,10 @@ impl NavGrid {
         let region = self.region[start as usize];
         // The goal's own place, if it's on one we can reach; otherwise the
         // nearest we can.
+        // (The goal may be a body's middle, or someone jetpacking: the floor
+        // under it, within a deck's height.)
         let end = self
-            .standing_on(goal)
+            .floor_under(goal, GOAL_DROP)
             .filter(|&n| self.region[n as usize] == region)
             .or_else(|| self.nearest_in(region, goal))?;
         let nodes = self.astar(start, end)?;

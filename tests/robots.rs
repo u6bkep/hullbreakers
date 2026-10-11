@@ -277,3 +277,33 @@ fn a_gunner_that_spots_the_crew_calls_the_others() {
     assert_eq!(world.get::<Brain>(spotter).unwrap().target, Some(me));
     assert_eq!(world.get::<Brain>(other).unwrap().target, Some(me), "not told");
 }
+
+#[test]
+fn a_gunner_that_loses_the_crew_searches_where_it_saw_them_then_goes_home() {
+    use hullbreakers::sim::bots::Brain;
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    let home_ship = ship(&mut app);
+    let me = crew(&mut app);
+    // Seen down the lower corridor, ahead of the Gunner...
+    app.world_mut().get_mut::<Player>(me).unwrap().mode = booted(carrier, Vec3::new(0.0, 0.01, -16.0), 0.0);
+    let post = Vec3::new(0.0, 0.0, -2.0);
+    let gunner = spawn_on(&mut app, carrier, Vec3::new(0.0, 0.01, -2.0), post, 0);
+    ticks(&mut app, 30);
+    assert_eq!(app.world().get::<Brain>(gunner).unwrap().target, Some(me));
+    // ...then gone, back aboard our own ship, far off: it can't know where.
+    app.world_mut().get_mut::<Player>(me).unwrap().mode = booted(home_ship, Vec3::new(0.0, 0.01, 5.0), 0.0);
+    let mut closest = f32::MAX;
+    let mut forgot = None;
+    for i in 0..60 * 30 {
+        ticks(&mut app, 1);
+        closest = closest.min(feet(&app, gunner).distance(Vec3::new(0.0, 0.0, -16.0)));
+        if forgot.is_none() && app.world().get::<Brain>(gunner).unwrap().target.is_none() {
+            forgot = Some(i);
+        }
+    }
+    assert!(closest < 2.0, "never went to look (closest {closest} m)");
+    assert!(forgot.is_some(), "never gave up");
+    let at = feet(&app, gunner);
+    assert!(Vec2::new(at.x - post.x, at.z - post.z).length() < 1.5, "not back at its post: at {at}");
+}

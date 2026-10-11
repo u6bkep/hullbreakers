@@ -149,6 +149,8 @@ pub struct Brain {
     /// since it last saw, heard, or was hit by it.
     lead: Option<Vec3>,
     since_lead: f32,
+    /// Seconds since it last saw its target.
+    since_seen: f32,
     /// Seconds spent looking about where the lead ran out.
     searching: f32,
     /// Seconds until it looks for a target again.
@@ -179,6 +181,7 @@ impl Brain {
             visible: false,
             lead: None,
             since_lead: 0.0,
+            since_seen: f32::INFINITY,
             searching: 0.0,
             rethink: 0.0,
             burst: 0.0,
@@ -359,6 +362,7 @@ pub fn think(
         // (sight lines cost a ray each).
         brain.rethink -= dt;
         brain.since_lead += dt;
+        brain.since_seen += dt;
         if brain.rethink <= 0.0 {
             brain.rethink = 0.3;
             let was_visible = brain.visible;
@@ -375,10 +379,11 @@ pub fn think(
                 });
             brain.visible = seen.is_some();
             if let Some((t, at)) = seen {
-                if !was_visible {
+                if !was_visible || brain.target != Some(t) {
                     sightings.push((position, t));
                 }
                 brain.target = Some(t);
+                brain.since_seen = 0.0;
                 // Strafe only to a side it would still see the target from.
                 let right = view * Vec3::X;
                 let side = if brain.strafe == 0.0 { 1.0 } else { brain.strafe };
@@ -394,7 +399,7 @@ pub fn think(
         }
         let target_at = brain.target.and_then(where_is);
         if let (Some(t), Some(at)) = (brain.target, target_at)
-            && (brain.visible || (brain.lead.is_some() && brain.since_lead < GLIMPSE))
+            && brain.since_seen < GLIMPSE
         {
             // In sight, or only just out of it: it saw where they went.
             brain.hear_of(t, to_home(at));
@@ -473,17 +478,44 @@ pub fn think(
                 // Walking a route: the grid of the ship underfoot, if that's
                 // its home (routes are in its home's frame).
                 let grid = (on == brain.home).then(|| hulls.get(on).ok()).flatten().map(|h| grids.get(h.0));
-                let walk = goal.and_then(|goal| {
-                    let grid = grid?;
-                    let stale = brain.route_goal.is_none_or(|g| g.distance(goal) > REPLAN_DISTANCE);
-                    brain.replan -= dt;
-                    if stale || brain.replan <= 0.0 {
-                        brain.route = grid.path(feet, goal).unwrap_or_default();
-                        brain.route_goal = Some(goal);
-                        brain.replan = REPLAN_SECONDS + brain.seed.fract() * 0.5;
+                let walk = match goal {
+                    None => {
+                        // Fighting where it stands: the route is history.
+                        brain.route.clear();
+                        brain.route_goal = None;
+                        Walk::Arrived
                     }
-                    Some(follow(grid, &mut brain.route, feet))
-                });
+                    Some(goal) => {
+                        let route = grid.and_then(|grid| {
+                            let stale = brain.route_goal.is_none_or(|g| g.distance(goal) > REPLAN_DISTANCE);
+                            brain.replan -= dt;
+                            if stale || brain.replan <= 0.0 {
+                                brain.route = grid.path(feet, goal).unwrap_or_default();
+                                brain.route_goal = Some(goal);
+                                brain.replan = REPLAN_SECONDS + brain.seed.fract() * 0.5;
+                            }
+                            // No route at all: off the grid, or nowhere it
+                            // can reach.
+                            (!brain.route.is_empty() || at_goal(feet, goal)).then(|| follow(grid, &mut brain.route, feet))
+                        });
+                        match route {
+                            Some(Some(dir)) => Walk::Toward(dir),
+                            Some(None) => Walk::Arrived,
+                            // Without a route, straight at it, as far as
+                            // nothing's in the way.
+                            None => {
+                                let local = frame.map_or(goal, |f| f.point_to_local(to_world(goal)));
+                                let dir = Vec3::new(local.x - feet.x, 0.0, local.z - feet.z);
+                                let world = frame.map_or(dir, |f| f.rotation * dir);
+                                if at_goal(feet, local) || blocked(world) {
+                                    Walk::Arrived
+                                } else {
+                                    Walk::Toward(dir.normalize_or_zero())
+                                }
+                            }
+                        }
+                    }
+                };
                 // A local walking direction as input, in the body's own
                 // frame (x right, z forward).
                 let to_input = |dir: Vec3| {
@@ -492,7 +524,7 @@ pub fn think(
                 };
                 match (aiming, walk) {
                     // Closing on a target in sight: walk the route, gun on it.
-                    (Some(_), Some(Some(dir))) => to_input(dir),
+                    (Some(_), Walk::Toward(dir)) => to_input(dir),
                     (Some(at), _) => {
                         // Fighting: keep within range, strafing; walking into
                         // a wall climbs it, so a robot keeps off walls (and
@@ -516,7 +548,7 @@ pub fn think(
                         Vec3::new(strafe, 0.0, advance)
                     }
                     // Going somewhere: face the way it's walking.
-                    (None, Some(Some(dir))) => {
+                    (None, Walk::Toward(dir)) => {
                         let world = frame.map_or(dir, |f| f.rotation * dir);
                         input.add_look(turn(look_toward(body, pitch, world)));
                         input.sprint = brain.lead.is_some();
@@ -541,9 +573,9 @@ pub fn think(
                     }
                     None => goal.map(to_world),
                 };
-                match goal {
-                    Some(goal) if goal.distance(position) > ARRIVED_EVA => {
-                        let dir = steer_clear(&spatial, entity, position, goal - position);
+                let heading = goal.filter(|g| g.distance(position) > ARRIVED_EVA).and_then(|goal| steer_clear(&spatial, entity, position, goal));
+                match heading {
+                    Some(dir) => {
                         if aiming.is_none() {
                             input.add_look(turn(look_toward(body, pitch, dir)));
                         }
@@ -563,7 +595,7 @@ pub fn think(
     for (from, target) in sightings {
         let Some(at) = where_is(target) else { continue };
         for (entity, _, mut brain, _) in &mut robots {
-            if brain.visible || brain.since_lead < 1.0 && brain.lead.is_some() {
+            if brain.visible || brain.lead.is_some() && brain.since_lead < 1.0 {
                 continue;
             }
             if where_is(entity).is_some_and(|p| p.distance(from) < CALL_RANGE) {
@@ -588,17 +620,38 @@ fn follow(grid: &NavGrid, route: &mut Vec<Vec3>, feet: Vec3) -> Option<Vec3> {
     dir.try_normalize()
 }
 
-/// A flyer heading along `dir` from `from`, turned aside from anything in
-/// the way: along its surface, and away from it the closer it is.
-fn steer_clear(spatial: &SpatialQuery, me: Entity, from: Vec3, dir: Vec3) -> Vec3 {
-    let Ok(d) = Dir3::new(dir) else { return Vec3::ZERO };
+/// Which way a flyer at `from` should head for `goal`, turned aside from
+/// anything in the way: along its surface (or round it, met head on), and
+/// away from it the closer it is. `None` when what's in the way is right in
+/// front of the goal (it's inside a hull, say): that's as near as it gets.
+fn steer_clear(spatial: &SpatialQuery, me: Entity, from: Vec3, goal: Vec3) -> Option<Vec3> {
+    let d = Dir3::new(goal - from).ok()?;
     let filter = SpatialQueryFilter::from_mask(Layer::World).with_excluded_entities([me]);
     let Some(hit) = spatial.cast_ray(from, d, AVOID_RANGE, true, &filter) else {
-        return *d;
+        return Some(*d);
     };
-    let n = hit.normal;
-    let along = *d - n * d.dot(n).min(0.0);
-    (along.normalize_or_zero() + n * (1.0 - hit.distance / AVOID_RANGE)).normalize_or_zero()
+    let n = Vec3::from(hit.normal).normalize_or(-*d);
+    let beyond = from.distance(goal) - hit.distance;
+    if beyond > 0.0 && beyond < BEHIND_SURFACE {
+        return None;
+    }
+    let mut along = *d - n * d.dot(n).min(0.0);
+    if along.length() < 0.3 {
+        // Head on: round it, either way.
+        along = n.cross(Vec3::Y).try_normalize().unwrap_or_else(|| n.any_orthonormal_vector());
+    }
+    Some((along.normalize_or_zero() + n * (1.0 - hit.distance / AVOID_RANGE)).normalize_or_zero())
+}
+
+/// Whether a walker at `feet` is at `goal` (m, across the deck).
+fn at_goal(feet: Vec3, goal: Vec3) -> bool {
+    Vec2::new(goal.x - feet.x, goal.z - feet.z).length() < 1.0
+}
+
+/// What walking a route comes to this tick.
+enum Walk {
+    Toward(Vec3),
+    Arrived,
 }
 
 /// Weak spot centres (see [`Robot::weak_spot`]): the Gunner's backpack
@@ -657,6 +710,9 @@ const REPLAN_DISTANCE: f32 = 1.5;
 /// for things in its way.
 const ARRIVED_EVA: f32 = 3.0;
 const AVOID_RANGE: f32 = 6.0;
+/// A flyer's goal less than this behind the surface in its way is as
+/// reached as it can be (m).
+const BEHIND_SURFACE: f32 = 12.0;
 
 /// A world direction as jetpack input (x right, y up, z forward in the
 /// view), full strength.
