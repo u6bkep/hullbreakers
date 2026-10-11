@@ -1,0 +1,27 @@
+{
+  "name": "suit",
+  "kind": "large_robot",
+  "brief": "Crew hardsuit, third person: a human in practical worn-in EVA work gear, 1.78-1.85 m, helmet with a visor that shows where it looks, soft-joint suit segments, mag boots, a backpack housing the EVA thrusters and the grapple reel. Rigid parts pivoted at their joints like the Gunner, standing in a low-ready carry with a closed fist round a pistol grip in each hand. paint_secondary is the per-player identity colour on the shoulders, helmet crest and backpack. Bone-white shell, charcoal soft suit, quiet lime status lights, warm white visor rim and headlamp.",
+  "palette": {
+    "paint_primary": "#d6d1c4",
+    "paint_secondary": "#3b74d9",
+    "polymer": "#34383e",
+    "glass": "#d9a84e",
+    "emissive": "#ffeccc",
+    "emissive_secondary": "#b6ff5a"
+  },
+  "expect": {
+    "size": {"x": [0.45, 0.75], "y": [1.78, 1.85], "z": [0.5, 0.75]},
+    "parts": ["pelvis", "torso", "head", "backpack",
+              "upper_arm_l", "forearm_l", "hand_l", "upper_arm_r", "forearm_r", "hand_r",
+              "thigh_l", "shin_l", "foot_l", "thigh_r", "shin_r", "foot_r"],
+    "colliders": ["COL_torso", "COL_head", "COL_pelvis"],
+    "sockets": {
+      "SOCKET_eye":       {"at": [0, 1.62, -0.10], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.02},
+      "SOCKET_headlamp":  {"forward": [0, 0, -1]},
+      "SOCKET_hand_r":    {"at": [0.2, 1.1, -0.34], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.06},
+      "SOCKET_hand_l":    {"at": [-0.2, 1.1, -0.34], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.06}
+    },
+    "tolerance": 0.01
+  }
+}

@@ -338,7 +338,7 @@ pub fn spawn_player(
 }
 
 /// Which spot on the deck a player comes aboard at.
-#[derive(Component, Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeckSlot(pub u32);
 
 /// Standing on `ship`'s deck at spot `slot`. Players are spread across the

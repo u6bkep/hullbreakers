@@ -6,6 +6,7 @@ pub mod animate;
 pub mod bindings;
 pub mod camera;
 pub mod combat_fx;
+pub mod crew;
 pub mod debug_shots;
 pub mod events;
 pub mod gallery;
@@ -96,8 +97,9 @@ impl Plugin for ClientPlugin {
                 (
                     render::update_avatars,
                     render::draw_pickups,
-                    animate::rig_robots,
-                    animate::animate_robots,
+                    crew::dress_crew,
+                    animate::rig_avatars,
+                    animate::animate_avatars,
                     camera::update_camera,
                     viewmodel::pose_view_hands,
                     viewmodel::dress_view_hands,

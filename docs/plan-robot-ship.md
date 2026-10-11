@@ -54,6 +54,11 @@ a doorway but not round a corner.
    - It replaces the raider in the boarding scenario.
 5. **Models.** Gunner, Swarmer, the SMG and rifle as held items, and carrier
    modules, built by agents through the asset pipeline ([assets.md](assets.md)).
+   Done: Gunner, Swarmer, SMG, rifle, grapple launcher, the carrier, the crew
+   suit (crewmates, coloured by deck slot) and first-person arms. Held items
+   show in first person (`client/viewmodel.rs`) and in crewmates' hands.
+   Robots path aboard ships over a grid baked from the hull (`sim/nav.rs`),
+   and learn of the crew by sight, gunfire, hits and each other's calls.
 
 Each stage ends playable and tested before the next starts.
 

@@ -1,0 +1,20 @@
+{
+  "name": "arms_fp",
+  "kind": "handheld",
+  "brief": "The player's own suit arms in first person, seen only from the eye, holding things: two independent arms, each a gloved fist closed round a pistol grip (index on the trigger) plus forearm and suit cuff, built with its grip point at the origin. The forearm runs back about 0.35 m, dropping and angled outward. Same materials and palette as crew/suit, paint_secondary (player identity) included; a subtle wrist display on each cuff.",
+  "palette": {
+    "paint_primary": "#d6d1c4",
+    "paint_secondary": "#3b74d9",
+    "polymer": "#34383e",
+    "emissive_secondary": "#b6ff5a"
+  },
+  "expect": {
+    "size": {"x": [0.18, 0.32], "y": [0.14, 0.26], "z": [0.38, 0.5]},
+    "parts": ["arm_r", "arm_l"],
+    "sockets": {
+      "SOCKET_grip_r": {"at": [0, 0, 0], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.001},
+      "SOCKET_grip_l": {"at": [0, 0, 0], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.001}
+    },
+    "tolerance": 0.01
+  }
+}

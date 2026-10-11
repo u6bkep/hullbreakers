@@ -267,6 +267,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
         app.component::<Robot>().replicate_once();
+        app.component::<DeckSlot>().replicate_once();
         app.component::<Pickup>().replicate();
         app.component::<Flight>().replicate();
         app.component::<Combatant>().replicate();

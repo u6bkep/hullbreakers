@@ -504,16 +504,14 @@ pub struct Avatar {
     pub player: Entity,
 }
 
-/// Keeps a capsule (with a visor showing where they look) on every other
-/// player, placed in the rendered frame of the body they stand on.
+/// Keeps a model (a robot's, or the crew suit) on every other player,
+/// placed in the rendered frame of the body they stand on.
 pub fn update_avatars(
     base: Res<Tuning>,
     assets: Res<AssetServer>,
     players: Query<(Entity, &Player, Option<&Robot>, Option<&BodyTuning>), Without<LocalPlayer>>,
     mut avatars: Query<(Entity, &Avatar, &mut Transform)>,
     transforms: Query<&Transform, Without<Avatar>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ) {
     let pose = |player: &Player, own: Option<&BodyTuning>| -> Option<Transform> {
@@ -573,30 +571,20 @@ pub fn update_avatars(
                 ));
             continue;
         }
-        let suit = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.85, 0.85, 0.8),
-            perceptual_roughness: 0.6,
-            ..default()
-        });
-        let visor = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.9, 0.6, 0.1),
-            emissive: LinearRgba::rgb(0.6, 0.35, 0.05),
-            ..default()
-        });
-        let length = (tuning.capsule_height - 2.0 * tuning.capsule_radius).max(0.01);
+        // The crew suit, its origin at its feet; the headlamp moves onto
+        // its helmet once it's in (see `crew::dress_crew`).
         let eye = tuning.eye_height - tuning.capsule_height / 2.0;
         commands
             .spawn((
-                Name::new("Avatar"),
+                Name::new("Crewmate"),
                 Avatar { player: entity },
-                Mesh3d(meshes.add(Capsule3d::new(tuning.capsule_radius, length))),
-                MeshMaterial3d(suit),
+                super::crew::CrewLook::default(),
                 pose,
+                Visibility::default(),
             ))
             .with_child((
-                Mesh3d(meshes.add(Cuboid::new(0.4, 0.15, 0.1))),
-                MeshMaterial3d(visor),
-                Transform::from_xyz(0.0, eye, -tuning.capsule_radius),
+                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(super::crew::SUIT))),
+                Transform::from_xyz(0.0, -tuning.capsule_height / 2.0, 0.0),
             ))
             .with_child((
                 super::camera::headlamp(false),

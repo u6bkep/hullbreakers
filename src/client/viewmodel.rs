@@ -21,7 +21,7 @@ use crate::sim::weapons::{GunKind, Hand, SWITCH_SECONDS, Slot};
 
 /// What a hand shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Held {
+pub enum Held {
     Gun(GunKind),
     Grapple,
     /// The glove alone, on the foregrip of the rifle the other hand holds.
@@ -29,7 +29,7 @@ enum Held {
 }
 
 impl Held {
-    fn model(self) -> Option<&'static str> {
+    pub fn model(self) -> Option<&'static str> {
         match self {
             Held::Gun(GunKind::Smg) => Some("weapons/smg_frame/smg_frame.glb"),
             Held::Gun(GunKind::Rifle) => Some("weapons/rifle/rifle.glb"),
@@ -104,7 +104,7 @@ pub fn spawn_view_hands(add: On<Add, PlayerCamera>, mut commands: Commands) {
 }
 
 /// What each hand holds, from the stance (a gun not carried shows nothing).
-fn held(player: &Player) -> [Option<Held>; 2] {
+pub fn held(player: &Player) -> [Option<Held>; 2] {
     let loadout = &player.loadout;
     let stance = loadout.stances[loadout.current as usize];
     let item = |slot: Slot| match slot {
