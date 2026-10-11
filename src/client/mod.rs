@@ -53,7 +53,6 @@ impl Plugin for ClientPlugin {
             .add_message::<events::Presented>()
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
-            .add_observer(render::attach_control_caps)
             .add_observer(render::add_ship_lights)
             .add_systems(PreStartup, render::setup_materials)
             .add_systems(
