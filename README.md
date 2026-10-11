@@ -1,14 +1,14 @@
 # Hullbreakers
 
-First-person co-op boarding-combat roguelite, early days (provisional name; the crate is still `space_game`). Bevy 0.19 + Avian 0.7.
+First-person co-op boarding-combat roguelite, early days (provisional name). Bevy 0.19 + Avian 0.7.
 
 ```
 cargo run                                # host a game and play (UDP port 5888)
 cargo run -- --connect 192.168.1.20      # join a host (HOST[:PORT])
 cargo run -- --server [--port 5888]      # dedicated headless server
 cargo test                               # movement, client-world and netplay tests
-SPACE_GAME_SHOTS=dir cargo run           # scripted screenshot tour, then exit
-SPACE_GAME_SCENARIO=boarding cargo run   # host straight into a scenario
+HULLBREAKERS_SHOTS=dir cargo run           # scripted screenshot tour, then exit
+HULLBREAKERS_SCENARIO=boarding cargo run   # host straight into a scenario
 ```
 
 ## Scenarios
@@ -53,7 +53,7 @@ Games launched by `tools/hl` play into an ALSA null device, not your speakers.
 Run `tools/hl game` again (e.g. `tools/hl game --connect 127.0.0.1`) for more
 instances; sway tiles them side by side (`tools/hl start 2560x720` gives each
 a 1280-wide half). `tools/hl focus <title>` picks which one gets input; the
-client's title is `space-game — HOST:PORT`.
+client's title is `Hullbreakers — HOST:PORT`.
 
 ## Controls
 
@@ -112,7 +112,7 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   is) against bodies posed at the same tick from their motion, and rolls
   back when the server's state differs beyond tolerance (`player_diverged`).
   The camera blends over corrections (`ViewCorrection`). Other players are
-  interpolated. `SPACE_GAME_LAG=ms[,loss%]` simulates a bad link on a client;
+  interpolated. `HULLBREAKERS_LAG=ms[,loss%]` simulates a bad link on a client;
   clients log their rollback rate every 10 s.
 - **Netplay tests** (`tests/netplay.rs`) run a server and a client in one
   process over loopback UDP with 100 ms simulated latency, on lightyear's

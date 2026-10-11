@@ -475,9 +475,9 @@ pub struct SimulatedLag {
 }
 
 impl SimulatedLag {
-    /// From `SPACE_GAME_LAG=ms[,loss%]`.
+    /// From `HULLBREAKERS_LAG=ms[,loss%]`.
     pub fn from_env() -> Option<Self> {
-        let spec = std::env::var("SPACE_GAME_LAG").ok()?;
+        let spec = std::env::var("HULLBREAKERS_LAG").ok()?;
         let mut parts = spec.split(',');
         Some(Self {
             latency_ms: parts.next()?.trim().parse().ok()?,

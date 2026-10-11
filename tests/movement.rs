@@ -5,12 +5,12 @@ use std::time::Duration;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use space_game::sim::SimPlugin;
-use space_game::sim::frame::BodyFrame;
-use space_game::sim::input::PlayerInput;
-use space_game::sim::player::{Mode, Player};
-use space_game::sim::ship::{HomeShip, ShipCommand};
-use space_game::sim::tuning::Tuning;
+use hullbreakers::sim::SimPlugin;
+use hullbreakers::sim::frame::BodyFrame;
+use hullbreakers::sim::input::PlayerInput;
+use hullbreakers::sim::player::{Mode, Player};
+use hullbreakers::sim::ship::{HomeShip, ShipCommand};
+use hullbreakers::sim::tuning::Tuning;
 
 fn app_with(tuning: Tuning) -> App {
     app_configured(tuning, false)
@@ -360,14 +360,14 @@ fn spawn_rock(app: &mut App, position: Vec3, radius: f32, angular: Vec3) -> Enti
     let rock = app
         .world_mut()
         .spawn((
-            space_game::sim::bodies::dynamic_mass(
+            hullbreakers::sim::bodies::dynamic_mass(
                 &Collider::sphere(radius),
-                space_game::sim::asteroids::ROCK_DENSITY,
+                hullbreakers::sim::asteroids::ROCK_DENSITY,
             ),
             Collider::sphere(radius),
             RigidBody::Dynamic,
             SleepingDisabled,
-            space_game::sim::bodies::PreviousVelocity::default(),
+            hullbreakers::sim::bodies::PreviousVelocity::default(),
             AngularVelocity(angular),
             Transform::from_translation(position),
         ))
@@ -616,7 +616,7 @@ fn relative_velocity(app: &mut App) -> Vec3 {
     let matched = app
         .world_mut()
         .run_system_once(
-            move |bodies: space_game::sim::bodies::Bodies, t: Res<Tuning>| {
+            move |bodies: hullbreakers::sim::bodies::Bodies, t: Res<Tuning>| {
                 bodies
                     .matched_velocity(ship, position, t.match_surface_near, t.match_surface_far)
                     .unwrap()
@@ -680,7 +680,7 @@ fn without_assist_momentum_is_kept() {
 
 #[test]
 fn riding_a_rock_out_of_the_field_keeps_rock_and_field_around_you() {
-    use space_game::sim::asteroids::Asteroid;
+    use hullbreakers::sim::asteroids::Asteroid;
     let mut app = app_configured(Tuning::default(), true);
     let (rock, radius) = {
         let w = app.world_mut();
@@ -884,14 +884,14 @@ fn walk_faceted_rock(tuning: Tuning) -> (f32, f32) {
     let rock = app
         .world_mut()
         .spawn((
-            space_game::sim::bodies::dynamic_mass(
-                &space_game::sim::asteroids::asteroid_collider(7, 6.0),
-                space_game::sim::asteroids::ROCK_DENSITY,
+            hullbreakers::sim::bodies::dynamic_mass(
+                &hullbreakers::sim::asteroids::asteroid_collider(7, 6.0),
+                hullbreakers::sim::asteroids::ROCK_DENSITY,
             ),
-            space_game::sim::asteroids::asteroid_collider(7, 6.0),
+            hullbreakers::sim::asteroids::asteroid_collider(7, 6.0),
             RigidBody::Dynamic,
             SleepingDisabled,
-            space_game::sim::bodies::PreviousVelocity::default(),
+            hullbreakers::sim::bodies::PreviousVelocity::default(),
             Transform::from_translation(Vec3::new(0.0, 0.0, 80.0)),
         ))
         .id();
@@ -993,7 +993,7 @@ fn a_press_acts_once_however_often_the_input_is_read() {
     let toggles = player(&mut app)
         .events
         .iter()
-        .filter(|(_, e)| matches!(e, space_game::sim::events::PlayerEvent::BootsToggled(_)))
+        .filter(|(_, e)| matches!(e, hullbreakers::sim::events::PlayerEvent::BootsToggled(_)))
         .count();
     assert_eq!(toggles, 1);
     assert!(!player(&mut app).boots_on);
@@ -1004,18 +1004,18 @@ fn a_press_acts_once_however_often_the_input_is_read() {
 /// it. This is what makes extrapolated replication cheap.
 #[test]
 fn free_rock_follows_its_sampled_motion() {
-    use space_game::sim::SimTick;
-    use space_game::sim::bodies::BodyInertia;
-    use space_game::sim::frame::BodyFrame;
-    use space_game::sim::motion::Motion;
+    use hullbreakers::sim::SimTick;
+    use hullbreakers::sim::bodies::BodyInertia;
+    use hullbreakers::sim::frame::BodyFrame;
+    use hullbreakers::sim::motion::Motion;
     let mut app = app();
-    let collider = space_game::sim::asteroids::asteroid_collider(11, 8.0);
+    let collider = hullbreakers::sim::asteroids::asteroid_collider(11, 8.0);
     let rock = app
         .world_mut()
         .spawn((
-            space_game::sim::bodies::dynamic_mass(
+            hullbreakers::sim::bodies::dynamic_mass(
                 &collider,
-                space_game::sim::asteroids::ROCK_DENSITY,
+                hullbreakers::sim::asteroids::ROCK_DENSITY,
             ),
             collider,
             RigidBody::Dynamic,

@@ -13,12 +13,12 @@ use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use lightyear::prelude::*;
 use mock_instant::global::MockClock;
-use space_game::net::{
+use hullbreakers::net::{
     LocalInput, LocalPlayer, NetMode, NetPlugin, SimulatedLag, add_headless_plugins,
 };
-use space_game::sim::asteroids::Asteroid;
-use space_game::sim::player::{Mode, Player};
-use space_game::sim::ship::HomeShip;
+use hullbreakers::sim::asteroids::Asteroid;
+use hullbreakers::sim::player::{Mode, Player};
+use hullbreakers::sim::ship::HomeShip;
 
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
@@ -145,7 +145,7 @@ impl Session {
                 Asteroid { radius, seed: 7 },
                 RigidBody::Dynamic,
                 SleepingDisabled,
-                space_game::sim::bodies::PreviousVelocity::default(),
+                hullbreakers::sim::bodies::PreviousVelocity::default(),
                 Position(position),
                 Rotation::default(),
             ))
@@ -275,8 +275,8 @@ fn forced_rollbacks_change_nothing() {
 /// has it.
 #[test]
 fn standing_on_a_duelling_ship_is_predicted() {
-    use space_game::sim::flight::Flight;
-    use space_game::sim::mission::{Director, ScenarioKind};
+    use hullbreakers::sim::flight::Flight;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
     let (_guard, mut s) = session(100);
     s.server
         .world_mut()

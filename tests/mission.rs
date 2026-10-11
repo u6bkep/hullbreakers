@@ -5,15 +5,15 @@ use std::time::Duration;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use space_game::sim::SimPlugin;
-use space_game::sim::combat::{Beams, Combatant};
-use space_game::sim::events::{Detach, PlayerEvent};
-use space_game::sim::flight::Flight;
-use space_game::sim::input::PlayerInput;
-use space_game::sim::mission::{Debris, Mission, Phase, ScenarioKind};
-use space_game::sim::player::{Mode, Player};
-use space_game::sim::ship::{HomeShip, HullKind, ShipHull};
-use space_game::sim::tuning::Tuning;
+use hullbreakers::sim::SimPlugin;
+use hullbreakers::sim::combat::{Beams, Combatant};
+use hullbreakers::sim::events::{Detach, PlayerEvent};
+use hullbreakers::sim::flight::Flight;
+use hullbreakers::sim::input::PlayerInput;
+use hullbreakers::sim::mission::{Debris, Mission, Phase, ScenarioKind};
+use hullbreakers::sim::player::{Mode, Player};
+use hullbreakers::sim::ship::{HomeShip, HullKind, ShipHull};
+use hullbreakers::sim::tuning::Tuning;
 
 fn app() -> App {
     let mut app = App::new();
@@ -261,7 +261,7 @@ fn a_beam_shoves_a_player_out_of_its_way() {
     assert_eq!(hits, 1, "one crossing, one hit");
 }
 
-fn frame(app: &mut App, ship: Entity) -> space_game::sim::frame::BodyFrame {
+fn frame(app: &mut App, ship: Entity) -> hullbreakers::sim::frame::BodyFrame {
     let world = app.world();
     let (p, r, v, w) = (
         world.get::<Position>(ship).unwrap().0,
@@ -269,7 +269,7 @@ fn frame(app: &mut App, ship: Entity) -> space_game::sim::frame::BodyFrame {
         world.get::<LinearVelocity>(ship).unwrap().0,
         world.get::<AngularVelocity>(ship).unwrap().0,
     );
-    space_game::sim::frame::BodyFrame {
+    hullbreakers::sim::frame::BodyFrame {
         position: p,
         rotation: r,
         center_of_mass: p,

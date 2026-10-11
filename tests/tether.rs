@@ -5,12 +5,12 @@ use std::time::Duration;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use space_game::sim::SimPlugin;
-use space_game::sim::events::{Detach, PlayerEvent};
-use space_game::sim::input::PlayerInput;
-use space_game::sim::player::{Mode, Player, new_player};
-use space_game::sim::ship::HomeShip;
-use space_game::sim::tuning::Tuning;
+use hullbreakers::sim::SimPlugin;
+use hullbreakers::sim::events::{Detach, PlayerEvent};
+use hullbreakers::sim::input::PlayerInput;
+use hullbreakers::sim::player::{Mode, Player, new_player};
+use hullbreakers::sim::ship::HomeShip;
+use hullbreakers::sim::tuning::Tuning;
 
 /// A ship, the default player (A), and a second player (B).
 fn two_players() -> (App, Entity, Entity) {

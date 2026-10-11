@@ -4,7 +4,7 @@
 # user's seat: no DRM master, no libinput, its own Wayland socket.
 #
 #   tools/hl start [WxH]        start headless sway (default 1280x720)
-#   tools/hl game [args...]     launch target/debug/space_game inside it (again for
+#   tools/hl game [args...]     launch target/debug/hullbreakers inside it (again for
 #                               more instances; they tile side by side; logs game-N.log)
 #   tools/hl focus <title>      focus the window whose title contains <title>
 #   tools/hl key <keys...>      tap keys (w a s d q e f v x r t l space tab shift ctrl esc 0-9)
@@ -74,7 +74,7 @@ game)
     n=$(grep -c '^GAME_PID' "$STATE/env" || true)
     log="$STATE/game.log"
     [[ "$n" -gt 0 ]] && log="$STATE/game-$((n + 1)).log"
-    windows() { swaymsg -s "$SWAYSOCK" -t get_tree | grep -c '"name": "space-game' || true; }
+    windows() { swaymsg -s "$SWAYSOCK" -t get_tree | grep -c '"name": "Hullbreakers' || true; }
     before=$(windows)
     (
         unset DISPLAY
@@ -83,7 +83,7 @@ game)
         printf 'pcm.!default { type null }\nctl.!default { type hw card 0 }\n' >"$STATE/asound.conf"
         export ALSA_CONFIG_PATH="/usr/share/alsa/alsa.conf:$STATE/asound.conf"
         cd "$ROOT"
-        exec ./target/debug/space_game "$@" >"$log" 2>&1
+        exec ./target/debug/hullbreakers "$@" >"$log" 2>&1
     ) &
     echo "GAME_PID=$!" >>"$STATE/env"
     # Wait for the window to map.

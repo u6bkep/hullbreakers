@@ -4107,6 +4107,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "hullbreakers"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bevy",
+ "bevy_egui",
+ "lightyear",
+ "lightyear_core",
+ "mock_instant",
+ "noise",
+ "rand 0.9.5",
+ "rand_chacha",
+ "ron 0.10.1",
+ "serde",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7732,23 +7749,6 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "space_game"
-version = "0.1.0"
-dependencies = [
- "avian3d",
- "bevy",
- "bevy_egui",
- "lightyear",
- "lightyear_core",
- "mock_instant",
- "noise",
- "rand 0.9.5",
- "rand_chacha",
- "ron 0.10.1",
- "serde",
 ]
 
 [[package]]

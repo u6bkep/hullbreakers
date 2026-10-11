@@ -1,28 +1,28 @@
-//! space-game
+//! Hullbreakers
 //!
 //! ```text
-//! space_game                     host a game and play (listen server)
-//! space_game --connect HOST[:PORT]   join a game
-//! space_game --server            host without playing (headless)
-//! space_game --port PORT         port to host on (default 5888)
+//! hullbreakers                     host a game and play (listen server)
+//! hullbreakers --connect HOST[:PORT]   join a game
+//! hullbreakers --server            host without playing (headless)
+//! hullbreakers --port PORT         port to host on (default 5888)
 //! ```
 //!
-//! `SPACE_GAME_SCENARIO=boarding` starts a host in the boarding action
+//! `HULLBREAKERS_SCENARIO=boarding` starts a host in the boarding action
 //! rather than the asteroid field.
 
 use std::net::{SocketAddr, ToSocketAddrs};
 use core::time::Duration;
 
 use bevy::prelude::*;
-use space_game::client::ClientPlugin;
-use space_game::sim::mission::{Director, ScenarioKind};
-use space_game::net::{DEFAULT_PORT, NetMode, NetPlugin, SimulatedLag, add_headless_plugins};
+use hullbreakers::client::ClientPlugin;
+use hullbreakers::sim::mission::{Director, ScenarioKind};
+use hullbreakers::net::{DEFAULT_PORT, NetMode, NetPlugin, SimulatedLag, add_headless_plugins};
 
 fn main() {
     let mode = match parse_args(std::env::args().skip(1)) {
         Ok(mode) => mode,
         Err(err) => {
-            eprintln!("space_game: {err}");
+            eprintln!("hullbreakers: {err}");
             std::process::exit(2);
         }
     };
@@ -32,8 +32,8 @@ fn main() {
         app.add_plugins(bevy::log::LogPlugin::default());
     } else {
         let title = match mode {
-            NetMode::Client { server } => format!("space-game — {server}"),
-            _ => "space-game".into(),
+            NetMode::Client { server } => format!("Hullbreakers — {server}"),
+            _ => "Hullbreakers".into(),
         };
         app.add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -47,13 +47,13 @@ fn main() {
         mode,
         lag: SimulatedLag::from_env(),
     });
-    // `SPACE_GAME_SCENARIO=boarding`: start there instead of the field.
-    if let Ok(name) = std::env::var("SPACE_GAME_SCENARIO") {
+    // `HULLBREAKERS_SCENARIO=boarding`: start there instead of the field.
+    if let Ok(name) = std::env::var("HULLBREAKERS_SCENARIO") {
         let kind = match name.as_str() {
             "field" => ScenarioKind::Field,
             "boarding" => ScenarioKind::Boarding,
             other => {
-                eprintln!("space_game: unknown scenario {other:?} (field, boarding)");
+                eprintln!("hullbreakers: unknown scenario {other:?} (field, boarding)");
                 std::process::exit(2);
             }
         };

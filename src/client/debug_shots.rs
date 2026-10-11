@@ -1,6 +1,6 @@
 //! Scripted screenshots for checking visuals without a human at the controls.
 //!
-//! `SPACE_GAME_SHOTS=<dir> cargo run` teleports the player through a few
+//! `HULLBREAKERS_SHOTS=<dir> cargo run` teleports the player through a few
 //! vantage points, saves a screenshot at each, then exits.
 
 use bevy::prelude::*;
@@ -20,7 +20,7 @@ pub struct ShotScript {
 }
 
 pub fn shot_script_from_env() -> Option<ShotScript> {
-    let dir = std::env::var_os("SPACE_GAME_SHOTS")?;
+    let dir = std::env::var_os("HULLBREAKERS_SHOTS")?;
     Some(ShotScript {
         dir: dir.into(),
         next: 0,
