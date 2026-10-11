@@ -76,6 +76,16 @@ impl Robot {
         t
     }
 
+    /// Its weak spot: a sphere's centre, in the body's frame about its
+    /// middle (the capsule centre; −Z is its front), and radius (m). From
+    /// the model's `SOCKET_weak`.
+    pub fn weak_spot(self) -> (Vec3, f32) {
+        match self {
+            Robot::Gunner => (WEAK_GUNNER, 0.15),
+            Robot::Swarmer => (WEAK_SWARMER, 0.09),
+        }
+    }
+
     fn gun(self) -> GunKind {
         match self {
             Robot::Gunner => GunKind::GunnerRifle,
@@ -197,6 +207,7 @@ pub fn new_robot(kind: Robot, mode: Mode, home: Entity, post: Vec3, base: &Tunin
         Vitals::full(&tuning),
         Team::Robots,
         BodyTuning(tuning),
+        super::vitals::HitLog::default(),
     )
 }
 
@@ -244,9 +255,9 @@ pub fn think(
         let frame = me.mode.body().and_then(|b| bodies.frame(b));
         let (eye, view) = me.mode.world_view(tuning, frame.as_ref());
         // The body's rotation (its Y the axis it turns about) and view pitch.
-        let (body, pitch) = match me.mode {
-            Mode::Booted { orientation, pitch, .. } => (frame.map_or(orientation, |f| f.rotation * orientation), pitch),
-            Mode::Eva { orientation, pitch, .. } => (orientation, pitch),
+        let body = body_rotation(&me.mode, frame.as_ref());
+        let pitch = match me.mode {
+            Mode::Booted { pitch, .. } | Mode::Eva { pitch, .. } => pitch,
         };
         let (position, _) = me.mode.world_kinematics(tuning, frame.as_ref());
         let sees = |target: Vec3| {
@@ -410,6 +421,25 @@ pub fn think(
                 if off.length() > 3.0 { to_input(view, off) } else { Vec3::ZERO }
             }
         };
+    }
+}
+
+/// Weak spot centres (see [`Robot::weak_spot`]): the Gunner's backpack
+/// core, the Swarmer's reactor between its rear thrusters.
+// Gunner: SOCKET_weak at (0, 1.42, 0.31) from its feet, its middle 0.95 up.
+const WEAK_GUNNER: Vec3 = Vec3::new(0.0, 0.47, 0.31);
+// Swarmer: SOCKET_weak at (0, 0.035, 0.19) from its middle (its origin).
+const WEAK_SWARMER: Vec3 = Vec3::new(0.0, 0.035, 0.19);
+
+/// Damage multiplier for a hit on a weak spot.
+pub const WEAK_MULTIPLIER: f32 = 2.5;
+
+/// A body's rotation: its Y the axis it stands or turns about, its −Z its
+/// front.
+pub fn body_rotation(mode: &Mode, frame: Option<&super::frame::BodyFrame>) -> Quat {
+    match *mode {
+        Mode::Booted { orientation, .. } => frame.map_or(orientation, |f| f.rotation * orientation),
+        Mode::Eva { orientation, .. } => orientation,
     }
 }
 

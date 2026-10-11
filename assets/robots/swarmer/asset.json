@@ -1,23 +1,137 @@
 {
   "name": "swarmer",
   "kind": "small_robot",
-  "brief": "Swarmer: a small, fast, fragile hostile drone that rushes the crew in packs in zero-g. Compact armoured insect-like shell, a cluster of sensor eyes on the front, four small swivelling thruster pods, and a stubby twin gun turret under the body. Bone-white plates, black joints and underside, cyan eyes and thruster glows.",
+  "brief": "Swarmer: a small, fast, fragile hostile drone that rushes the crew in packs in zero-g. Compact armoured insect-like shell, a cluster of sensor eyes on the front, four small swivelling thruster pods, and a stubby twin gun turret under the body. Bone-white plates, black joints and underside, cyan eyes and thruster glows. Revision: the weak spot is a hot-magenta reactor core exposed at the back between the rear pods (visible from behind and above-behind, hidden from the front), SOCKET_weak at its centre; thruster glow and small status lights on emissive_secondary; longer, jointed legs and a dorsal crest for a spider outline at range.",
   "palette": {
     "paint_primary": "#e4dccb",
-    "emissive": "#4fe8ff"
+    "emissive": "#4fe8ff",
+    "emissive_secondary": "#38d4ff",
+    "emissive_core": "#ff40c8"
   },
   "expect": {
-    "size": {"x": [0.68, 0.8], "y": [0.3, 0.45], "z": [0.45, 0.65]},
-    "parts": ["body", "gun", "thruster_fl", "thruster_fr", "thruster_rl", "thruster_rr"],
-    "colliders": ["COL_body", "COL_pods"],
+    "size": {
+      "x": [
+        0.8,
+        0.92
+      ],
+      "y": [
+        0.38,
+        0.48
+      ],
+      "z": [
+        0.5,
+        0.65
+      ]
+    },
+    "parts": [
+      "body",
+      "gun",
+      "thruster_fl",
+      "thruster_fr",
+      "thruster_rl",
+      "thruster_rr"
+    ],
+    "colliders": [
+      "COL_body",
+      "COL_pods"
+    ],
     "sockets": {
-      "SOCKET_eye":        {"at": [0, -0.04, -0.2415], "forward": [0, 0, -1], "up": [0, 1, 0]},
-      "SOCKET_muzzle_l":   {"at": [-0.034, -0.152, -0.29], "forward": [0, 0, -1]},
-      "SOCKET_muzzle_r":   {"at": [0.034, -0.152, -0.29], "forward": [0, 0, -1]},
-      "SOCKET_thrust_fl":  {"at": [-0.31, -0.06, 0.006], "forward": [0, 0, 1]},
-      "SOCKET_thrust_fr":  {"at": [0.31, -0.06, 0.006], "forward": [0, 0, 1]},
-      "SOCKET_thrust_rl":  {"at": [-0.3, 0.06, 0.216], "forward": [0, 0, 1]},
-      "SOCKET_thrust_rr":  {"at": [0.3, 0.06, 0.216], "forward": [0, 0, 1]}
+      "SOCKET_eye": {
+        "at": [
+          0,
+          -0.04,
+          -0.2415
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ]
+      },
+      "SOCKET_muzzle_l": {
+        "at": [
+          -0.034,
+          -0.152,
+          -0.29
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      },
+      "SOCKET_muzzle_r": {
+        "at": [
+          0.034,
+          -0.152,
+          -0.29
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      },
+      "SOCKET_thrust_fl": {
+        "at": [
+          -0.36,
+          -0.07,
+          -0.024
+        ],
+        "forward": [
+          0,
+          0,
+          1
+        ]
+      },
+      "SOCKET_thrust_fr": {
+        "at": [
+          0.36,
+          -0.07,
+          -0.024
+        ],
+        "forward": [
+          0,
+          0,
+          1
+        ]
+      },
+      "SOCKET_thrust_rl": {
+        "at": [
+          -0.35,
+          0.06,
+          0.256
+        ],
+        "forward": [
+          0,
+          0,
+          1
+        ]
+      },
+      "SOCKET_thrust_rr": {
+        "at": [
+          0.35,
+          0.06,
+          0.256
+        ],
+        "forward": [
+          0,
+          0,
+          1
+        ]
+      },
+      "SOCKET_weak": {
+        "at": [
+          0,
+          0.035,
+          0.19
+        ]
+      }
     },
     "tolerance": 0.01
   }

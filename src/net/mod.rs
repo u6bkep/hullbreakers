@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::sim::asteroids::Asteroid;
 use crate::sim::bots::Robot;
 use crate::sim::combat::Combatant;
-use crate::sim::vitals::Vitals;
+use crate::sim::vitals::{HitLog, Vitals};
 use crate::sim::flight::Flight;
 use crate::sim::input::PlayerInput;
 use crate::sim::mission::{Debris, GalleryAnchor, Mission};
@@ -268,6 +268,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Flight>().replicate();
         app.component::<Combatant>().replicate();
         app.component::<Vitals>().replicate();
+        app.component::<HitLog>().replicate();
         app.component::<Mission>().replicate();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();

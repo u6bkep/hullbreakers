@@ -11,7 +11,7 @@ use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
 use super::input::MouseCaptured;
 use crate::sim::bots::{Robot, SpawnRobots};
-use crate::sim::vitals::Vitals;
+use crate::sim::vitals::{Hit, HitLog, Vitals};
 use crate::sim::weapons::{Hand, Slot};
 use crate::sim::combat::{SHIELD_CENTER, SHIELD_RADII};
 use crate::sim::bodies::Bodies;
@@ -808,6 +808,58 @@ pub fn loadout_hud(
         };
         painter.text(egui::pos2(x, y), egui::Align2::RIGHT_BOTTOM, text, egui::FontId::monospace(11.0), color);
         y -= 14.0;
+    }
+    Ok(())
+}
+
+/// Hit markers: ticks round the crosshair when your shots land (white),
+/// bigger and magenta on a weak spot, an X on a kill. From what the
+/// authority says you hit, so a little after the shot.
+pub fn hit_markers(
+    mut contexts: EguiContexts,
+    time: Res<Time>,
+    log: Option<Single<&HitLog, With<LocalPlayer>>>,
+    mut seen: Local<Option<u32>>,
+    // The newest marker: how it looks, and its age (s).
+    mut showing: Local<Option<(Hit, f32)>>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let Some(log) = log else {
+        return Ok(());
+    };
+    if let Some(count) = *seen {
+        // Of several new hits, show the most telling.
+        let best = log.since(count).copied().max_by_key(|h| (h.kill, h.weak));
+        if let Some(hit) = best {
+            *showing = Some((hit, 0.0));
+        }
+    }
+    *seen = Some(log.count);
+    let Some((hit, age)) = showing.as_mut() else {
+        return Ok(());
+    };
+    *age += time.delta_secs();
+    let life = if hit.kill { 0.5 } else { 0.25 };
+    if *age > life {
+        *showing = None;
+        return Ok(());
+    }
+    let fade = 1.0 - *age / life;
+    let color = if hit.weak {
+        egui::Color32::from_rgba_unmultiplied(255, 64, 200, (255.0 * fade) as u8)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(255, 255, 255, (230.0 * fade) as u8)
+    };
+    let (inner, outer, width) = match (hit.kill, hit.weak) {
+        (true, _) => (4.0, 16.0, 3.0),
+        (false, true) => (7.0, 15.0, 2.5),
+        (false, false) => (7.0, 12.0, 1.8),
+    };
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("hits")));
+    let c = ctx.content_rect().center();
+    for (dx, dy) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+        let d = egui::vec2(dx, dy) / std::f32::consts::SQRT_2;
+        painter.line_segment([c + d * inner, c + d * outer], egui::Stroke::new(width, color));
     }
     Ok(())
 }

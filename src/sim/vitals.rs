@@ -5,11 +5,14 @@
 //! it; it learns its health from the authority, and a death reaches it as a
 //! respawn like any other.
 
+use std::collections::VecDeque;
+
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::SimTick;
 use super::events::PlayerEvent;
+use super::bots::Robot;
 use super::player::{DeckSlot, Player};
 use super::ship::HomeShip;
 use super::tuning::Tuning;
@@ -35,6 +38,46 @@ impl Vitals {
 pub struct Damage {
     pub target: Entity,
     pub amount: f32,
+    /// Who did it, to tell them they hit (see [`HitLog`]).
+    pub source: Option<Entity>,
+    /// Whether it was a weak spot.
+    pub weak: bool,
+}
+
+/// What a player has recently hit, for their hit markers. The authority
+/// writes it; it isn't predicted (a client can't know what its shots hit).
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct HitLog {
+    /// Hits counted so far; a reader keeps its own count to see new ones.
+    pub count: u32,
+    /// The most recent hits, newest last.
+    pub recent: VecDeque<Hit>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Hit {
+    pub weak: bool,
+    /// The hit left the target with no health.
+    pub kill: bool,
+}
+
+/// How many hits a log keeps.
+const HIT_LOG: usize = 16;
+
+impl HitLog {
+    fn push(&mut self, hit: Hit) {
+        self.count = self.count.wrapping_add(1);
+        self.recent.push_back(hit);
+        while self.recent.len() > HIT_LOG {
+            self.recent.pop_front();
+        }
+    }
+
+    /// Hits since a reader last saw `count` of them, oldest first.
+    pub fn since(&self, count: u32) -> impl Iterator<Item = &Hit> {
+        let new = (self.count.wrapping_sub(count) as usize).min(self.recent.len());
+        self.recent.iter().skip(self.recent.len() - new)
+    }
 }
 
 /// Authority: a laser beam a player was caught in this tick burns them.
@@ -53,6 +96,8 @@ pub fn beam_burns(
             damage.write(Damage {
                 target: entity,
                 amount: tuning.beam_damage,
+                source: None,
+                weak: false,
             });
         }
     }
@@ -64,19 +109,32 @@ pub fn apply_damage(
     time: Res<Time>,
     tuning: Res<Tuning>,
     mut damage: MessageReader<Damage>,
-    mut vitals: Query<&mut Vitals>,
+    mut vitals: Query<(&mut Vitals, Has<Robot>)>,
+    mut logs: Query<&mut HitLog>,
 ) {
     let dt = time.delta_secs();
-    for mut v in &mut vitals {
+    // The crew's suits heal; robots don't.
+    for (mut v, robot) in &mut vitals {
         v.since_hurt += dt;
-        if v.since_hurt > tuning.health_regen_delay {
+        if !robot && v.since_hurt > tuning.health_regen_delay {
             v.health = (v.health + tuning.health_regen_rate * dt).min(tuning.player_health);
         }
     }
     for hit in damage.read() {
-        if let Ok(mut v) = vitals.get_mut(hit.target) {
-            v.health = (v.health - hit.amount).max(0.0);
-            v.since_hurt = 0.0;
+        let Ok((mut v, _)) = vitals.get_mut(hit.target) else {
+            continue;
+        };
+        // Already dead this tick: no more hits to count.
+        if v.health <= 0.0 {
+            continue;
+        }
+        v.health = (v.health - hit.amount).max(0.0);
+        v.since_hurt = 0.0;
+        if let Some(mut log) = hit.source.and_then(|s| logs.get_mut(s).ok()) {
+            log.push(Hit {
+                weak: hit.weak,
+                kill: v.health <= 0.0,
+            });
         }
     }
 }

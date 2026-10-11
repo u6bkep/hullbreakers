@@ -259,8 +259,6 @@ The driver runs it. A FAIL exits 1; a WARN doesn't.
 
 ## Known limits
 
-- **Only one emissive role.** An asset can't have two different light colours yet. Add a
-  role to `materials.json` when a brief needs one.
 - **No booleans.** Doorways and cut-outs would have to be built from pieces. If ship modules
   need booleans, expect bevel pinching and normal cleanup at the seams.
 - **No joint limits or articulation data** in the export. Robots get parts pivoted at their

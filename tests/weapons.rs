@@ -127,3 +127,60 @@ fn bullets_hurt_the_other_side_and_pass_through_our_own() {
     assert_eq!(health(&app, friend), full, "hit a teammate");
     assert!(health(&app, robot) < full - 30.0, "robot only down to {}", health(&app, robot));
 }
+
+/// A Gunner held still (no brain or input) floating at `at`, turned by
+/// `facing`; returns it.
+fn still_gunner(app: &mut App, at: Vec3, facing: Quat) -> Entity {
+    use hullbreakers::sim::bots::{Robot, new_robot};
+    let ship = {
+        let world = app.world_mut();
+        world.query_filtered::<Entity, With<HomeShip>>().single(world).unwrap()
+    };
+    let mode = Mode::Eva {
+        position: at,
+        velocity: Vec3::ZERO,
+        orientation: facing,
+        pitch: 0.0,
+    };
+    let robot = app
+        .world_mut()
+        .spawn(new_robot(Robot::Gunner, mode, ship, at, &Tuning::default(), 0))
+        .id();
+    app.world_mut().entity_mut(robot).remove::<PlayerInput>();
+    ticks(app, 2);
+    robot
+}
+
+/// Fires two braced rifle shots at a Gunner whose weak spot is on the line
+/// of fire, from behind or in front; returns (weak hits, all hits).
+fn shoot_gunner(facing_away: bool) -> (usize, usize) {
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::vitals::HitLog;
+    let mut app = app();
+    let me = float_shooter(&mut app);
+    let eye = Tuning::default().eye_height - Tuning::default().capsule_height / 2.0;
+    let (spot, _) = Robot::Gunner.weak_spot();
+    // Facing away (−Z, its back toward us) or toward us; centred so the
+    // spot (behind its middle, higher up) is level with our eye.
+    let facing = if facing_away { Quat::IDENTITY } else { Quat::from_rotation_y(std::f32::consts::PI) };
+    let at = Vec3::new(0.0, eye, 185.0) - facing * Vec3::new(spot.x, spot.y, 0.0);
+    still_gunner(&mut app, at, facing);
+    app.world_mut().get_mut::<PlayerInput>(me).unwrap().stance = 2;
+    ticks(&mut app, 30);
+    hold_trigger(&mut app, me, true);
+    ticks(&mut app, 10);
+    hold_trigger(&mut app, me, false);
+    ticks(&mut app, 20);
+    let log = app.world().get::<HitLog>(me).unwrap();
+    (log.recent.iter().filter(|h| h.weak).count(), log.recent.len())
+}
+
+#[test]
+fn a_gunner_is_weak_from_behind() {
+    let (weak, all) = shoot_gunner(true);
+    assert!(all >= 2, "only {all} hits");
+    assert_eq!(weak, all, "{weak} of {all} hits on the weak spot");
+    let (weak, all) = shoot_gunner(false);
+    assert!(all >= 2, "only {all} hits from the front");
+    assert_eq!(weak, 0, "weak spot hit from the front");
+}

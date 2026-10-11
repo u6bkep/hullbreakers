@@ -16,10 +16,17 @@ use bevy::prelude::*;
 
 use super::SimTick;
 use super::bodies::Bodies;
+use super::bots::{BodyTuning, Robot, WEAK_MULTIPLIER, body_rotation, tuning_of};
+use super::tuning::Tuning;
 use super::events::PlayerEvent;
 use super::player::Player;
 use super::vitals::{Damage, Vitals};
 use super::weapons::GunKind;
+
+/// How deep past where a bullet meets a body it can still find the weak
+/// spot (m): weak spots sit just inside the hull capsule, so a shot from
+/// the far side doesn't reach through the body to one.
+const WEAK_DEPTH: f32 = 0.25;
 
 /// Seconds a bullet flies before it's forgotten.
 pub const SHOT_LIFE: f32 = 2.0;
@@ -86,6 +93,8 @@ pub fn fly_shots(
     mut bodies: Bodies,
     teams: Query<Option<&Team>, With<Player>>,
     vitals: Query<(), With<Vitals>>,
+    robots: Query<(&Robot, &Player, Option<&BodyTuning>)>,
+    base: Res<Tuning>,
     mut damage: MessageWriter<Damage>,
 ) {
     let dt = time.delta_secs();
@@ -110,9 +119,21 @@ pub fn fly_shots(
         let point = shot.position + dir * hit.distance;
         let stats = shot.gun.stats();
         if vitals.contains(hit.entity) {
+            // A robot's weak spot is a sphere (inside it, or behind its
+            // armour); the bullet's line through the body finds it.
+            let weak = robots.get(hit.entity).is_ok_and(|(kind, player, own)| {
+                let frame = player.mode.body().and_then(|b| bodies.frame(b));
+                let (center, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
+                let (local, radius) = kind.weak_spot();
+                let spot = center + body_rotation(&player.mode, frame.as_ref()) * local;
+                let along = (spot - point).dot(*dir).clamp(0.0, WEAK_DEPTH);
+                (point + *dir * along).distance(spot) < radius
+            });
             damage.write(Damage {
                 target: hit.entity,
-                amount: stats.damage,
+                amount: if weak { stats.damage * WEAK_MULTIPLIER } else { stats.damage },
+                source: Some(shot.shooter),
+                weak,
             });
         } else if let Some(body) = bodies.body_of_collider(hit.entity) {
             let relative = shot.velocity - bodies.frame(body).map_or(Vec3::ZERO, |f| f.point_velocity(point));

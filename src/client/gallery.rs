@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::camera::primitives::Aabb;
+use bevy::gltf::GltfMaterialName;
 use bevy::prelude::*;
 use bevy::world_serialization::WorldAssetRoot;
 use bevy_egui::{EguiContexts, egui};
@@ -170,4 +171,31 @@ pub fn label_exhibits(
         );
     }
     Ok(())
+}
+
+/// The material name the asset pipeline gives weak-spot cores (see
+/// docs/art-style.md).
+const CORE_MATERIAL: &str = "emissive_core";
+
+/// Weak-spot cores pulse, so they read as alive (and as a target).
+pub fn pulse_cores(
+    time: Res<Time>,
+    new: Query<(&GltfMaterialName, &MeshMaterial3d<StandardMaterial>), Added<GltfMaterialName>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    // Each core material and its full glow.
+    mut cores: Local<Vec<(Handle<StandardMaterial>, LinearRgba)>>,
+) {
+    for (name, material) in &new {
+        if name.0 == CORE_MATERIAL && !cores.iter().any(|(h, _)| h.id() == material.0.id()) {
+            if let Some(m) = materials.get(&material.0) {
+                cores.push((material.0.clone(), m.emissive));
+            }
+        }
+    }
+    let pulse = 0.6 + 0.4 * (time.elapsed_secs() * 4.0).sin().abs();
+    for (handle, full) in cores.iter() {
+        if let Some(mut m) = materials.get_mut(handle) {
+            m.emissive = *full * pulse;
+        }
+    }
 }

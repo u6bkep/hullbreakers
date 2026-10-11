@@ -11,6 +11,7 @@ use std::f32::consts::TAU;
 use bevy::audio::{AudioSinkPlayback, PlaybackMode, Volume};
 use bevy::prelude::*;
 
+use crate::sim::vitals::HitLog;
 use crate::sim::weapons::GunKind;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -380,6 +381,11 @@ pub struct Sounds {
     /// Your own gun, through your hand and suit: a thump more than a bang.
     shot_smg: Handle<AudioSource>,
     shot_rifle: Handle<AudioSource>,
+    /// Your shots landing: a tick, a brighter one on a weak spot, a thump
+    /// for a kill. (Feedback, not something heard across space.)
+    hit: Handle<AudioSource>,
+    hit_weak: Handle<AudioSource>,
+    kill: Handle<AudioSource>,
     grapple_fire: Handle<AudioSource>,
     grapple_attach: Handle<AudioSource>,
     grapple_release: Handle<AudioSource>,
@@ -469,6 +475,15 @@ pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         shot_rifle: add(mix(
             synth.thud(0.16, 45.0, 700.0, 1.0),
             synth.clank(0.1, 400.0, 40.0, 0.45),
+        )),
+        hit: add(synth.clank(0.05, 1900.0, 90.0, 0.4)),
+        hit_weak: add(mix(
+            synth.clank(0.09, 2600.0, 45.0, 0.5),
+            synth.clank(0.07, 3900.0, 60.0, 0.3),
+        )),
+        kill: add(mix(
+            synth.thud(0.25, 40.0, 500.0, 0.9),
+            synth.clank(0.18, 1300.0, 25.0, 0.5),
         )),
         grapple_fire: add(synth.sweep(0.18, 2200.0, 700.0, 0.55, 0.5)),
         grapple_attach: add(synth.clank(0.25, 880.0, 25.0, 0.6)),
@@ -1061,4 +1076,27 @@ mod tests {
         let klaxon = synth.klaxon_loop();
         assert!(klaxon[0].abs() < 0.01 && klaxon[klaxon.len() - 1].abs() < 0.01);
     }
+}
+
+/// Sounds for your shots landing, from what the authority says you hit.
+pub fn play_hit_sounds(
+    mut commands: Commands,
+    sounds: Res<Sounds>,
+    log: Option<Single<&HitLog, With<LocalPlayer>>>,
+    mut seen: Local<Option<u32>>,
+) {
+    let Some(log) = log else { return };
+    if let Some(count) = *seen
+        && let Some(hit) = log.since(count).copied().max_by_key(|h| (h.kill, h.weak))
+    {
+        let sound = if hit.kill {
+            &sounds.kill
+        } else if hit.weak {
+            &sounds.hit_weak
+        } else {
+            &sounds.hit
+        };
+        play(&mut commands, sound, 0.6, 1.0);
+    }
+    *seen = Some(log.count);
 }

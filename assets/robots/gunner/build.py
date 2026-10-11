@@ -88,12 +88,32 @@ for k in range(3):                                                              
     torso.box((0.07, y, -0.303), (0.27, y + 0.02, -0.275), mat=DARK, bevel=0.005)
 torso.lathe([(0.13, 1.6), (0.13, 1.69), (0.095, 1.69), (0.095, 1.70)], axis="y", center=(0, -0.05),
             mats=[DARK, DARK, DARK], segments=12, bevel=0.005)                  # neck collar
-# back: power pack with two yellow coolant canisters
+# back: power pack. The weak spot is its coolant core, a glowing sphere sat in an open
+# teal housing and caged by two guard bars, flanked by two yellow coolant canisters with
+# sight-glass strips. The torso hides it from the front.
 torso.box((-0.21, 1.24, 0.15), (0.21, 1.60, 0.30), mat=DARK)
-torso.box((-0.17, 1.28, 0.29), (0.17, 1.55, 0.32), mat=PAINT, bevel=0.008)
-for x in (-0.12, 0.12):
-    torso.lathe([(0.05, 1.23), (0.068, 1.26), (0.068, 1.57), (0.05, 1.60)], axis="y", center=(x, 0.335),
-                mats=[ACCENT] * 3, segments=14, bevel=0.006)
+CORE, CORE_R = (0, 1.42, 0.31), 0.14
+torso.frame((-0.18, CORE[1] - 0.18, 0.27), (0.18, CORE[1] + 0.18, 0.37), 0.032, "z", mat=PAINT,
+            bevel=0.008)                                                        # core housing
+AP = 0.148                                                                      # aperture half width
+for sx in (-1, 1):                                                              # corner gussets: octagonal port
+    for sy in (-1, 1):
+        cx, cy = sx * AP, CORE[1] + sy * AP
+        torso.prism([(cx, cy), (cx - sx * 0.06, cy), (cx, cy - sy * 0.06)], plane="xy",
+                    span=(0.29, 0.362), mat=DARK, bevel=0.004)
+ring = 8
+torso.lathe([(CORE_R * math.sin(math.pi * k / ring), CORE[2] - CORE_R * math.cos(math.pi * k / ring))
+             for k in range(1, ring)], axis="z", center=(CORE[0], CORE[1]),
+            mats=["emissive_core"] * (ring - 2), segments=16, bevel=0)         # the core (capped poles)
+for x in (-0.06, 0.06):                                                         # guard bars
+    torso.box((x - 0.011, CORE[1] - 0.165, 0.36), (x + 0.011, CORE[1] + 0.165, 0.455), mat=BARE,
+              bevel=0.004)
+a.socket("SOCKET_weak", torso, at=CORE)
+for x in (-0.245, 0.245):
+    torso.lathe([(0.045, 1.23), (0.06, 1.26), (0.06, 1.57), (0.045, 1.60)], axis="y", center=(x, 0.27),
+                mats=[ACCENT] * 3, segments=14, bevel=0.006)                    # coolant canisters
+    torso.box((x - 0.011, 1.31, 0.322), (x + 0.011, 1.52, 0.336), mat="emissive_secondary",
+              bevel=0.002)                                                      # sight glass
 for _, s in SIDES:                                                              # shoulder hubs
     torso.cylinder("x", (SHOULDER_Y, 0), 0.09, sorted((s * 0.30, s * 0.37)), mat=DARK, segments=16,
                    bevel=0.008)
@@ -114,6 +134,8 @@ for _, s in SIDES:                                                              
     head.lathe([(0.05, s * 0.15), (0.05, s * 0.185), (0.03, s * 0.185), (0.03, s * 0.195)], axis="x",
                center=(1.79, -0.06), mats=[DARK, DARK, BARE], segments=12, bevel=0.004)
     head.box((s * 0.15, 1.70, 0.0), (s * 0.165, 1.85, 0.07), mat=ACCENT, bevel=0.004)   # side panels
+head.box((-0.085, 1.795, 0.074), (0.085, 1.811, 0.088), mat="emissive_secondary",
+         bevel=0.002)                                                           # rear status strip
 a.socket("SOCKET_eye", head, at=(0, EYE_Y, EYE_FRONT), forward=(0, 0, -1))
 
 # ---------------------------------------------------------------- arms
@@ -179,6 +201,9 @@ gun.lathe([(0.072, -0.50), (0.072, -0.74), (0.05, -0.74), (0.033, -0.76), (0.033
 for k in range(4):                                                              # shroud cooling fins
     z = -0.52 - k * 0.055
     gun.box((xr - 0.014, BORE + 0.06, z - 0.03), (xr + 0.014, BORE + 0.098, z), mat=DARK, bevel=0.004)
+for y in (Y0 + 0.045, Y0 + 0.005, Y0 - 0.035):                                 # power lights, outer face
+    gun.box((xr + 0.084, y - 0.011, -0.115), (xr + 0.095, y + 0.011, -0.093), mat="emissive_secondary",
+            bevel=0.002)
 a.socket("SOCKET_muzzle", gun, at=(xr, BORE, MUZZLE_Z), forward=(0, 0, -1))
 
 # ---------------------------------------------------------------- legs
@@ -208,6 +233,8 @@ for side, s in SIDES:
                   bevel=0.006)                                                  # ankle knuckle
     foot.box((x - 0.104, 0.0, -0.26), (x + 0.104, 0.02, 0.155), mat=BARE, bevel=0.005)  # mag plate
     foot.box((x - 0.112, 0.016, -0.265), (x + 0.112, 0.058, 0.16), mat=DARK, bevel=0.01)  # magnet block
+    foot.box((x - 0.116, 0.026, -0.262), (x + 0.116, 0.036, 0.157), mat="emissive_secondary",
+             bevel=0.002)                                                       # mag-boot glow seam
     foot.prism([(0.14, 0.05), (-0.17, 0.05), (-0.17, 0.125), (-0.10, 0.125), (-0.065, 0.10), (0.11, 0.10),
                 (0.14, 0.08)], span=(x - 0.095, x + 0.095), mat=PAINT)          # boot upper
     foot.prism([(-0.165, 0.05), (-0.28, 0.05), (-0.29, 0.08), (-0.255, 0.14), (-0.165, 0.14)],
@@ -222,7 +249,8 @@ for side, s in SIDES:
 # Blender's hull wobble past the verifier's convexity tolerance).
 a.collider("COL_torso", parent=torso, points=[(x, y, z) for z, y in CHEST for x in (-0.335, 0.335)]
            + [(x, y, z) for x in (-0.25, 0.25) for y in (1.18, 1.33) for z in (-0.215, 0.13)]
-           + [(x, y, z) for x in (-0.21, 0.21) for y in (1.24, 1.60) for z in (0.30, 0.40)])
+           + [(x, y, z) for x in (-0.305, 0.305) for y in (1.24, 1.60) for z in (0.30, 0.33)]
+           + [(x, y, z) for x in (-0.18, 0.18) for y in (1.24, 1.60) for z in (0.455,)])
 a.collider("COL_pelvis", parent=pelvis, points=[(x, y, z) for x in (-0.17, 0.17) for y in (0.86, 1.10)
                                                 for z in (-0.175, 0.16)])
 a.collider("COL_head", around=[head], parent=head)

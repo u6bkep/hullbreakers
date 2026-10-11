@@ -45,7 +45,10 @@ facing the cargo door) and four **Swarmers** flying escort (fast, fragile
 drones that rush in and spray). Robots are players driven by a brain on the
 host, so they move, aim and shoot by the crew's rules; they see along clear
 sight lines, chase a target that ducks out of view for a few seconds, and
-are destroyed at zero health. The F1 panel can spawn a Gunner on our bridge
+are destroyed at zero health. Each has a **weak spot**, a glowing magenta
+core (the Gunner's backpack, the Swarmer's rear reactor) that takes 2.5×
+damage: flank them. Hit markers show your hits (white), weak-spot hits
+(magenta) and kills (an X); robots don't heal. The F1 panel can spawn a Gunner on our bridge
 or three Swarmers off our port side, for trying out a fight.
 
 Players have suit health (bottom of the screen). It comes back after a few

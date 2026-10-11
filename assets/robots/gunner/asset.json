@@ -1,11 +1,13 @@
 {
   "name": "gunner",
   "kind": "large_robot",
-  "brief": "Gunner: baseline hostile robot, ~1.9 m, mag-boot walker in zero-g with a rifle built into its right arm. Industrial, repurposed for war: squat torso, sensor head with one strong amber eye, chunky mag-boot feet, exposed joints. Rigid parts pivoted at their joints for procedural animation. Faded teal paint, worn hazard-yellow accents, dark metal joints.",
+  "brief": "Gunner: baseline hostile robot, ~1.9 m, mag-boot walker in zero-g with a rifle built into its right arm. Industrial, repurposed for war: squat torso, sensor head with one strong amber eye, chunky mag-boot feet, exposed joints. Rigid parts pivoted at their joints for procedural animation. Faded teal paint, worn hazard-yellow accents, dark metal joints. Weak spot: a magenta coolant core caged in the backpack, hidden from the front. Quiet pale-teal power lights.",
   "palette": {
     "paint_primary": "#5b8a84",
     "paint_secondary": "#b99a3e",
-    "emissive": "#ffa030"
+    "emissive": "#ffa030",
+    "emissive_secondary": "#a6f2e4",
+    "emissive_core": "#ff40c8"
   },
   "expect": {
     "size": {"x": [0.95, 1.25], "y": [1.85, 1.95], "z": [1.1, 1.45]},
@@ -17,7 +19,8 @@
       "SOCKET_eye":    {"at": [0, 1.785, -0.305], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.02},
       "SOCKET_muzzle": {"at": [0.44, 1.235, -0.96], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.03},
       "SOCKET_foot_l": {"at": [-0.18, 0, -0.05], "forward": [0, -1, 0], "up": [0, 0, -1], "tol": 0.03},
-      "SOCKET_foot_r": {"at": [0.18, 0, -0.05], "forward": [0, -1, 0], "up": [0, 0, -1], "tol": 0.03}
+      "SOCKET_foot_r": {"at": [0.18, 0, -0.05], "forward": [0, -1, 0], "up": [0, 0, -1], "tol": 0.03},
+      "SOCKET_weak":   {"at": [0, 1.42, 0.31], "tol": 0.02}
     },
     "tolerance": 0.01
   }

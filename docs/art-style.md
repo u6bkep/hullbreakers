@@ -13,10 +13,19 @@ models are built is in [assets.md](assets.md).
   something look "detailed".
 - **No textures yet.** Materials only (PBR metallic-roughness). Detail comes
   from form, material breaks between parts, and emissive accents.
-- **Emissives carry meaning.** Lights mark function: indicators, sensors and
-  eyes, weak spots, things you can interact with. They are what you see of a
-  thing in shadow, so every model that matters in play should have some. Don't
-  sprinkle them for decoration.
+- **Emissives carry meaning.** Lights mark function, and are what you see of
+  a thing in shadow, so every model that matters in play should have some.
+  Three roles, from loud to quiet:
+  - `emissive`: eyes, sensors, interactables. The thing's identity in the dark.
+  - `emissive_secondary`: power lights, status strips, thruster glow. Worked
+    into the design (a strip along a seam, a ring in a nozzle) so they read
+    as part of the machine; they also give it a readable outline from every
+    side.
+  - `emissive_core`: **weak spots only**: an exposed, glowing core that takes
+    extra damage. The game pulses it. Reserve it for weak spots so players
+    learn what it means; mark its centre with a `SOCKET_weak`.
+    Weak spots are the same hot magenta (`#ff40c8`) on every enemy, the one
+    colour rule in the game: it's a signal to learn, not a faction.
 - **Value contrast between masses.** Neighbouring parts differ in lightness
   (light body, dark grip; pale plating, dark joints) so the form reads even
   without colour.

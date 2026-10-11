@@ -43,6 +43,16 @@
       "doc": "Lights that mean something: indicators, sensors and eyes, weak spots, interactables.",
       "color": "#ffffff", "metallic": 0.0, "roughness": 0.4, "palette": true,
       "emissive_strength": 8.0, "base_from_emission": 0.1
+    },
+    "emissive_secondary": {
+      "doc": "Quieter lights worked into the design: power lights, status strips, thruster glow. Dimmer than emissive, often another colour.",
+      "color": "#ffffff", "metallic": 0.0, "roughness": 0.4, "palette": true,
+      "emissive_strength": 3.0, "base_from_emission": 0.15
+    },
+    "emissive_core": {
+      "doc": "A weak spot's exposed core: only for weak spots, so players learn what it means. The game pulses it.",
+      "color": "#ffffff", "metallic": 0.0, "roughness": 0.3, "palette": true,
+      "emissive_strength": 10.0, "base_from_emission": 0.1
     }
   }
 }
