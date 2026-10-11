@@ -54,10 +54,10 @@ fn set_player(app: &mut App, f: impl FnOnce(&mut Player)) {
     f(&mut world.query::<&mut Player>().single_mut(world).unwrap());
 }
 
-fn click(app: &mut App) {
+fn interact(app: &mut App) {
     let world = app.world_mut();
     let mut input = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
-    input.presses.grapple.press();
+    input.presses.interact.press();
 }
 
 fn mission(app: &mut App) -> Mission {
@@ -111,7 +111,7 @@ fn start_boarding(app: &mut App) {
     let feet = Vec3::new(-2.0, 0.01, -7.3);
     let button = Vec3::new(-3.5, 1.75, -7.3);
     stand(app, ship, feet, button - (feet + Vec3::Y * eye_height()));
-    click(app);
+    interact(app);
     ticks(app, 2);
 }
 
@@ -180,7 +180,7 @@ fn dropping_the_shield_wins_and_blows_the_crew_clear() {
     let feet = Vec3::new(0.0, 0.01, -11.0);
     let button = Vec3::new(0.0, 1.1, -13.0);
     stand(&mut app, raider, feet, button - (feet + Vec3::Y * eye_height()));
-    click(&mut app);
+    interact(&mut app);
     ticks(&mut app, 2);
     assert!(!app.world().get::<Combatant>(raider).unwrap().shield);
     assert_eq!(mission(&mut app).shield_breaker.as_deref(), Some("Player 1"));
@@ -309,7 +309,11 @@ fn a_player_can_cross_to_the_raider() {
         };
         p.reference_body = Some(home);
     });
-    click(&mut app);
+    {
+        let world = app.world_mut();
+        let mut input = world.query::<&mut PlayerInput>().single_mut(world).unwrap();
+        input.presses.grapple.press();
+    }
     ticks(&mut app, 1);
     let grapple = player(&mut app).grapple.expect("missed the raider");
     assert_eq!(grapple.target, raider);

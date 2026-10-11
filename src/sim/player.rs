@@ -808,18 +808,15 @@ pub fn player_tick(
         // Recorded after look so the camera interpolates movement only; look
         // is applied immediately (see `update_camera`).
         previous.0 = player.mode;
-        // A click on a button within reach presses it; anywhere else it
-        // fires (or lets go of) the grapple.
-        let pressed = cmd
-            .grapple
-            .then(|| control_under_crosshair(&ctx, &bodies, entity, player))
-            .flatten();
-        if let Some(control) = pressed {
+        if cmd.interact
+            && let Some(control) = control_under_crosshair(&ctx, &bodies, entity, player)
+        {
             player.emit(PlayerEvent::Pressed {
                 body: control.body,
                 action: control.control.action,
             });
-        } else if cmd.grapple {
+        }
+        if cmd.grapple {
             if player.grapple.take().is_none() {
                 fire_grapple(&ctx, &bodies, entity, player);
             } else {

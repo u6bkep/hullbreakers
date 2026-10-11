@@ -36,6 +36,8 @@ pub struct Presses {
     pub toggle_boots: Press,
     pub toggle_assist: Press,
     pub grapple: Press,
+    /// Press the control under the crosshair.
+    pub interact: Press,
     /// Make the body under the crosshair the reference frame.
     pub set_reference: Press,
 }
@@ -97,6 +99,7 @@ pub struct TickInput {
     pub toggle_boots: bool,
     pub toggle_assist: bool,
     pub grapple: bool,
+    pub interact: bool,
     pub set_reference: bool,
 }
 
@@ -122,6 +125,7 @@ impl InputCursor {
             toggle_boots: p.toggle_boots.since(seen.toggle_boots),
             toggle_assist: p.toggle_assist.since(seen.toggle_assist),
             grapple: p.grapple.since(seen.grapple),
+            interact: p.interact.since(seen.interact),
             set_reference: p.set_reference.since(seen.set_reference),
         };
         self.look = input.look;

@@ -60,17 +60,22 @@ fn keycode(name: &str) -> Option<u32> {
         "lshift" | "shift" => 42,
         "space" => 57,
         "lalt" | "alt" => 56,
+        "f1" => 59,
         _ => return None,
     })
 }
 
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
+const BTN_SIDE: u32 = 0x113;
+const BTN_EXTRA: u32 = 0x114;
 
 fn button(name: &str) -> Option<u32> {
     match name {
         "left" | "button1" => Some(BTN_LEFT),
         "right" | "button3" => Some(BTN_RIGHT),
+        "mouse4" | "side" => Some(BTN_SIDE),
+        "mouse5" | "extra" => Some(BTN_EXTRA),
         _ => None,
     }
 }

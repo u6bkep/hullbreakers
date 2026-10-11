@@ -1,19 +1,21 @@
-//! Keyboard and mouse to [`PlayerInput`].
+//! Keyboard and mouse to [`PlayerInput`], through the [`Bindings`].
 //!
-//! | Input            | Booted            | EVA                    |
+//! | Default          | Booted            | EVA                    |
 //! |------------------|-------------------|------------------------|
 //! | WASD             | walk              | thrust                 |
-//! | Space / Ctrl     | jump / —          | thrust up / down       |
+//! | Space / C        | jump / —          | thrust up / down       |
 //! | Shift            | sprint            | boost                  |
 //! | Q / E            | —                 | roll                   |
-//! | F                | toggle mag boots  | toggle mag boots       |
+//! | B                | toggle mag boots  | toggle mag boots       |
 //! | V                | toggle flight assist (on by default)       |
 //! | T                | set reference body to the one under the crosshair |
 //! | X (hold)         | —                 | brake vs. last body    |
+//! | F                | press the button under the crosshair       |
 //! | LMB              | fire / release grapple                     |
-//! | RMB (hold)       | reel in                                    |
-//! | R (hold)         | pay out rope                               |
-//! | Tab              | tuning panel (frees cursor)                |
+//! | Mouse4, Ctrl+LMB (hold) | reel in                             |
+//! | Mouse5, Alt+LMB (hold)  | pay out rope                        |
+//! | F1               | tuning panel (frees cursor)                |
+//! | Escape           | free the cursor                            |
 //! | L                | debug: ship lurch                          |
 
 use bevy::input::mouse::AccumulatedMouseMotion;
@@ -21,6 +23,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::LocalInput;
+use super::bindings::{Action, Bindings, Held};
 use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::Tuning;
 
@@ -30,13 +33,16 @@ pub struct MouseCaptured(pub bool);
 
 pub fn toggle_capture(
     keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    bindings: Res<Bindings>,
     mut captured: ResMut<MouseCaptured>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    if keys.just_pressed(KeyCode::Tab) {
+    let held = Held { keys: &keys, mouse: &mouse };
+    if held.started(&bindings, Action::TuningPanel) {
         captured.0 = !captured.0;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    if held.started(&bindings, Action::ReleaseMouse) {
         captured.0 = false;
     }
     let (grab_mode, visible) = if captured.0 {
@@ -54,6 +60,7 @@ pub fn read_input(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
+    bindings: Res<Bindings>,
     captured: Res<MouseCaptured>,
     tuning: Res<Tuning>,
     mut local: ResMut<LocalInput>,
@@ -69,34 +76,35 @@ pub fn read_input(
         cmd.pay_out = false;
         return;
     }
-    let axis = |pos: KeyCode, neg: KeyCode| {
-        keys.pressed(pos) as i32 as f32 - keys.pressed(neg) as i32 as f32
-    };
+    let held = Held { keys: &keys, mouse: &mouse };
+    let on = |action| held.active(&bindings, action);
+    let axis = |pos, neg| on(pos) as i32 as f32 - on(neg) as i32 as f32;
     cmd.movement = Vec3::new(
-        axis(KeyCode::KeyD, KeyCode::KeyA),
-        axis(KeyCode::Space, KeyCode::ControlLeft),
-        axis(KeyCode::KeyW, KeyCode::KeyS),
+        axis(Action::Right, Action::Left),
+        axis(Action::Up, Action::Down),
+        axis(Action::Forward, Action::Back),
     );
-    cmd.roll = axis(KeyCode::KeyE, KeyCode::KeyQ);
-    cmd.sprint = keys.pressed(KeyCode::ShiftLeft);
-    cmd.brake = keys.pressed(KeyCode::KeyX);
-    cmd.reel_in = mouse.pressed(MouseButton::Right);
-    cmd.pay_out = keys.pressed(KeyCode::KeyR);
+    cmd.roll = axis(Action::RollRight, Action::RollLeft);
+    cmd.sprint = on(Action::Sprint);
+    cmd.brake = on(Action::Brake);
+    cmd.reel_in = on(Action::ReelIn);
+    cmd.pay_out = on(Action::PayOut);
     cmd.add_look(motion.delta * tuning.mouse_sensitivity);
     let presses = &mut cmd.presses;
-    for (pressed, counter) in [
-        (keys.just_pressed(KeyCode::Space), &mut presses.jump),
-        (keys.just_pressed(KeyCode::KeyF), &mut presses.toggle_boots),
-        (keys.just_pressed(KeyCode::KeyV), &mut presses.toggle_assist),
-        (keys.just_pressed(KeyCode::KeyT), &mut presses.set_reference),
-        (mouse.just_pressed(MouseButton::Left), &mut presses.grapple),
+    for (action, counter) in [
+        (Action::Jump, &mut presses.jump),
+        (Action::ToggleBoots, &mut presses.toggle_boots),
+        (Action::ToggleAssist, &mut presses.toggle_assist),
+        (Action::SetReference, &mut presses.set_reference),
+        (Action::Interact, &mut presses.interact),
+        (Action::Grapple, &mut presses.grapple),
     ] {
-        if pressed {
+        if held.started(&bindings, action) {
             counter.press();
         }
     }
 
-    if keys.just_pressed(KeyCode::KeyL) {
+    if held.started(&bindings, Action::DebugLurch) {
         ship_orders.write(ShipCommand::Lurch);
     }
 }

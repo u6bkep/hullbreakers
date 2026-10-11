@@ -2,6 +2,7 @@
 //! only [`LocalInput`] and [`crate::sim::ship::ShipCommand`] (plus debug
 //! actions). Which player is local is the network layer's business.
 
+pub mod bindings;
 pub mod camera;
 pub mod combat_fx;
 pub mod debug_shots;
@@ -54,7 +55,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
             .add_observer(render::add_ship_lights)
-            .add_systems(PreStartup, render::setup_materials)
+            .add_systems(PreStartup, (render::setup_materials, bindings::load_bindings))
             .add_systems(
                 Startup,
                 (

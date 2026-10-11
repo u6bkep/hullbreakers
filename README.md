@@ -14,7 +14,7 @@ HULLBREAKERS_SCENARIO=boarding cargo run   # host straight into a scenario
 ## Scenarios
 
 The crew's ship has a **mission wall** on the port side of the bridge: click
-a button (LMB, within reach) to start a scenario. Every switch rebuilds the
+a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
 **asteroid field**, and its button takes you back there.
 
@@ -61,18 +61,34 @@ client's title is `Hullbreakers — HOST:PORT`.
 |--------------|------------------|-----------------------|
 | Mouse        | look             | look (pitch past vertical tumbles the body) |
 | WASD         | walk             | thrust                |
-| Space / Ctrl | jump / —         | thrust up / down      |
+| Space / C    | jump / —         | thrust up / down      |
 | Shift        | sprint           | boost                 |
 | Q / E        | —                | roll                  |
-| F            | toggle mag boots | toggle mag boots (on = land on contact) |
+| B            | toggle mag boots | toggle mag boots (on = land on contact) |
 | V            | toggle flight assist (on by default) ||
 | T            | set reference body (what assist/brake match) to the one under the crosshair ||
 | X (hold)     | —                | brake relative to last body touched/grappled |
-| LMB          | press the button under the crosshair (within reach); otherwise fire / release grapple ||
-| RMB (hold)   | reel in                             ||
-| R (hold)     | pay out rope                        ||
-| Tab          | tuning panel (frees the mouse)      ||
+| F            | press the button under the crosshair (within reach) ||
+| LMB          | fire / release grapple              ||
+| Mouse4 or Ctrl+LMB (hold) | reel in                ||
+| Mouse5 or Alt+LMB (hold)  | pay out rope           ||
+| F1           | tuning panel (frees the mouse)      ||
+| Escape       | free the mouse                      ||
 | L            | debug: ship lurches forward         ||
+
+These are the defaults. To remap them, write a `keybinds.ron` next to the game
+listing only the actions you change, each with up to two bindings. A binding
+is a key or mouse button with optional modifiers (Shift, Ctrl, Alt, Tab,
+CapsLock):
+
+```ron
+{ "ReelIn": ["RMB", "Ctrl+LMB"], "ToggleBoots": ["G"], "Interact": ["F", "MMB"] }
+```
+
+The action names are in `src/client/bindings.rs`. When chords share a button,
+the most specific one whose modifiers are held wins, so Ctrl+LMB reels without
+also firing. Modifiers that no chord on that button uses are ignored, so Shift
+(sprint) plus a click still fires.
 
 Walk straight into a wall to climb onto it; walk off an edge to wrap around it.
 Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
@@ -166,5 +182,5 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 
 ## Tuning
 
-All feel parameters are in `sim/tuning.rs` and appear in the Tab panel. "Save"
+All feel parameters are in `sim/tuning.rs` and appear in the F1 panel. "Save"
 writes `tuning.ron` in the working directory, which is loaded at startup.

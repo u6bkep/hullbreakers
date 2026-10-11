@@ -8,6 +8,7 @@ use avian3d::prelude::{ColliderAabb, SpatialQuery, SpatialQueryFilter};
 use super::camera::{CameraFx, PlayerCamera};
 use super::LocalPlayer;
 use super::events::EventCursor;
+use super::bindings::{Action, Bindings};
 use super::input::MouseCaptured;
 use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
@@ -27,6 +28,7 @@ pub fn hud(
     mut tuning: ResMut<Tuning>,
     mut panel: ResMut<PanelState>,
     captured: Res<MouseCaptured>,
+    bindings: Res<Bindings>,
     player: Single<(Entity, &Player), With<LocalPlayer>>,
     bodies: Bodies,
     names: Query<&Name>,
@@ -74,7 +76,7 @@ pub fn hud(
         let cyan = INK;
         painter.circle_stroke(center, 11.0, egui::Stroke::new(1.5, cyan));
         let galley = painter.layout_no_wrap(
-            format!("[LMB] {label}"),
+            format!("[{}] {label}", bindings.label(Action::Interact)),
             egui::FontId::monospace(15.0),
             cyan,
         );
@@ -164,7 +166,7 @@ pub fn hud(
             ui.label(text(events.last_text.clone()));
             if captured.0 {
                 ui.label(
-                    egui::RichText::new("Tab: tuning panel")
+                    egui::RichText::new(format!("{}: tuning panel", bindings.label(Action::TuningPanel)))
                         .size(12.0)
                         .color(egui::Color32::GRAY),
                 );
