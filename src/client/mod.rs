@@ -2,6 +2,7 @@
 //! only [`LocalInput`] and [`crate::sim::ship::ShipCommand`] (plus debug
 //! actions). Which player is local is the network layer's business.
 
+pub mod animate;
 pub mod bindings;
 pub mod camera;
 pub mod combat_fx;
@@ -88,6 +89,8 @@ impl Plugin for ClientPlugin {
                 PostUpdate,
                 (
                     render::update_avatars,
+                    animate::rig_robots,
+                    animate::animate_robots,
                     camera::update_camera,
                     render::update_dust,
                 )
