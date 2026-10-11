@@ -1,2 +1,5 @@
 target/
 .claude/
+
+# Rendered by each asset build script
+assets/**/preview/

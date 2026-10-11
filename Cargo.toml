@@ -3,6 +3,7 @@ members = [".", "tools/hl-input"]
 
 [package]
 name = "hullbreakers"
+default-run = "hullbreakers"
 version = "0.1.0"
 edition = "2024"
 
