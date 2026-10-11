@@ -135,7 +135,7 @@ fn the_mission_wall_starts_a_boarding_action() {
     assert_eq!(mission(&mut app).kind, ScenarioKind::Boarding);
     let new_home = home(&mut app);
     assert_ne!(new_home, old_home, "the world wasn't rebuilt");
-    assert!(ship_of(&mut app, HullKind::Raider).is_some());
+    assert!(ship_of(&mut app, HullKind::Carrier).is_some());
     let p = player(&mut app);
     assert_eq!(p.mode.body(), Some(new_home), "not put back aboard");
     assert!(p.events.iter().any(|(_, e)| e == PlayerEvent::Respawned));
@@ -160,43 +160,44 @@ fn standing_on_a_manoeuvring_ship_holds() {
 }
 
 #[test]
-fn the_raider_hits_us_slowly() {
+fn the_carrier_hits_us_slowly() {
     let mut app = app();
     start_boarding(&mut app);
     ticks(&mut app, 20 * 60);
     let home = home(&mut app);
     let ours = *app.world().get::<Combatant>(home).unwrap();
-    let raider = ship_of(&mut app, HullKind::Raider).unwrap();
-    let theirs = *app.world().get::<Combatant>(raider).unwrap();
+    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
+    let theirs = *app.world().get::<Combatant>(carrier).unwrap();
     let survival = Tuning::default().home_survival_seconds;
     // About 20 s of a survival time's worth of fire.
     let expected = 1.0 - 20.0 / survival;
     assert!((ours.integrity - expected).abs() < 0.05, "integrity {}", ours.integrity);
-    assert!(theirs.integrity > 0.95, "raider at {}", theirs.integrity);
+    assert!(theirs.integrity > 0.95, "carrier at {}", theirs.integrity);
 }
 
 #[test]
 fn dropping_the_shield_wins_and_blows_the_crew_clear() {
     let mut app = app();
     start_boarding(&mut app);
-    let raider = ship_of(&mut app, HullKind::Raider).unwrap();
-    // On the raider's bridge, looking down at the shield console.
-    let feet = Vec3::new(0.0, 0.01, -11.0);
-    let button = Vec3::new(0.0, 1.1, -13.0);
-    stand(&mut app, raider, feet, button - (feet + Vec3::Y * eye_height()));
+    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
+    // On the carrier's bridge, looking down at the shield console.
+    let console = hullbreakers::sim::ship::carrier::CONSOLE;
+    let feet = Vec3::new(0.0, console.y - 0.5 + 0.01, console.z + 2.0);
+    let button = console + Vec3::Y * 0.6;
+    stand(&mut app, carrier, feet, button - (feet + Vec3::Y * eye_height()));
     interact(&mut app);
     ticks(&mut app, 2);
-    assert!(!app.world().get::<Combatant>(raider).unwrap().shield);
+    assert!(!app.world().get::<Combatant>(carrier).unwrap().shield);
     assert_eq!(mission(&mut app).shield_breaker.as_deref(), Some("Player 1"));
     // Our beams cut through in seconds, with the boarder still aboard.
-    let exposed = Tuning::default().raider_exposed_seconds;
+    let exposed = Tuning::default().enemy_exposed_seconds;
     let mut waited = 0;
-    while app.world().get_entity(raider).is_ok() {
-        assert!(waited < ((exposed + 2.0) * 60.0) as usize, "raider survived");
+    while app.world().get_entity(carrier).is_ok() {
+        assert!(waited < ((exposed + 2.0) * 60.0) as usize, "carrier survived");
         ticks(&mut app, 1);
         waited += 1;
     }
-    assert!(waited as f32 > exposed * 0.5 * 60.0, "raider blew up after {waited} ticks");
+    assert!(waited as f32 > exposed * 0.5 * 60.0, "carrier blew up after {waited} ticks");
     assert_eq!(mission(&mut app).phase, Phase::Won);
     let p = player(&mut app);
     assert!(matches!(p.mode, Mode::Eva { .. }));
@@ -336,21 +337,21 @@ fn frame(app: &mut App, ship: Entity) -> hullbreakers::sim::frame::BodyFrame {
 }
 
 /// The crossing, as a player would make it: out of the stern on a close
-/// pass, grapple the raider, and reel in to its hull.
+/// pass, grapple the carrier, and reel in to its hull.
 #[test]
-fn a_player_can_cross_to_the_raider() {
+fn a_player_can_cross_to_the_carrier() {
     let mut app = app();
     start_boarding(&mut app);
     // Coming up on the first close pass (half a pass in).
-    let pass = Tuning::default().duel_pass_seconds;
+    let pass = Tuning::default().carrier_pass_seconds;
     ticks(&mut app, (pass * 0.45 * 60.0) as usize);
-    let raider = ship_of(&mut app, HullKind::Raider).unwrap();
+    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
     let home = home(&mut app);
     let ours = frame(&mut app, home);
-    let theirs = frame(&mut app, raider);
-    // Just off our stern, moving with the ship, looking at the raider.
+    let theirs = frame(&mut app, carrier);
+    // Just off our stern, moving with the ship, looking at the carrier.
     let start = ours.point_to_world(Vec3::new(0.0, 1.5, 18.0));
-    let target = theirs.point_to_world(Vec3::new(0.0, 1.5, 0.0));
+    let target = theirs.point_to_world(Vec3::new(0.0, 3.0, 0.0));
     let eye = Tuning::default().eye_height - Tuning::default().capsule_height / 2.0;
     let orientation = Transform::IDENTITY
         .looking_to(target - (start + Vec3::Y * eye), Vec3::Y)
@@ -370,8 +371,8 @@ fn a_player_can_cross_to_the_raider() {
         input.presses.off.press();
     }
     ticks(&mut app, 1);
-    let grapple = player(&mut app).grapple.expect("missed the raider");
-    assert_eq!(grapple.target, raider);
+    let grapple = player(&mut app).grapple.expect("missed the carrier");
+    assert_eq!(grapple.target, carrier);
     {
         let world = app.world_mut();
         let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
@@ -382,17 +383,72 @@ fn a_player_can_cross_to_the_raider() {
     for second in 0..10 {
         ticks(&mut app, 60);
         let p = player(&mut app);
-        let theirs = frame(&mut app, raider);
+        let theirs = frame(&mut app, carrier);
         let Mode::Eva { position, velocity, .. } = p.mode else {
             panic!("expected EVA: {:?}", p.mode);
         };
         let local = theirs.point_to_local(position);
         let speed = theirs.velocity_to_local(position, velocity).length();
-        // The raider's port or starboard wall is at |x| = 4.
-        if local.x.abs() < 5.5 && local.y.abs() < 4.0 && local.z.abs() < 16.0 && speed < 1.0 {
-            eprintln!("at the raider's hull after {second} s of reeling, {speed:.1} m/s");
+        // The carrier's sides are at |x| = 6.3, its roof at y = 6.6.
+        if local.x.abs() < 8.0 && local.y > -2.5 && local.y < 9.0 && local.z.abs() < 32.0 && speed < 1.0 {
+            eprintln!("at the carrier's hull after {second} s of reeling, {speed:.1} m/s");
             return;
         }
     }
-    panic!("never reached the raider: {:?}", player(&mut app).mode);
+    panic!("never reached the carrier: {:?}", player(&mut app).mode);
+}
+
+/// From the carrier's hangar floor, up the ramp along its port wall,
+/// through the door at its top, into the upper deck's port room.
+#[test]
+fn the_carriers_ramp_leads_to_the_upper_deck() {
+    let mut app = app();
+    start_boarding(&mut app);
+    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
+    stand(&mut app, carrier, Vec3::new(-4.8, 0.01, 28.5), Vec3::NEG_Z);
+    {
+        let world = app.world_mut();
+        let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
+        input.movement = Vec3::Z;
+    }
+    let upper = hullbreakers::sim::ship::carrier::UPPER;
+    for second in 0..12 {
+        ticks(&mut app, 60);
+        let Mode::Booted { body, feet, up, .. } = player(&mut app).mode else {
+            panic!("fell off at {second} s: {:?}", player(&mut app).mode);
+        };
+        assert_eq!(body, carrier);
+        if feet.z < 12.0 {
+            assert!((feet.y - upper).abs() < 0.1 && up.y > 0.99, "in the room but at {feet}, up {up}");
+            return;
+        }
+    }
+    panic!("never reached the upper deck: {:?}", player(&mut app).mode);
+}
+
+/// The carrier's robots stand at their posts on its decks.
+#[test]
+fn the_carriers_gunners_stand_at_their_posts() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Director>().robots = true;
+    start_boarding(&mut app);
+    ticks(&mut app, 120);
+    let world = app.world_mut();
+    let gunners: Vec<Mode> = world
+        .query::<(&Robot, &Player, &hullbreakers::sim::bots::Brain)>()
+        .iter(world)
+        .filter(|(r, ..)| **r == Robot::Gunner)
+        .map(|(_, p, b)| {
+            if !matches!(p.mode, Mode::Booted { .. }) {
+                eprintln!("off its feet: {:?} post {}", p.events.iter().collect::<Vec<_>>(), b.post);
+            }
+            p.mode
+        })
+        .collect();
+    let crew: Vec<_> = world.query_filtered::<&Player, Without<Robot>>().single(world).unwrap().events.iter().collect();
+    eprintln!("crew events: {crew:?}");
+    assert_eq!(gunners.len(), 7);
+    for mode in gunners {
+        assert!(matches!(mode, Mode::Booted { up, .. } if up.y > 0.99), "{mode:?}");
+    }
 }

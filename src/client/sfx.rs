@@ -969,11 +969,11 @@ pub fn play_combat_sounds(
         (state.firing[i], state.hit[i]) = (fire, hit);
     }
 
-    // The klaxon: loud on the raider's own deck, a faint suit-radio echo of
+    // The klaxon: loud on the carrier's own deck, a faint suit-radio echo of
     // it everywhere else.
     let alarm = ships
         .iter()
-        .find(|(_, c, h, _)| h.0 == HullKind::Raider && !c.shield)
+        .find(|(_, c, h, _)| h.0 == HullKind::Carrier && !c.shield)
         .map(|(e, ..)| e);
     let klaxon = match alarm {
         Some(raider) if body == Some(raider) => 0.3,

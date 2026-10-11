@@ -92,7 +92,7 @@ pub struct Mission {
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Debris {
     pub size: Vec3,
-    /// Painted like the raider's hull rather than ours.
+    /// Painted like the enemy's hull rather than ours.
     pub hostile: bool,
 }
 
@@ -239,7 +239,7 @@ pub fn settle_battle(
 /// Breaks a ship into tumbling pieces of its hull.
 fn wreck(commands: &mut Commands, ship: Entity, kind: HullKind, frame: &super::frame::BodyFrame, tick: u32) {
     let mut rng = ChaCha8Rng::seed_from_u64(tick as u64);
-    for (center, size, material) in ship::hull_pieces(kind) {
+    for (center, size, turn, material) in ship::hull_pieces(kind) {
         if material == SimMaterial::Trim && size.max_element() < 1.5 {
             continue;
         }
@@ -259,7 +259,7 @@ fn wreck(commands: &mut Commands, ship: Entity, kind: HullKind, frame: &super::f
             Name::new("Debris"),
             Debris {
                 size,
-                hostile: kind == HullKind::Raider,
+                hostile: kind == HullKind::Carrier,
             },
             RigidBody::Dynamic,
             SleepingDisabled,
@@ -267,7 +267,7 @@ fn wreck(commands: &mut Commands, ship: Entity, kind: HullKind, frame: &super::f
             LinearVelocity(frame.point_velocity(at) + out * rng.random_range(3.0..9.0) + scatter * 1.5),
             AngularVelocity(spin),
             Position(at),
-            Rotation(frame.rotation),
+            Rotation(frame.rotation * turn),
         ));
     }
     commands.entity(ship).despawn();
@@ -406,7 +406,7 @@ const SHIP_CLEARANCE: f32 = 40.0;
 const SAMPLE_TICKS: u32 = TICK_HZ as u32 / 2;
 const BATTLE_SAMPLES: u32 = 1200;
 
-/// Two ships in a duel: ours, and a raider weaving in and out around it.
+/// Two ships in a duel: ours, and the carrier weaving in and out around it.
 /// Returns ours.
 fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool) -> Entity {
     let duel = Duel {
@@ -416,8 +416,8 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool)
         bob: 20.0,
         near: tuning.duel_near,
         far: tuning.duel_far,
-        pass: tuning.duel_pass_seconds,
-        sweep: 150.0,
+        pass: tuning.carrier_pass_seconds,
+        sweep: 240.0,
     };
     let (orbit, weave) = (
         Flight {
@@ -464,54 +464,72 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool)
             flying(orbit),
         ))
         .id();
-    let raider = commands
+    let carrier = commands
         .spawn((
-            Name::new("Raider"),
-            ShipHull(HullKind::Raider),
+            Name::new("Carrier"),
+            ShipHull(HullKind::Carrier),
             flying(weave),
             Combatant {
                 target: Some(home),
                 integrity: 1.0,
                 shield: true,
-                shielded_seconds: tuning.raider_shielded_seconds,
-                exposed_seconds: tuning.raider_exposed_seconds,
+                shielded_seconds: tuning.enemy_shielded_seconds,
+                exposed_seconds: tuning.enemy_exposed_seconds,
             },
         ))
         .id();
     commands.entity(home).insert(Combatant {
-        target: Some(raider),
+        target: Some(carrier),
         integrity: 1.0,
         shield: true,
         shielded_seconds: tuning.home_survival_seconds,
         exposed_seconds: tuning.home_survival_seconds,
     });
     if robots {
-        crew_the_raider(commands, tuning, raider, &weave, tick);
+        crew_the_carrier(commands, tuning, carrier, &weave, tick);
     }
     home
 }
 
-/// Gunners aboard the raider, facing aft toward its cargo door (where
-/// boarders come in), and Swarmers flying escort around it.
-fn crew_the_raider(commands: &mut Commands, tuning: &Tuning, raider: Entity, flight: &Flight, tick: u32) {
+/// Gunners posted along the way from the carrier's hangar door to its
+/// bridge, facing aft (toward boarders), and Swarmers flying escort.
+fn crew_the_carrier(commands: &mut Commands, tuning: &Tuning, carrier: Entity, flight: &Flight, tick: u32) {
+    use ship::carrier::UPPER;
     let aft = Quat::from_rotation_y(std::f32::consts::PI);
-    for (i, feet) in [Vec3::new(0.0, 0.01, -10.0), Vec3::new(-1.5, 0.01, 8.0)].into_iter().enumerate() {
+    let posts = [
+        // The hangar.
+        Vec3::new(-2.5, 0.0, 19.0),
+        Vec3::new(3.5, 0.0, 17.0),
+        // The lower corridor.
+        Vec3::new(0.0, 0.0, -2.0),
+        // The upper port room, inside the ramp's door.
+        Vec3::new(-4.0, UPPER, 8.0),
+        // The upper corridor.
+        Vec3::new(0.0, UPPER, -10.0),
+        // The bridge.
+        Vec3::new(-2.5, UPPER, -25.0),
+        Vec3::new(2.5, UPPER, -25.0),
+    ];
+    for (i, post) in posts.into_iter().enumerate() {
+        let feet = post + Vec3::Y * 0.01;
         let mode = Mode::Booted {
-            body: raider,
+            body: carrier,
             feet,
             up: Vec3::Y,
             velocity: Vec3::ZERO,
             orientation: aft,
             pitch: 0.0,
         };
-        commands.spawn(bots::new_robot(Robot::Gunner, mode, raider, feet, tuning, i as u32));
+        commands.spawn(bots::new_robot(Robot::Gunner, mode, carrier, feet, tuning, i as u32));
     }
     let frame = flight.frame(tick, Vec3::ZERO);
     for (i, post) in [
-        Vec3::new(12.0, 3.0, -8.0),
-        Vec3::new(-12.0, 3.0, -8.0),
-        Vec3::new(12.0, -2.0, 10.0),
-        Vec3::new(-12.0, -2.0, 10.0),
+        Vec3::new(18.0, 6.0, -20.0),
+        Vec3::new(-18.0, 6.0, -20.0),
+        Vec3::new(18.0, -4.0, 5.0),
+        Vec3::new(-18.0, -4.0, 5.0),
+        Vec3::new(10.0, 4.0, 40.0),
+        Vec3::new(-10.0, 4.0, 40.0),
     ]
     .into_iter()
     .enumerate()
@@ -523,7 +541,7 @@ fn crew_the_raider(commands: &mut Commands, tuning: &Tuning, raider: Entity, fli
             orientation: frame.rotation,
             pitch: 0.0,
         };
-        commands.spawn(bots::new_robot(Robot::Swarmer, mode, raider, post, tuning, 2 + i as u32));
+        commands.spawn(bots::new_robot(Robot::Swarmer, mode, carrier, post, tuning, 10 + i as u32));
     }
 }
 

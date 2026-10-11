@@ -32,8 +32,8 @@ use super::render::Avatar;
 use crate::sim::bots::{BodyTuning, Robot};
 use crate::sim::vitals::Vitals;
 use super::render::ShipLight;
-use crate::sim::combat::{Beams, Combatant, SHIELD_CENTER, SHIELD_RADII};
-use crate::sim::ship::{Control, ControlAction, HomeShip, Turret};
+use crate::sim::combat::{Beams, Combatant};
+use crate::sim::ship::{Control, ControlAction, HomeShip, ShipHull, Turret};
 
 pub struct CombatFxPlugin;
 
@@ -669,13 +669,13 @@ struct ShieldFitted;
 const SHIELD_FAIL_SECONDS: f32 = 0.9;
 
 fn fit_shields(
-    ships: Query<(Entity, &Combatant, Has<HomeShip>), Without<ShieldFitted>>,
+    ships: Query<(Entity, &Combatant, &ShipHull, Has<HomeShip>), Without<ShieldFitted>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ShieldMaterial>>,
     mut mesh: Local<Option<Handle<Mesh>>>,
     mut commands: Commands,
 ) {
-    for (ship, combatant, home) in &ships {
+    for (ship, combatant, hull, home) in &ships {
         if !combatant.shield {
             continue;
         }
@@ -695,7 +695,7 @@ fn fit_shields(
                 ShieldBubble { ship, failed: None },
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_translation(SHIELD_CENTER).with_scale(SHIELD_RADII),
+                Transform::from_translation(hull.0.shield().0).with_scale(hull.0.shield().1),
                 NotShadowCaster,
             ))
             .id();
@@ -709,14 +709,14 @@ fn draw_shields(
     time: Res<Time>,
     tracks: Res<BeamTracks>,
     camera: Single<&Transform, With<PlayerCamera>>,
-    ships: Query<(&Combatant, &Transform)>,
+    ships: Query<(&Combatant, &Transform, &ShipHull)>,
     mut bubbles: Query<(Entity, &mut ShieldBubble, &MeshMaterial3d<ShieldMaterial>)>,
     mut materials: ResMut<Assets<ShieldMaterial>>,
     mut commands: Commands,
 ) {
     let dt = time.delta_secs();
     for (entity, mut bubble, material) in &mut bubbles {
-        let Ok((combatant, ship)) = ships.get(bubble.ship) else {
+        let Ok((combatant, ship, hull)) = ships.get(bubble.ship) else {
             continue;
         };
         if !combatant.shield {
@@ -732,7 +732,8 @@ fn draw_shields(
         };
         let u = &mut material.shield;
         let local = ship.rotation.inverse() * (camera.translation - ship.translation);
-        let inside = ((local - SHIELD_CENTER) / SHIELD_RADII).length() < 1.0;
+        let (shield_center, shield_radii) = hull.0.shield();
+        let inside = ((local - shield_center) / shield_radii).length() < 1.0;
         let mut hits: Vec<&BeamTrack> = tracks
             .0
             .iter()
@@ -912,7 +913,7 @@ fn cool_scorches(
 const ALARM_RED: Color = Color::srgb(1.0, 0.08, 0.04);
 
 /// Our ship's lights pulse red while it's under fire, harder when it's
-/// badly hurt. A raider whose shield is down is counting down to blowing
+/// badly hurt. A carrier whose shield is down is counting down to blowing
 /// up: its lights go to a red strobe that sweeps along the hull.
 fn alert_lights(
     time: Res<Time>,

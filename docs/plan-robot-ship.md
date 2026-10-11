@@ -6,9 +6,11 @@ both need health. Design background: the combat brainstorm of 2026-10-11 (in
 project memory) and [art-style.md](art-style.md).
 
 ## Status (2026-10-11)
-Stages 1–3 are done: health and death, hands and guns, robots (Gunner and
-Swarmer; models built and in game). Not yet: the dropped-inventory pickup
-(stage 1), procedural animation of the robot models, the carrier (stage 4).
+Stages 1–4 are done: health and death, hands and guns, robots (Gunner and
+Swarmer, with weak spots), and the carrier (a code greybox: 60 m, two
+decks, hangar ramp, bridge console; replaces the raider). Not yet: the
+dropped-inventory pickup (stage 1), procedural animation of the robot
+models, carrier modules as models (stage 5).
 Known limit: robots have no pathfinding; a Gunner that loses its target
 walks straight at it and sidesteps to line up with it, which gets it through
 a doorway but not round a corner.

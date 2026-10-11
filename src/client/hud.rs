@@ -13,7 +13,6 @@ use super::input::MouseCaptured;
 use crate::sim::bots::{Robot, SpawnRobots};
 use crate::sim::vitals::{Hit, HitLog, Vitals};
 use crate::sim::weapons::{Hand, Slot};
-use crate::sim::combat::{SHIELD_CENTER, SHIELD_RADII};
 use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
 use crate::sim::mission::{Mission, Phase, ScenarioKind};
@@ -306,16 +305,18 @@ pub fn ship_markers(
     let font = egui::FontId::monospace(13.0);
     for (entity, hull, transform, visibility) in &ships {
         // Not the ship you're on or in.
-        let inside = ((transform.rotation.inverse() * (cam.translation - transform.translation) - SHIELD_CENTER)
-            / SHIELD_RADII)
+        let (shield_center, shield_radii) = hull.0.shield();
+        let inside = ((transform.rotation.inverse() * (cam.translation - transform.translation) - shield_center)
+            / shield_radii)
             .length()
             < 1.0;
         if player.mode.body() == Some(entity) || inside || *visibility == Visibility::Hidden {
             continue;
         }
-        let (name, color) = match hull.0 {
-            HullKind::Home => ("SHIP", egui::Color32::from_rgb(110, 230, 160)),
-            HullKind::Raider => ("RAIDER", egui::Color32::from_rgb(255, 95, 80)),
+        let name = hull.0.name();
+        let color = match hull.0 {
+            HullKind::Home => egui::Color32::from_rgb(110, 230, 160),
+            HullKind::Carrier => egui::Color32::from_rgb(255, 95, 80),
         };
         // The middle of the hull.
         let center = transform.translation + transform.rotation * Vec3::new(0.0, 1.5, 0.0);
@@ -579,15 +580,15 @@ pub fn mission_hud(
 
     if mission.kind == ScenarioKind::Boarding {
         let ours = ships.iter().find(|(_, home)| *home).map(|(c, _)| c);
-        let raider = ships.iter().find(|(_, home)| !*home).map(|(c, _)| c);
+        let enemy = ships.iter().find(|(_, home)| !*home).map(|(c, _)| c);
         // A wrecked ship's entity is gone: no ship, no hull.
         let ours_integrity = ours.map_or(0.0, |c| c.integrity);
-        let raider_integrity = raider.map_or(0.0, |c| c.integrity);
-        let shield_up = raider.is_some_and(|c| c.shield);
+        let enemy_integrity = enemy.map_or(0.0, |c| c.integrity);
+        let shield_up = enemy.is_some_and(|c| c.shield);
         let objective = match mission.phase {
-            Phase::Won => "Raider destroyed — return to the mission wall",
+            Phase::Won => "Carrier destroyed — return to the mission wall",
             Phase::Lost => "Hull breached — abandon ship",
-            Phase::Underway if shield_up => "Cross to the raider and disable its shield",
+            Phase::Underway if shield_up => "Board the carrier and disable its shield on the bridge",
             Phase::Underway => "Shield down — get clear!",
         };
         egui::Area::new(egui::Id::new("mission"))
@@ -598,12 +599,12 @@ pub fn mission_hud(
                     let ours_color = if ours_integrity < 0.3 { FOE_COLOR } else { HULL_COLOR };
                     let pct = format!("{:>3.0}%", ours_integrity * 100.0);
                     bar(ui, "HULL", ours_integrity, ours_color, (&pct, ours_color));
-                    let note = match (raider.is_some(), shield_up) {
+                    let note = match (enemy.is_some(), shield_up) {
                         (false, _) => ("DESTROYED", FOE_COLOR),
                         (true, true) => ("SHIELDED", SHIELD_COLOR),
                         (true, false) => ("SHIELD DOWN", egui::Color32::from_rgb(255, 190, 70)),
                     };
-                    bar(ui, "RAIDER", raider_integrity, FOE_COLOR, note);
+                    bar(ui, "CARRIER", enemy_integrity, FOE_COLOR, note);
                     ui.label(
                         egui::RichText::new(format!("{objective}   {}", clock(elapsed)))
                             .monospace()
@@ -621,7 +622,7 @@ pub fn mission_hud(
         let since = seconds_since(tick.0, ended);
         if (0.0..5.0).contains(&since) {
             let (text, color) = match mission.phase {
-                Phase::Won => ("RAIDER DESTROYED", HULL_COLOR),
+                Phase::Won => ("CARRIER DESTROYED", HULL_COLOR),
                 Phase::Lost => ("SHIP LOST", FOE_COLOR),
                 Phase::Underway => ("", INK),
             };
@@ -648,7 +649,7 @@ pub fn mission_hud(
     {
         let won = debrief.phase == Phase::Won;
         let (title, color) = if won {
-            ("RAIDER DESTROYED", HULL_COLOR)
+            ("CARRIER DESTROYED", HULL_COLOR)
         } else {
             ("SHIP LOST", FOE_COLOR)
         };

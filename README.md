@@ -18,15 +18,16 @@ a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
 **asteroid field**, and its button takes you back there. `HULLBREAKERS_SCENARIO=boarding` (or `gallery`) starts in another.
 
-- **Boarding action**: our ship and a raider duel among rocks, weaving in to
-  about 100 m and back out to 400 m every 40 s. Laser turrets on both ships fire slow,
-  shielded beams: our hull lasts about 3.5 minutes. Cross to the raider
-  (grapple and reel, or jump on a close pass), get in through its stern
-  cargo door, and press the shield console on its bridge. Our beams then
-  finish it in seconds, so get clear: it breaks apart and throws boarders
-  into space. Beams shove and burn anyone in EVA who crosses them: three
-  hits kill. Lose our ship and the crew drifts a while, then returns to the
-  field.
+- **Boarding action**: our ship and an enemy **carrier** duel among rocks,
+  the carrier weaving in to about 100 m and back out to 400 m every 60 s.
+  Laser turrets on both ships fire slow, shielded beams: our hull lasts
+  about 3.5 minutes. The carrier is 60 m long with two decks: get in
+  through the hangar door at its stern, climb the ramp up the hangar's port
+  wall, and fight forward along the upper deck to the bridge at the bow,
+  where the shield console is. Our beams then finish it in seconds, so get
+  clear: it breaks apart and throws boarders into space. Beams shove and
+  burn anyone in EVA who crosses them: three hits kill. Lose our ship and
+  the crew drifts a while, then returns to the field.
 
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn
@@ -39,9 +40,9 @@ braced and shoots tighter. Bullets fly at realistic speeds and keep the
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's
 hand works its rope; stow it and the rope holds its length.
 
-The raider is crewed by robots: two **Gunners** aboard (walkers with rifle
-arms that keep their distance and strafe; they hold the bridge and the hold
-facing the cargo door) and four **Swarmers** flying escort (fast, fragile
+The carrier is crewed by robots: seven **Gunners** posted from its hangar to
+its bridge (walkers with rifle arms that keep their distance and strafe)
+and six **Swarmers** flying escort (fast, fragile
 drones that rush in and spray). Robots are players driven by a brain on the
 host, so they move, aim and shoot by the crew's rules; they see along clear
 sight lines, chase a target that ducks out of view for a few seconds, and

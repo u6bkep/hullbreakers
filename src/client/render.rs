@@ -164,24 +164,46 @@ pub struct ShipLight {
 /// Interior lights ride along with the ship.
 pub fn add_ship_lights(
     add: On<Add, crate::sim::ship::ShipHull>,
+    hulls: Query<&crate::sim::ship::ShipHull>,
     sky: Res<super::sky::Sky>,
     mut commands: Commands,
 ) {
+    use crate::sim::ship::HullKind;
     let ship = add.entity;
-    // The cabin, out to the middle of its walls (see `ship::hull_layout`).
-    let cabin = commands
-        .spawn(super::sky::interior_light(
-            &sky,
+    let Ok(hull) = hulls.get(ship) else { return };
+    // The inside, out to the middle of its walls (see `ship::hull_layout`),
+    // and the ceiling lights.
+    let (cabin_center, cabin_size, lamps): (Vec3, Vec3, Vec<Vec3>) = match hull.0 {
+        HullKind::Home => (
             Vec3::new(0.0, 1.5, 0.0),
             Vec3::new(7.8, 3.3, 29.8),
-        ))
+            [-10.0, -4.0, 5.0, 11.0].map(|z| Vec3::new(0.0, 2.7, z)).to_vec(),
+        ),
+        HullKind::Carrier => {
+            let upper = crate::sim::ship::carrier::UPPER;
+            let mut lamps: Vec<Vec3> = Vec::new();
+            // Lower deck: the corridor, the side rooms, the forward room.
+            lamps.extend([-27.0, -16.0, -4.0, 8.0].map(|z| Vec3::new(0.0, 2.7, z)));
+            lamps.extend([-12.0, 6.0].map(|z| Vec3::new(-4.0, 2.7, z)));
+            lamps.extend([-12.0, 6.0].map(|z| Vec3::new(4.0, 2.7, z)));
+            // The hangar, high up.
+            lamps.extend([18.0, 26.0].map(|z| Vec3::new(0.0, upper + 2.6, z)));
+            // Upper deck: the bridge, the corridor, the side rooms.
+            lamps.extend([-26.0, -14.0, -2.0, 9.0].map(|z| Vec3::new(0.0, upper + 2.7, z)));
+            lamps.extend([-8.0, 8.0].map(|z| Vec3::new(-4.0, upper + 2.7, z)));
+            lamps.extend([-8.0, 8.0].map(|z| Vec3::new(4.0, upper + 2.7, z)));
+            (Vec3::new(0.0, (upper + 3.0) / 2.0, 0.0), Vec3::new(12.3, upper + 3.3, 60.3), lamps)
+        }
+    };
+    let cabin = commands
+        .spawn(super::sky::interior_light(&sky, cabin_center, cabin_size))
         .id();
     commands.entity(ship).add_child(cabin);
     let normal = ShipLight {
         color: Color::srgb(1.0, 0.92, 0.8),
         intensity: 60_000.0,
     };
-    for z in [-10.0, -4.0, 5.0, 11.0] {
+    for at in lamps {
         let light = commands
             .spawn((
                 normal,
@@ -191,7 +213,7 @@ pub fn add_ship_lights(
                     color: normal.color,
                     ..default()
                 },
-                Transform::from_xyz(0.0, 2.7, z),
+                Transform::from_translation(at),
             ))
             .id();
         commands.entity(ship).add_child(light);

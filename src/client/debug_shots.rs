@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::sim::player::{Grapple, Mode, Player};
-use crate::sim::ship::HomeShip;
+use crate::sim::ship::{HullKind, ShipHull};
 
 #[derive(Resource)]
 pub struct ShotScript {
@@ -53,7 +53,16 @@ enum Vantage {
     },
 }
 
+/// `HULLBREAKERS_SHOTS_SHIP=carrier`: tour the enemy carrier instead
+/// (start in the boarding scenario).
+fn carrier_tour() -> bool {
+    std::env::var("HULLBREAKERS_SHOTS_SHIP").is_ok_and(|v| v == "carrier")
+}
+
 fn vantages() -> Vec<(&'static str, Vantage)> {
+    if carrier_tour() {
+        return carrier_vantages();
+    }
     vec![
         (
             "interior",
@@ -127,6 +136,32 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
     ]
 }
 
+fn carrier_vantages() -> Vec<(&'static str, Vantage)> {
+    use crate::sim::ship::carrier::UPPER;
+    let booted = |feet: Vec3, forward: Vec3, pitch: f32| Vantage::Booted {
+        feet,
+        up: Vec3::Y,
+        forward,
+        pitch,
+    };
+    vec![
+        (
+            "carrier_outside",
+            Vantage::Eva {
+                offset: Vec3::new(35.0, 18.0, 70.0),
+                look_at: Vec3::new(0.0, 3.0, 0.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        ("carrier_door", booted(Vec3::new(0.0, 0.01, 29.0), Vec3::NEG_Z, 0.15)),
+        ("carrier_ramp", booted(Vec3::new(3.0, 0.01, 25.0), Vec3::new(-1.0, 0.0, -0.6), 0.3)),
+        ("carrier_lower", booted(Vec3::new(0.0, 0.01, 12.0), Vec3::NEG_Z, 0.0)),
+        ("carrier_upper_room", booted(Vec3::new(-4.8, UPPER + 0.01, 12.5), Vec3::NEG_Z, 0.0)),
+        ("carrier_upper", booted(Vec3::new(0.0, UPPER + 0.01, 10.0), Vec3::NEG_Z, 0.0)),
+        ("carrier_bridge", booted(Vec3::new(0.0, UPPER + 0.01, -21.0), Vec3::NEG_Z, -0.2)),
+    ]
+}
+
 const SETTLE_SECONDS: f32 = 1.5;
 
 pub fn run_shot_script(
@@ -134,9 +169,13 @@ pub fn run_shot_script(
     mut script: ResMut<ShotScript>,
     mut commands: Commands,
     mut player: Single<&mut Player, With<super::LocalPlayer>>,
-    ship: Single<(Entity, &Transform), With<HomeShip>>,
+    ships: Query<(Entity, &Transform, &ShipHull)>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    let want = if carrier_tour() { HullKind::Carrier } else { HullKind::Home };
+    let Some((ship_entity, ship_transform, _)) = ships.iter().find(|(.., h)| h.0 == want) else {
+        return;
+    };
     let shots = vantages();
     script.timer += time.delta_secs();
     if script.timer < SETTLE_SECONDS {
@@ -162,7 +201,6 @@ pub fn run_shot_script(
         script.next += 1;
         return;
     }
-    let (ship_entity, ship_transform) = *ship;
     player.mode = match shots[script.next].1 {
         Vantage::Booted {
             feet,

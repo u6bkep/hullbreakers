@@ -336,7 +336,7 @@ fn shooting_is_predicted() {
     assert!(firing.max(switching).max(rifle) <= 0.5, "shooting mispredicted");
 }
 
-/// The raider's robots reach a client as interpolated players with their
+/// The carrier's robots reach a client as interpolated players with their
 /// kind and health, and having them about doesn't upset the client's
 /// prediction of itself.
 #[test]

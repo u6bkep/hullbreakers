@@ -16,7 +16,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::bodies::Bodies;
-use super::ship::Turret;
+use super::ship::{ShipHull, Turret};
 use super::{SimTick, TICK_HZ};
 
 /// Turrets per ship.
@@ -64,9 +64,6 @@ impl MapEntities for Combatant {
     }
 }
 
-/// A ship's shield: an ellipsoid around the hull, in ship coordinates.
-pub const SHIELD_CENTER: Vec3 = Vec3::new(0.0, 2.0, 0.0);
-pub const SHIELD_RADII: Vec3 = Vec3::new(9.0, 7.5, 19.0);
 
 /// One beam this tick, in world coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,7 +106,7 @@ fn ray_ellipsoid(origin: Vec3, dir: Vec3, center: Vec3, radii: Vec3) -> Option<f
 pub fn update_beams(
     tick: Res<SimTick>,
     bodies: Bodies,
-    ships: Query<(&Combatant, &Collider)>,
+    ships: Query<(&Combatant, &Collider, &ShipHull)>,
     turrets: Query<(&Turret, &Transform, &ChildOf)>,
     mut beams: ResMut<Beams>,
 ) {
@@ -119,13 +116,13 @@ pub fn update_beams(
         if !beam_on(turret.index, tick.0) {
             continue;
         }
-        let Ok((combatant, _)) = ships.get(shooter) else {
+        let Ok((combatant, ..)) = ships.get(shooter) else {
             continue;
         };
         let Some(target) = combatant.target else {
             continue;
         };
-        let (Some(own), Some(theirs), Ok((target_state, hull))) =
+        let (Some(own), Some(theirs), Ok((target_state, hull, kind))) =
             (bodies.frame(shooter), bodies.frame(target), ships.get(target))
         else {
             continue;
@@ -140,7 +137,8 @@ pub fn update_beams(
         let (distance, shielded) = if target_state.shield {
             let local_origin = theirs.point_to_local(from);
             let local_dir = theirs.dir_to_local(*dir);
-            match ray_ellipsoid(local_origin, local_dir, SHIELD_CENTER, SHIELD_RADII) {
+            let (center, radii) = kind.0.shield();
+            match ray_ellipsoid(local_origin, local_dir, center, radii) {
                 Some(t) => (t, true),
                 None => (from.distance(aim), false),
             }
