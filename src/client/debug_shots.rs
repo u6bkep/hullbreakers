@@ -2,11 +2,16 @@
 //!
 //! `HULLBREAKERS_SHOTS=<dir> cargo run` teleports the player through a few
 //! vantage points, saves a screenshot at each, then exits.
+//! `HULLBREAKERS_SHOTS_SHIP=carrier` tours the enemy carrier instead, and
+//! `HULLBREAKERS_SHOTS_SHIP=hud` puts the HUD through the states it has to
+//! show (armed, hurt, critical, by an objective, dying); both start in the
+//! boarding scenario.
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::sim::player::{Grapple, Mode, Player};
+use crate::sim::vitals::Vitals;
 use crate::sim::mission::CARRIER;
 use crate::sim::ship::{HOME, ShipHull};
 
@@ -60,9 +65,23 @@ fn carrier_tour() -> bool {
     std::env::var("HULLBREAKERS_SHOTS_SHIP").is_ok_and(|v| v == "carrier")
 }
 
+/// `HULLBREAKERS_SHOTS_SHIP=hud`.
+fn hud_tour() -> bool {
+    std::env::var("HULLBREAKERS_SHOTS_SHIP").is_ok_and(|v| v == "hud")
+}
+
+/// Which ship a vantage is relative to: the carrier's tour, and the HUD
+/// tour's `hud_carrier_*` shots, are on the carrier.
+fn ship_of(name: &str) -> &'static str {
+    if carrier_tour() || (hud_tour() && name.starts_with("hud_carrier")) { CARRIER } else { HOME }
+}
+
 fn vantages() -> Vec<(&'static str, Vantage)> {
     if carrier_tour() {
         return carrier_vantages();
+    }
+    if hud_tour() {
+        return hud_vantages();
     }
     vec![
         (
@@ -163,6 +182,65 @@ fn carrier_vantages() -> Vec<(&'static str, Vantage)> {
     ]
 }
 
+fn hud_vantages() -> Vec<(&'static str, Vantage)> {
+    let upper = ShipHull::new(CARRIER).design().marker("upper_deck").y;
+    let booted = |feet: Vec3, forward: Vec3, pitch: f32| Vantage::Booted {
+        feet,
+        up: Vec3::Y,
+        forward,
+        pitch,
+    };
+    vec![
+        // At the mission wall: the interact prompt.
+        ("hud_deck", booted(Vec3::new(-2.2, 0.01, -7.3), Vec3::NEG_X, 0.08)),
+        ("hud_hurt", booted(Vec3::new(0.0, 0.01, 10.0), Vec3::NEG_Z, 0.0)),
+        ("hud_critical", booted(Vec3::new(1.5, 0.01, 12.0), Vec3::NEG_Z, 0.0)),
+        (
+            "hud_carrier_eva",
+            Vantage::Eva {
+                offset: Vec3::new(30.0, 14.0, 75.0),
+                look_at: Vec3::new(0.0, 3.0, 0.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        ("hud_carrier_console", booted(Vec3::new(0.0, upper + 0.01, -25.6), Vec3::NEG_Z, -0.38)),
+        ("hud_carrier_dead", booted(Vec3::new(0.0, upper + 0.01, 10.0), Vec3::NEG_Z, 0.0)),
+        ("hud_respawned", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+    ]
+}
+
+/// The state each HUD shot is in, set as the player arrives.
+fn hud_state(name: &str, player: &mut Player, vitals: Option<&mut Vitals>) {
+    let loadout = &mut player.loadout;
+    if name != "hud_respawned" {
+        loadout.arm_fully();
+    }
+    let Some(vitals) = vitals else { return };
+    match name {
+        "hud_hurt" => {
+            // The rifle braced and low; hurt a moment ago.
+            loadout.current = 2;
+            loadout.guns[1].mag = 6;
+            vitals.health = 55.0;
+            vitals.since_hurt = 0.0;
+        }
+        "hud_critical" => {
+            // The SMG dry, the rifle reloading; nearly dead, healing.
+            loadout.current = 0;
+            loadout.guns[0].mag = 0;
+            loadout.guns[0].reserve = 0;
+            vitals.health = 14.0;
+            vitals.since_hurt = 4.55;
+        }
+        "hud_carrier_console" => loadout.current = 1,
+        "hud_carrier_dead" => {
+            vitals.health = 0.0;
+            vitals.since_hurt = 0.0;
+        }
+        _ => {}
+    }
+}
+
 const SETTLE_SECONDS: f32 = 1.5;
 
 pub fn run_shot_script(
@@ -170,14 +248,15 @@ pub fn run_shot_script(
     mut script: ResMut<ShotScript>,
     mut commands: Commands,
     mut player: Single<&mut Player, With<super::LocalPlayer>>,
+    mut vitals: Option<Single<&mut Vitals, With<super::LocalPlayer>>>,
     ships: Query<(Entity, &Transform, &ShipHull)>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let want = if carrier_tour() { CARRIER } else { HOME };
+    let shots = vantages();
+    let want = shots.get(script.next).map_or(HOME, |(name, _)| ship_of(name));
     let Some((ship_entity, ship_transform, _)) = ships.iter().find(|(.., h)| h.0 == want) else {
         return;
     };
-    let shots = vantages();
     script.timer += time.delta_secs();
     if script.timer < SETTLE_SECONDS {
         return;
@@ -270,5 +349,8 @@ pub fn run_shot_script(
     }
     // Keep the scripted drift so the prograde marker is visible.
     player.flight_assist = false;
+    if hud_tour() {
+        hud_state(shots[script.next].0, &mut player, vitals.as_mut().map(|v| &mut ***v));
+    }
     script.next += 1;
 }

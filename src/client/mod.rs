@@ -52,7 +52,7 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin))
+        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, hud::HudPlugin))
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<input::TuningOpen>()
             .init_resource::<menu::Menu>()
@@ -63,7 +63,6 @@ impl Plugin for ClientPlugin {
             })
             .init_resource::<events::EventCursor>()
             .add_message::<events::Presented>()
-            .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
             .add_observer(render::add_ship_lights)
             .add_observer(render::add_ship_model)
@@ -145,18 +144,7 @@ impl Plugin for ClientPlugin {
             )
             .add_systems(
                 EguiPrimaryContextPass,
-                (
-                    hud::ship_markers,
-                    hud::reference_overlay,
-                    hud::hud,
-                    hud::mission_hud,
-                    hud::vitals_hud,
-                    hud::loadout_hud,
-                    gallery::label_exhibits,
-                    hud::hit_markers,
-                    menu::menu,
-                )
-                    .chain(),
+                (gallery::label_exhibits, menu::menu).chain().after(hud::HudSet),
             );
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
