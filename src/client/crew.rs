@@ -106,12 +106,15 @@ pub fn dress_crew(
                 }
             }
             if let Some(path) = item.and_then(Held::model) {
-                commands.spawn((
+                let mut model = commands.spawn((
                     HeldModel,
                     WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
                     Transform::default(),
                     ChildOf(socket),
                 ));
+                if let Some(paint) = item.and_then(Held::paint) {
+                    model.insert(super::pickup_look::WeaponPaint(paint));
+                }
             }
             look.showing[hand] = item;
         }

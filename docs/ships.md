@@ -59,8 +59,11 @@ Boxes keep their order (parts in order, modules in order, turret bases last).
 A model's `build.py` may rely on it, so add parts at the end of a module.
 
 Markers are named points. Play uses `entry` (where boarders come in) and
-`objective` (what they're there for) on enemy ships; others are free (the
-carrier's `upper_deck` is a point on its upper floor, for tests). A site
+`objective` (what they're there for) on enemy ships. Every marker whose name
+starts with `loot` (`loot_bridge`, ...) gets a loot crate on that floor spot,
+rolled better the nearer it is to the `objective` than the `entry`
+(`sim/pickups.rs`). Others are free (the carrier's `upper_deck` is a point on
+its upper floor, for tests). A site
 (below) uses them too: the derelict's `entry` is its airlock, its `objective`
 the data core.
 
@@ -129,6 +132,7 @@ Gunner can. It checks:
   on an enemy);
 - an enemy has an `entry` a walker can stand at, an `objective`, and a
   `DisableShields` control;
+- every `loot` marker is on a floor that can be walked to from the entry;
 - a site with an `entry` and an `objective` can be walked from one to the
   other with every door open (doors are drawn `D` on the plan);
 - the crew's ship (`home`) has a button for every scenario.

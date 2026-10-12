@@ -320,7 +320,7 @@ fn shooting_is_predicted() {
     // own simulation, which on a client is its prediction; so both copies.)
     for world in [s.server.world_mut(), s.client.world_mut()] {
         for mut p in world.query::<&mut Player>().iter_mut(world) {
-            p.loadout.arm_fully();
+            p.loadout.restock();
         }
     }
     s.step(60);
@@ -419,4 +419,50 @@ fn devices_reach_clients() {
     let world = s.client.world_mut();
     let objective = world.query::<&Mission>().single(world).unwrap().objective.clone();
     assert!(objective.starts_with("Route power"), "{objective}");
+}
+
+/// Putting a gun down and taking it back, on a client: the inventory is
+/// predicted, the pickup is the authority's, and the two agree.
+#[test]
+fn dropping_and_taking_back_is_predicted() {
+    use hullbreakers::sim::pickups::Pickup;
+    use hullbreakers::sim::tuning::Tuning;
+    let (_guard, mut s) = session(100);
+    s.step(60);
+    for world in [s.server.world_mut(), s.client.world_mut()] {
+        for mut p in world.query::<&mut Player>().iter_mut(world) {
+            p.loadout.restock();
+        }
+    }
+    s.input().0.stance = 0;
+    s.input().0.presses.stance.press();
+    s.step(60);
+    let gun = s.local_player().unwrap().loadout.inventory.weapons[0].expect("armed");
+    s.input().0.presses.drop.press();
+    let dropping = s.rollback_rate(120);
+    let pickups = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<&Pickup>().iter(world).cloned().collect::<Vec<_>>()
+    };
+    let (on_server, on_client) = (pickups(&mut s.server), pickups(&mut s.client));
+    assert_eq!(s.local_player().unwrap().loadout.inventory.weapons[0], None, "still holding it");
+    assert_eq!(s.server_player().loadout.inventory.weapons[0], None, "the server says still holding it");
+    assert_eq!(on_server.len(), 1, "nothing left on the server");
+    assert_eq!(on_client.len(), 1, "the client never saw it put down");
+    // Look down at it and take it.
+    let tuning = s.client.world().resource::<Tuning>().clone();
+    let Mode::Booted { feet, up, pitch, .. } = s.local_player().unwrap().mode else {
+        panic!("not on the deck");
+    };
+    let look = on_client[0].at - (feet + up * tuning.eye_height);
+    let wanted = look.y.atan2(Vec2::new(look.x, look.z).length());
+    s.input().0.add_look(Vec2::new(0.0, pitch - wanted));
+    s.step(10);
+    s.input().0.presses.interact.press();
+    let taking = s.rollback_rate(120);
+    eprintln!("dropping {dropping:.2}, taking {taking:.2} rollbacks/s");
+    assert_eq!(s.local_player().unwrap().loadout.inventory.weapons[0], Some(gun), "didn't take it back");
+    assert_eq!(s.server_player().loadout.inventory.weapons[0], Some(gun));
+    assert!(pickups(&mut s.server).is_empty() && pickups(&mut s.client).is_empty(), "it's still lying there");
+    assert!(dropping.max(taking) <= 0.5, "items mispredicted");
 }

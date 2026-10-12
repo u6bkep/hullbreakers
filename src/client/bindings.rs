@@ -42,6 +42,8 @@ pub enum Action {
     ToggleAssist,
     SetReference,
     Interact,
+    /// Put down what's in hand (cargo, else the main hand's gun).
+    DropItem,
     /// The main hand's item (primary) and the off hand's (secondary).
     MainUse,
     OffUse,
@@ -60,15 +62,17 @@ pub enum Action {
     Stance2,
     Stance3,
     Stance4,
-    /// The menu, open on what your hands hold.
+    /// The menu, open on the inventory.
     Loadout,
     TuningPanel,
     Menu,
     DebugLurch,
+    /// A loot crate at your feet (host only).
+    DebugLoot,
 }
 
 impl Action {
-    pub const ALL: [Action; 34] = [
+    pub const ALL: [Action; 36] = [
         Action::Forward,
         Action::Back,
         Action::Left,
@@ -84,6 +88,7 @@ impl Action {
         Action::ToggleAssist,
         Action::SetReference,
         Action::Interact,
+        Action::DropItem,
         Action::MainUse,
         Action::OffUse,
         Action::MainAlt,
@@ -103,6 +108,7 @@ impl Action {
         Action::TuningPanel,
         Action::Menu,
         Action::DebugLurch,
+        Action::DebugLoot,
     ];
 
     fn defaults(self) -> &'static [&'static str] {
@@ -122,6 +128,7 @@ impl Action {
             Action::ToggleAssist => &["V"],
             Action::SetReference => &["T"],
             Action::Interact => &["F"],
+            Action::DropItem => &["G"],
             Action::MainUse => &["LMB"],
             Action::OffUse => &["RMB"],
             Action::MainAlt => &["Ctrl+LMB"],
@@ -141,6 +148,7 @@ impl Action {
             Action::TuningPanel => &["F1"],
             Action::Menu => &["Escape"],
             Action::DebugLurch => &["L"],
+            Action::DebugLoot => &["K"],
         }
     }
 
@@ -167,6 +175,7 @@ impl Action {
             Action::ToggleAssist => "Flight assist",
             Action::SetReference => "Set reference body",
             Action::Interact => "Interact",
+            Action::DropItem => "Drop held item",
             Action::MainUse => "Main hand: use",
             Action::OffUse => "Off hand: use",
             Action::MainAlt => "Main hand: alternate",
@@ -182,10 +191,11 @@ impl Action {
             Action::Stance2 => "Stance 2",
             Action::Stance3 => "Stance 3",
             Action::Stance4 => "Stance 4",
-            Action::Loadout => "Loadout",
+            Action::Loadout => "Inventory",
             Action::TuningPanel => "Tuning panel",
             Action::Menu => "Menu",
             Action::DebugLurch => "Debug: ship lurch",
+            Action::DebugLoot => "Debug: loot crate (host)",
         }
     }
 
@@ -207,6 +217,7 @@ impl Action {
             | Action::ToggleAssist
             | Action::SetReference => "Movement",
             Action::Interact
+            | Action::DropItem
             | Action::MainUse
             | Action::OffUse
             | Action::MainAlt
@@ -218,7 +229,7 @@ impl Action {
             | Action::ReloadOff => "Hands",
             Action::ReelIn | Action::PayOut => "Grapple",
             Action::Stance1 | Action::Stance2 | Action::Stance3 | Action::Stance4 => "Stances",
-            Action::Loadout | Action::TuningPanel | Action::Menu | Action::DebugLurch => "Interface",
+            Action::Loadout | Action::TuningPanel | Action::Menu | Action::DebugLurch | Action::DebugLoot => "Interface",
         }
     }
 }

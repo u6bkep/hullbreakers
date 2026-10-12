@@ -14,6 +14,7 @@ pub mod events;
 pub mod flight;
 pub mod frame;
 pub mod input;
+pub mod items;
 pub mod mission;
 pub mod motion;
 pub mod nav;
@@ -90,6 +91,7 @@ impl Plugin for SimSharedPlugin {
         }
         app.add_message::<ship::ShipCommand>()
             .add_message::<bots::SpawnRobots>()
+            .add_message::<pickups::SpawnLoot>()
             .init_resource::<nav::NavGrids>()
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
@@ -169,6 +171,7 @@ impl Plugin for SimPlugin {
         app.add_message::<vitals::Damage>()
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
+            .add_observer(pickups::set_adrift)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
             .add_systems(
@@ -231,7 +234,10 @@ impl Plugin for SimPlugin {
                         vitals::beam_burns,
                         vitals::apply_damage,
                         pickups::remove_taken,
+                        pickups::spawn_drops,
+                        pickups::debug_spawn_loot,
                         vitals::settle_deaths,
+                        pickups::drop_robot_loot,
                         bots::settle_robot_deaths,
                     )
                         .chain()

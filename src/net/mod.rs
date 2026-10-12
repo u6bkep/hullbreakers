@@ -365,7 +365,10 @@ fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
         || confirmed.boots_on != predicted.boots_on
         || confirmed.flight_assist != predicted.flight_assist
         || confirmed.reference_body != predicted.reference_body
-        || confirmed.input != predicted.input;
+        || confirmed.input != predicted.input
+        // What's carried is discrete: a pickup the authority settled
+        // otherwise (someone else got there first) must be corrected.
+        || confirmed.loadout.inventory != predicted.loadout.inventory;
     if diverged {
         debug!(
             "diverged: modes {modes} grapple {grapples} input {}\n  confirmed {:?}\n  predicted {:?}",

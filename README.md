@@ -49,8 +49,9 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   conduits on the floors and ceilings show where the power runs; doors
   latch open as power reaches them. The vault opens only when its two keys,
   on the bridge and in the port room, are turned within 1.5 s of each other
-  (alone, key B holds 5 s: race to key A). Release the data core, and the
-  tripped reactor gives everyone 75 s to get back aboard before it goes.
+  (alone, key B holds 5 s: race to key A). Release the data core's clamp,
+  take the core off its cradle (it goes in your pack), and get it and
+  everyone back aboard in the 75 s before the tripped reactor goes.
 
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn
@@ -59,13 +60,44 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
 
 You start (and respawn) with the base kit: your suit and its grapple. Guns
 are in the **weapons locker** on the starboard wall of our ship's aft hold
-(press it with F for an SMG and a rifle, full; again to top up). Die, and
-what you carried stays where you fell, in a glowing case on the deck (or
-drifting on, if you were in EVA): look at it and press F to take it back.
+(press it with F): it issues a standard SMG and rifle if you have none of
+that kind, and fills your ammo and mags. Die, and everything you carried
+stays where you fell, in one glowing case on the deck (or drifting on, if
+you were in EVA): look at it and press F to take it back.
 
-Armed, players carry an SMG and a rifle. Each hand holds one item and a stance
-(1-4) sets what's in each; a one-handed gun with the other hand empty is
-braced and shoots tighter. Bullets fly at realistic speeds and keep the
+### Weapons, loot and the inventory
+
+Guns are items, Borderlands-style: each is a **frame** (SMG or rifle), a
+**maker**, five **parts** and a **rarity**, all rolled from a seed, so two
+guns of a kind play differently. Every part trades one thing for another
+(a long barrel: faster, tighter shots but a slower rate; a drum: twice the
+mag, a much slower reload; a light stock: quick to switch to, wild
+unbraced). Makers lean their guns their own way: Kessler (precise, slower),
+Brakk (heavy, crude), Hoshi (fast and light), Corvid (deep mags, loose).
+Rarity runs Standard issue (grey), Common (white), Uncommon (green), Rare
+(blue, one perk) and Exotic (orange, two perks); perks are things like
+Recycler (every fourth shot is free) and Last word (the last round in the
+mag hits three times as hard). A gun's name says who made it and its most
+telling part: "Kessler Mk3 Longshot".
+
+Robots drop things when destroyed (mostly ammo, sometimes a gun, better from
+tougher robots), and the enemy carrier has **loot crates** aboard, better
+the deeper in they are (the best on the bridge). A pickup glows in the
+colour of the best thing in it, with its best gun turning on the lid; look
+at it for what's inside and how it compares with your guns, and press F to
+take everything that fits.
+
+You carry three **weapon slots** (the stances use these, by number), a
+**pack** of six for spares and small cargo, **ammo** by kind (light rounds
+for SMGs, heavy for rifles; a reload draws from it), and bulky **cargo**
+such as a power cell, which takes both hands: whoever carries it can't
+shoot or grapple, so the team escorts them. G puts down what's in hand
+(cargo first, else the main hand's gun). The **inventory** (I) shows it all:
+click an item, then a slot to move it there (or swap); right-click drops
+it; the panel beside compares the chosen gun with yours.
+
+Each hand holds one item and a stance (1-4) sets what's in each; a one-handed
+gun with the other hand empty is braced and shoots tighter. Bullets fly at realistic speeds and keep the
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's
 hand works its rope; stow it and the rope holds its length.
 
@@ -136,20 +168,23 @@ client's title is `Hullbreakers — HOST:PORT`.
 | V            | toggle flight assist (on by default) ||
 | T            | set reference body (what assist/brake match) to the one under the crosshair ||
 | X (hold)     | —                | brake relative to last body touched/grappled |
-| F            | press the button under the crosshair (within reach) ||
+| F            | press the button, or take what's in the pickup, under the crosshair (within reach) ||
+| G            | put down what's in hand (cargo, else the main hand's gun) ||
 | LMB / RMB    | use the main / off hand's item (gun: fire; grapple: fire or let go) ||
 | Ctrl+LMB / Ctrl+RMB (hold) | that hand's alternate: for the grapple, reel in ||
 | Alt+LMB / Alt+RMB (hold)   | that hand's second alternate: for the grapple, pay out ||
 | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple ||
-| R            | reload (main hand first; a dry gun reloads itself) ||
-| 1-4          | stance: by default SMG + grapple, rifle + grapple, rifle braced, grapple alone ||
-| I            | the menu, on your loadout           ||
+| R            | reload from your ammo (main hand first; a dry gun reloads itself) ||
+| 1-4          | stance: by default weapon slot 1 + grapple, slot 2 + grapple, slot 2 braced, grapple alone ||
+| I            | the menu, on your inventory         ||
 | Escape       | the menu (frees the mouse)          ||
 | F1           | tuning panel (frees the mouse)      ||
 | L            | debug: ship lurches forward         ||
+| K            | debug (host): a loot crate at your feet ||
 
-The menu (Escape) has two pages. **Loadout** shows what you carry and lets you
-choose what each stance puts in each hand; that's saved to `stances.ron`.
+The menu (Escape) has two pages. **Inventory** shows what you carry, lets you
+sort and drop it, and lets you choose which weapon slot (or the grapple) each
+stance puts in each hand; the stances are saved to `stances.ron`.
 **Controls** remaps every action: click a binding and press the key, button or
 chord you want. Right-click clears a binding. The game goes on while the menu
 is open.

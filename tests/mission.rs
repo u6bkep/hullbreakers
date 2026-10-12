@@ -471,14 +471,14 @@ fn the_carriers_gunners_stand_at_their_posts() {
 fn the_weapons_locker_arms_you() {
     let mut app = app();
     let ship = home(&mut app);
-    assert!(player(&mut app).loadout.carried().is_empty(), "started armed");
+    assert!(player(&mut app).loadout.inventory.weapons.iter().all(Option::is_none), "started armed");
     // In the aft hold, facing the locker on the starboard wall.
     let feet = Vec3::new(2.4, 0.01, 9.0);
     let locker = Vec3::new(3.54, 1.5, 9.0);
     stand(&mut app, ship, feet, locker - (feet + Vec3::Y * eye_height()));
     interact(&mut app);
     ticks(&mut app, 2);
-    assert_eq!(player(&mut app).loadout.carried().len(), 2);
+    assert_eq!(player(&mut app).loadout.inventory.weapons.iter().flatten().count(), 2);
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn the_dead_leave_their_guns_where_they_fell() {
     let mut app = app();
     let ship = home(&mut app);
     // Armed, on the deck aft.
-    set_player(&mut app, |p| p.loadout.arm_fully());
+    set_player(&mut app, |p| p.loadout.restock());
     let feet = Vec3::new(0.0, 0.01, 10.0);
     stand(&mut app, ship, feet, Vec3::NEG_Z);
     {
@@ -496,21 +496,22 @@ fn the_dead_leave_their_guns_where_they_fell() {
         *v = Vitals { health: 0.0, since_hurt: 0.0 };
     }
     ticks(&mut app, 2);
-    assert!(player(&mut app).loadout.carried().is_empty(), "respawned armed");
+    assert!(player(&mut app).loadout.inventory.weapons.iter().all(Option::is_none), "respawned armed");
     let pickups = |app: &mut App| {
         let world = app.world_mut();
         world.query::<&Pickup>().iter(world).cloned().collect::<Vec<_>>()
     };
     let dropped = pickups(&mut app);
     assert_eq!(dropped.len(), 1);
-    assert_eq!(dropped[0].guns.len(), 2);
+    let guns = dropped[0].items.iter().filter(|i| matches!(i, hullbreakers::sim::items::Item::Weapon(_)));
+    assert_eq!(guns.count(), 2);
     assert_eq!(dropped[0].body, Some(ship));
     // Back to it, looking at it: take them.
     let stand_at = Vec3::new(0.0, 0.01, 8.5);
     stand(&mut app, ship, stand_at, dropped[0].at - (stand_at + Vec3::Y * eye_height()));
     interact(&mut app);
     ticks(&mut app, 2);
-    assert_eq!(player(&mut app).loadout.carried().len(), 2, "didn't pick them up");
+    assert_eq!(player(&mut app).loadout.inventory.weapons.iter().flatten().count(), 2, "didn't pick them up");
     assert!(pickups(&mut app).is_empty(), "the case is still there");
 }
 
@@ -634,10 +635,22 @@ fn the_dead_ship_can_be_won() {
     assert!(live(&mut app, derelict, "vault"), "the keys didn't open the vault");
     press_device(&mut app, derelict, "core_clamp");
     let m = mission(&mut app);
-    assert!(m.objective.contains("back to the ship"), "{}", m.objective);
+    assert!(m.objective.contains("take the data core"), "{}", m.objective);
     assert!(m.status[0].starts_with("Overload in"), "{:?}", m.status);
-    // Home: on our deck.
+    // Home without the core isn't a win.
     let ship = home(&mut app);
+    stand(&mut app, ship, Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z);
+    ticks(&mut app, 2);
+    assert_eq!(mission(&mut app).phase, Phase::Underway, "won without the core");
+    // Take the core off its cradle, then home.
+    let core = mission(&mut app).markers.iter().find(|m| m.label == "Data core").expect("no core marker").at;
+    let feet = Vec3::new(core.x, 0.01, core.z + 1.4);
+    stand(&mut app, derelict, feet, core - (feet + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    let core = hullbreakers::sim::items::Item::Cargo(hullbreakers::sim::items::CargoKind::DataCore);
+    assert!(player(&mut app).loadout.inventory.pack.contains(&Some(core)), "didn't take the core");
+    assert!(mission(&mut app).objective.contains("everyone back"), "{}", mission(&mut app).objective);
     stand(&mut app, ship, Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z);
     ticks(&mut app, 2);
     let m = mission(&mut app);
@@ -651,7 +664,7 @@ fn the_dead_ship_can_be_won() {
     assert_eq!(debrief.scenario, ScenarioKind::DeadShip);
     let card = &debrief.crew[0];
     assert!(card.aboard);
-    for credit in ["restarted the reactor", "turned key A", "turned key B", "released the data core", "turned junctions 5 times"] {
+    for credit in ["restarted the reactor", "turned key A", "turned key B", "released the data core", "carried the data core home", "turned junctions 5 times"] {
         assert!(card.credits.iter().any(|c| c == credit), "no {credit:?} in {:?}", card.credits);
     }
     assert!(card.presses >= 9, "{} presses", card.presses);

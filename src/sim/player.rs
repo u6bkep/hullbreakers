@@ -26,9 +26,9 @@ use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
 use super::combat::{Beams, beam_shove};
 use super::bots::{BodyTuning, Robot, tuning_of};
-use super::pickups::{PICKUP_HALF, Pickup};
+use super::pickups::{Pickup, PickupPoint};
 use super::ship::ControlAction;
-use super::weapons::{Gun, Loadout, ShotOut};
+use super::weapons::{Loadout, ShotOut};
 use super::rope::{RopeEnd, solve_rope};
 use super::ship::Control;
 use super::tuning::Tuning;
@@ -518,7 +518,7 @@ struct TickContext<'a, 'w, 's> {
     controls: &'a [ControlPoint],
     /// Everything lying about to pick up: where, how it's turned, and what's
     /// in it.
-    pickups: &'a [(Entity, Vec3, Quat, Vec<Gun>)],
+    pickups: &'a [PickupPoint],
     /// Every laser beam firing this tick.
     beams: &'a Beams,
 }
@@ -794,13 +794,22 @@ pub fn player_tick(
             center: transform.translation,
         })
         .collect();
-    let pickups: Vec<(Entity, Vec3, Quat, Vec<Gun>)> = pickups
+    let pickups: Vec<PickupPoint> = pickups
         .iter()
         .filter_map(|(entity, p)| {
             let (at, turn) = p.sim_pose(&bodies, tick.0)?;
-            Some((entity, at, turn, p.guns.clone()))
+            Some(PickupPoint {
+                entity,
+                at,
+                turn,
+                half: p.half(),
+                items: p.items.clone(),
+            })
         })
         .collect();
+    // What's been taken from each pickup so far this tick (bits by index),
+    // so two players can't both take the same thing.
+    let mut claimed: Vec<(Entity, u32)> = Vec::new();
     // Every player, simulated here or not, can be aimed at and tied to.
     let points: Vec<PlayerPoint> = players
         .iter()
@@ -868,7 +877,7 @@ pub fn player_tick(
                 (Some((t, control)), pickup) if pickup.is_none_or(|(u, _)| t <= u) => {
                     // The weapons locker arms whoever opens it, at once.
                     if control.control.action == ControlAction::Armory {
-                        player.loadout.arm_fully();
+                        player.loadout.restock();
                     }
                     player.emit(PlayerEvent::Pressed {
                         body: control.body,
@@ -876,13 +885,20 @@ pub fn player_tick(
                     });
                 }
                 (_, Some((_, i))) => {
-                    let (pickup, _, _, guns) = &ctx.pickups[i];
-                    player.loadout.take(guns);
-                    player.emit(PlayerEvent::PickedUp { pickup: *pickup });
+                    let pickup = &ctx.pickups[i];
+                    let index = match claimed.iter().position(|(e, _)| *e == pickup.entity) {
+                        Some(index) => index,
+                        None => {
+                            claimed.push((pickup.entity, 0));
+                            claimed.len() - 1
+                        }
+                    };
+                    claimed[index].1 |= super::pickups::take_from(player, pickup, claimed[index].1);
                 }
                 _ => {}
             }
         }
+        super::pickups::handle_inventory(player, &cmd);
         let hands = player.loadout.tick(&cmd, ctx.dt);
         if hands.grapple_trigger {
             if player.grapple.take().is_none() {
@@ -1019,8 +1035,8 @@ fn pickup_under_crosshair(ctx: &TickContext, bodies: &Bodies, entity: Entity, pl
     ctx.pickups
         .iter()
         .enumerate()
-        .filter_map(|(i, (_, at, turn, _))| {
-            let t = ray_box(turn.inverse() * (eye - *at), turn.inverse() * dir, PICKUP_HALF)?;
+        .filter_map(|(i, p)| {
+            let t = ray_box(p.turn.inverse() * (eye - p.at), p.turn.inverse() * dir, p.half)?;
             (t <= CONTROL_REACH && t <= blocked).then_some((t, i))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1084,15 +1100,16 @@ fn fire_shot(ctx: &TickContext, bodies: &Bodies, player: &mut Player, shot: &Sho
     let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
     let (_, own_velocity) = player.mode.world_kinematics(ctx.tuning, frame.as_ref());
     let dir = (view * Vec3::new(shot.deviation.x, shot.deviation.y, -1.0)).normalize();
-    let stats = shot.gun.stats();
     player.emit(PlayerEvent::Fired {
         hand: shot.hand,
         gun: shot.gun,
+        damage: shot.damage,
+        mass: shot.bullet_mass,
         origin: eye,
-        velocity: own_velocity + dir * stats.muzzle_speed,
+        velocity: own_velocity + dir * shot.muzzle_speed,
     });
     if let Mode::Eva { velocity, .. } = &mut player.mode {
-        *velocity -= dir * stats.bullet_mass * stats.muzzle_speed / ctx.tuning.player_mass;
+        *velocity -= dir * shot.bullet_mass * shot.muzzle_speed / ctx.tuning.player_mass;
     }
 }
 

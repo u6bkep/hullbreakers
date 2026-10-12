@@ -16,8 +16,9 @@
 //! | Alt+LMB / Alt+RMB   | that hand's second alternate (grapple: pay out) |
 //! | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple |
 //! | R                | reload (main hand first)                   |
-//! | 1-4              | stance (by default SMG+grapple, rifle+grapple, rifle braced, grapple only; see the menu's loadout) |
-//! | I                | the menu, on your loadout                  |
+//! | 1-4              | stance (by default weapon slot 1+grapple, slot 2+grapple, slot 2 braced, grapple only; see the inventory) |
+//! | I                | the menu, on your inventory                |
+//! | G                | put down what's in hand                    |
 //! | F1               | tuning panel (frees cursor)                |
 //! | Escape           | the menu (frees cursor)                    |
 //! | L                | debug: ship lurch                          |
@@ -28,7 +29,8 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::LocalInput;
 use super::bindings::{Action, Bindings, Held};
-use super::menu::{Menu, StanceLayout, Tab};
+use super::LocalPlayer;
+use super::menu::{ItemOps, Menu, StanceLayout, Tab};
 use crate::sim::input::HandHeld;
 use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::Tuning;
@@ -69,10 +71,10 @@ pub fn toggle_capture(
             }
         }
         if held.started(&bindings, Action::Loadout) {
-            if menu.open && menu.tab == Tab::Loadout {
+            if menu.open && menu.tab == Tab::Inventory {
                 menu.close();
             } else {
-                menu.open_on(Tab::Loadout);
+                menu.open_on(Tab::Inventory);
             }
         }
         if held.started(&bindings, Action::TuningPanel) {
@@ -99,11 +101,25 @@ pub fn read_input(
     captured: Res<MouseCaptured>,
     tuning: Res<Tuning>,
     stances: Res<StanceLayout>,
+    mut ops: ResMut<ItemOps>,
+    player: Option<Single<(Entity, &crate::sim::player::Player), With<LocalPlayer>>>,
     mut local: ResMut<LocalInput>,
     mut ship_orders: MessageWriter<ShipCommand>,
+    mut loot_orders: MessageWriter<crate::sim::pickups::SpawnLoot>,
 ) {
     let cmd = &mut local.0;
     cmd.stances = Some(stances.0);
+    // The inventory screen's changes, one at a time: the next once the
+    // simulation has done the last. (Without a player, they're dropped.)
+    match player.as_deref() {
+        Some((_, player)) if player.input.item_op_done(cmd) => {
+            if let Some(op) = ops.0.pop_front() {
+                cmd.ask(op);
+            }
+        }
+        Some(_) => {}
+        None => ops.0.clear(),
+    }
     if !captured.0 {
         cmd.movement = Vec3::ZERO;
         cmd.roll = 0.0;
@@ -155,6 +171,7 @@ pub fn read_input(
         (Action::ToggleAssist, &mut presses.toggle_assist),
         (Action::SetReference, &mut presses.set_reference),
         (Action::Interact, &mut presses.interact),
+        (Action::DropItem, &mut presses.drop),
         (Action::MainUse, &mut presses.main),
         (Action::OffUse, &mut presses.off),
         (Action::Reload, &mut presses.reload),
@@ -168,5 +185,10 @@ pub fn read_input(
 
     if held.started(&bindings, Action::DebugLurch) {
         ship_orders.write(ShipCommand::Lurch);
+    }
+    if held.started(&bindings, Action::DebugLoot)
+        && let Some((near, _)) = player.as_deref()
+    {
+        loot_orders.write(crate::sim::pickups::SpawnLoot { near: *near });
     }
 }

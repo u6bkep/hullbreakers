@@ -9,8 +9,9 @@
 //! derelict`): its devices and how they're wired. This module only reads
 //! their state, to tell the crew what to do next and to decide the end.
 //!
-//! Wave 4 replaces "release the data core" with the core itself, carried
-//! home as cargo: see [`core_secured`].
+//! Releasing the clamp puts the data core (cargo, not bulky: it goes in the
+//! pack) on its cradle; it's won when the crew is home with it (see
+//! [`core_secured`]).
 
 use std::collections::BTreeMap;
 
@@ -22,6 +23,8 @@ use crate::sim::bots::Robot;
 use crate::sim::design::ShipDesign;
 use crate::sim::devices::{DeviceKind, Devices};
 use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, break_up, clock, countdown, presses};
+use crate::sim::items::{CargoKind, Item};
+use crate::sim::pickups::{PICKUP_HALF, Pickup};
 use crate::sim::player::Player;
 use crate::sim::ship::{self, ControlAction, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
@@ -94,11 +97,20 @@ enum Step {
     Escape,
 }
 
-/// Whether the mission's prize is safe: for now, released from its cradle.
-/// (Wave 4: the data core, as cargo, aboard our ship.)
-fn core_secured(salvage: &Salvage) -> bool {
-    salvage.released.is_some()
+/// Whether a crew member standing on our ship has the data core.
+fn core_secured<'a>(home: Option<Entity>, crew: impl IntoIterator<Item = &'a Player>) -> bool {
+    crew.into_iter().any(|p| home.is_some() && p.mode.body() == home && carries_core(p))
 }
+
+fn carries_core(player: &Player) -> bool {
+    let inventory = &player.loadout.inventory;
+    let core = Item::Cargo(CargoKind::DataCore);
+    inventory.carrying == Some(CargoKind::DataCore) || inventory.pack.contains(&Some(core))
+}
+
+/// Where the data core sits once released: on its cradle, in the
+/// derelict's coordinates.
+const CORE_AT: Vec3 = Vec3::new(-3.0, 1.0 + PICKUP_HALF.y, -17.0);
 
 #[allow(clippy::too_many_arguments)]
 fn salvage(
@@ -111,10 +123,22 @@ fn salvage(
     homes: Query<Entity, With<HomeShip>>,
     mut players: Query<(Entity, &mut Player, Has<Robot>)>,
     names: Query<&Name>,
+    pickups: Query<&Pickup>,
     mission: Single<&mut Mission>,
     mut tally: ResMut<CrewTally>,
 ) {
     let Some(salvage) = salvage else { return };
+    // Where the data core lies, if nobody has it: (body, place).
+    let core = Item::Cargo(CargoKind::DataCore);
+    let cores: Vec<(Option<Entity>, Vec3)> = pickups
+        .iter()
+        .filter(|p| p.items.contains(&core))
+        .map(|p| match p.body {
+            Some(body) => (Some(body), p.at),
+            // Adrift (the derelict went without it): where it is now.
+            None => (None, p.sim_pose(&bodies, tick.0).map_or(p.at, |(at, _)| at)),
+        })
+        .collect();
     let mut salvage = salvage.into_inner();
     let mut mission = mission.into_inner();
     let design: &'static ShipDesign = ShipHull::new(DERELICT).design();
@@ -160,6 +184,10 @@ fn salvage(
         }
         if live("core_clamp") && salvage.released.is_none() {
             salvage.released = Some(tick.0);
+            commands.spawn((
+                Name::new("Data core"),
+                Pickup::dropped((Some(derelict), CORE_AT, Vec3::ZERO), tick.0, vec![Item::Cargo(CargoKind::DataCore)]),
+            ));
             let by = salvage.clamp_by.map_or("?".to_string(), name);
             if let Some(who) = salvage.clamp_by {
                 tally.credit(who, "released the data core");
@@ -186,12 +214,20 @@ fn salvage(
     if mission.phase == Phase::Underway && let Some(released) = salvage.released {
         let left = OVERLOAD_SECONDS - tick.0.wrapping_sub(released) as f32 / TICK_HZ as f32;
         let all_home = !crew.is_empty() && aboard == crew.len();
-        let outcome = if all_home && core_secured(&salvage) {
+        let secured = core_secured(home, players.iter().filter(|(.., robot)| !robot).map(|(_, p, _)| p));
+        let outcome = if all_home && secured {
+            if let Some((who, ..)) = players.iter().find(|(_, p, robot)| !robot && carries_core(p)) {
+                tally.credit(who, "carried the data core home");
+                mission.report.push(format!("{} brought the data core home.", name(who)));
+            }
             mission.report.push(format!("Everyone home with {} to spare.", clock(left)));
             Some((Phase::Won, "SALVAGE COMPLETE"))
         } else if left <= 0.0 {
             let left_behind = crew.len() - aboard;
             mission.report.push(format!("The reactor went with {left_behind} of the crew still out."));
+            if !secured {
+                mission.report.push("The data core never made it home.".into());
+            }
             Some((Phase::Lost, "DERELICT LOST"))
         } else {
             None
@@ -244,19 +280,33 @@ fn salvage(
             (objective, vec![device("key_a", MarkerKind::Device), device("key_b", MarkerKind::Device)])
         }
         (_, Step::Release) => ("Release the data core in the vault".to_string(), vec![device("core_clamp", MarkerKind::Goal)]),
-        (_, Step::Escape) => (
-            "Reactor overload — everyone back to the ship!".to_string(),
-            home.map(|home| Marker {
+        (_, Step::Escape) => {
+            let core: Vec<Marker> = cores
+                .iter()
+                .map(|&(body, at)| Marker {
+                    label: "Data core".into(),
+                    kind: MarkerKind::Goal,
+                    body,
+                    at,
+                    player: None,
+                    device: None,
+                })
+                .collect();
+            let objective = if core.is_empty() {
+                "Reactor overload — everyone back to the ship!"
+            } else {
+                "Reactor overload — take the data core and get back to the ship!"
+            };
+            let ship = home.map(|home| Marker {
                 label: "Ship".into(),
                 kind: MarkerKind::Exit,
                 body: Some(home),
                 at: Vec3::new(0.0, 1.5, 8.0),
                 player: None,
                 device: None,
-            })
-            .into_iter()
-            .collect(),
-        ),
+            });
+            (objective.to_string(), core.into_iter().chain(ship).collect())
+        }
     };
     let status = match salvage.released {
         Some(released) if mission.phase == Phase::Underway => {

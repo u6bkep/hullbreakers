@@ -489,6 +489,17 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
             problems.push(format!("control {action:?} at {center}: nowhere to stand within reach"));
         }
     }
+    // Loot crates (`loot…` markers) stand on a floor the boarders can walk to.
+    let mut loot: Vec<_> = ship.markers.iter().filter(|(name, _)| name.starts_with("loot")).collect();
+    loot.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, &at) in loot {
+        let on = grid.standing_on(at).map(|n| grid.point(n));
+        if !on.is_some_and(|p| near(p, at, 0.6)) {
+            problems.push(format!("loot marker {name:?} at {at}: not on a floor"));
+        } else if entry_node.is_some() && !reachable(at) {
+            problems.push(format!("loot marker {name:?} at {at}: can't be walked to from the entry"));
+        }
+    }
     // A site to explore (with its doors open): its objective can be walked
     // to from its entry.
     if !ship.hostile

@@ -127,6 +127,7 @@ fn build(stage: &mut Stage) -> Entity {
     if stage.robots {
         crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick);
     }
+    crate::sim::pickups::stock_ship(commands, carrier, ShipHull::new(CARRIER).design(), tick);
     home
 }
 
