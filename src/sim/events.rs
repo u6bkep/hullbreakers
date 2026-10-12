@@ -13,6 +13,7 @@ use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::items::Item;
 use super::ship::ControlAction;
 use super::weapons::{GunKind, Hand};
 
@@ -78,14 +79,26 @@ pub enum PlayerEvent {
     BeamHit,
     /// Ran out of health (a respawn follows).
     Died,
-    /// Took what was in a pickup.
+    /// Took from a pickup: the items whose bits are set in `taken` (by
+    /// their index in it), and some of up to two boxes of ammo (their
+    /// index, and the rounds left in them).
     PickedUp {
         pickup: Entity,
+        taken: u32,
+        partly: [Option<(u8, u16)>; 2],
     },
-    /// A shot left a gun: from `origin` (the eye), at `velocity`.
+    /// Couldn't take anything from a pickup: no room for it.
+    InventoryFull,
+    /// Put something down (the authority leaves it as a pickup).
+    Dropped(Item),
+    /// A shot left a gun (a `gun` frame): from `origin` (the eye), at
+    /// `velocity`, to do `damage` and push what it hits with a bullet of
+    /// `mass`.
     Fired {
         hand: Hand,
         gun: GunKind,
+        damage: f32,
+        mass: f32,
         origin: Vec3,
         velocity: Vec3,
     },
@@ -136,6 +149,8 @@ impl PlayerEvent {
             PlayerEvent::Died => "killed".into(),
             PlayerEvent::Fired { .. } => return None,
             PlayerEvent::PickedUp { .. } => "picked up".into(),
+            PlayerEvent::InventoryFull => "no room: drop something first".into(),
+            PlayerEvent::Dropped(item) => format!("dropped {}", item.name()),
         })
     }
 }
@@ -149,7 +164,7 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::BodyChanged { body }
             | PlayerEvent::GrappleAttached { body, .. }
             | PlayerEvent::Pressed { body, .. } => *body = mapper.get_mapped(*body),
-            PlayerEvent::PickedUp { pickup } => *pickup = mapper.get_mapped(*pickup),
+            PlayerEvent::PickedUp { pickup, .. } => *pickup = mapper.get_mapped(*pickup),
             PlayerEvent::Detached(_)
             | PlayerEvent::GrappleMissed
             | PlayerEvent::GrappleReleased
@@ -161,6 +176,8 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::Respawned
             | PlayerEvent::BeamHit
             | PlayerEvent::Died
+            | PlayerEvent::InventoryFull
+            | PlayerEvent::Dropped(_)
             | PlayerEvent::Fired { .. } => {}
         }
     }

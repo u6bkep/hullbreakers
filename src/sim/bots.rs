@@ -23,7 +23,7 @@ use super::player::{Mode, Player, PlayerTelemetry, PreviousMode, capsule};
 use super::shots::Team;
 use super::tuning::Tuning;
 use super::vitals::Vitals;
-use super::weapons::{Gun, GunKind, Loadout, STANCES, Slot, Stance};
+use super::weapons::{GunKind, Loadout};
 use super::{Layer, SimTick, TICK_HZ};
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -227,19 +227,7 @@ impl MapEntities for Brain {
 /// timing.
 pub fn new_robot(kind: Robot, mode: Mode, home: Entity, post: Vec3, base: &Tuning, index: u32) -> impl Bundle {
     let tuning = kind.tuning(base);
-    let gun = Slot::Gun(0);
-    let loadout = Loadout {
-        guns: vec![Gun {
-            reserve: u16::MAX,
-            ..Gun::full(kind.gun())
-        }],
-        current: 0,
-        stances: [Stance {
-            main: gun,
-            off: Slot::Empty,
-        }; STANCES],
-        ..Loadout::default()
-    };
+    let loadout = Loadout::robot(kind.gun());
     (
         Name::new(kind.name()),
         kind,

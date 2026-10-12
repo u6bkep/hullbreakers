@@ -39,6 +39,20 @@ it.
   round-trip with the user. Pattern to watch: egui's sizing is implicit and
   layout-pass dependent, so every non-trivial window needs a screenshot to
   check.
+- 2026-10-12. The inventory screen puts its item cards and the chosen
+  item's details side by side, with `ui.separator()` between them in a
+  horizontal layout. A separator there spans the *available* height, which
+  was the rest of the screen, so the window ran off the bottom. Fix: the
+  side-by-side part lives in an `allocate_ui_with_layout` of fixed height
+  (`ITEMS_HEIGHT`, `src/client/menu.rs`). Cost: one harness round-trip.
+  Same pattern as the entry above: implicit sizing, caught only on screen.
+
+## Our own: screenshot tour
+
+- 2026-10-12. `HULLBREAKERS_SHOTS=<dir>` doesn't create its directory; Bevy's
+  `save_to_disk` logs an IO error per shot and the tour finishes with
+  nothing. Worked around with `mkdir -p` first. Cost: one run (~1 min).
+  (`src/client/debug_shots.rs`; not fixed.)
 
 ## Bevy rendering
 

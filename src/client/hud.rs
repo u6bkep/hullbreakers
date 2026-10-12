@@ -11,7 +11,7 @@ use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
 use super::input::{MouseCaptured, TuningOpen};
 use crate::sim::bots::{Robot, SpawnRobots};
-use crate::sim::pickups::{PICKUP_HALF, Pickup};
+use crate::sim::pickups::Pickup;
 use crate::sim::vitals::{Hit, HitLog, Vitals};
 use crate::sim::weapons::{Hand, Slot};
 use crate::sim::bodies::Bodies;
@@ -174,7 +174,7 @@ pub fn hud(
             if captured.0 {
                 ui.label(
                     egui::RichText::new(format!(
-                        "{}: menu   {}: loadout   {}: tuning panel",
+                        "{}: menu   {}: inventory   {}: tuning panel",
                         bindings.label(Action::Menu),
                         bindings.label(Action::Loadout),
                         bindings.label(Action::TuningPanel)
@@ -278,9 +278,8 @@ fn control_prompt(
     let blocked = blocked + 0.1;
     let cases = pickups.iter().filter_map(|(pickup, transform)| {
         let turn = transform.rotation.inverse();
-        let t = crate::sim::player::ray_box(turn * (eye - transform.translation), turn * *dir, PICKUP_HALF)?;
-        let names: Vec<&str> = pickup.guns.iter().map(|g| g.kind.stats().name).collect();
-        (t <= CONTROL_REACH && t <= blocked).then(|| (t, format!("Pick up: {}", names.join(", "))))
+        let t = crate::sim::player::ray_box(turn * (eye - transform.translation), turn * *dir, pickup.half())?;
+        (t <= CONTROL_REACH && t <= blocked).then(|| (t, pickup.label()))
     });
     buttons
         .chain(cases)
@@ -803,7 +802,7 @@ pub fn loadout_hud(
         let max = egui::pos2(right - column as f32 * (CARD.x + GAP), bottom);
         let card = egui::Rect::from_min_max(max - CARD, max);
         let slot = stance.slot(hand);
-        let gun = loadout.gun(hand);
+        let gun = loadout.weapon(hand);
         let lit = !switching && slot != Slot::Empty;
         painter.rect_filled(card, 4.0, egui::Color32::from_black_alpha(if lit { 190 } else { 120 }));
         painter.rect_stroke(
@@ -819,16 +818,24 @@ pub fn loadout_hud(
         };
         painter.text(inner.left_top(), egui::Align2::LEFT_TOP, format!("{side} · {}", bindings.label(action)), mono(10.0), dim);
         let name = match slot {
-            Slot::Gun(i) => loadout.guns.get(i as usize).map_or("—", |g| g.kind.stats().name),
-            Slot::Grapple => "Grapple",
-            Slot::Empty => "—",
+            _ if loadout.hands_full() => "Hands full".to_string(),
+            Slot::Gun(_) => gun.map_or("—".to_string(), |g| g.name()),
+            Slot::Grapple => "Grapple".to_string(),
+            Slot::Empty => "—".to_string(),
         };
-        let name_color = if gun.is_some() || slot == Slot::Grapple { ink } else { dim };
-        painter.text(inner.left_top() + egui::vec2(0.0, 14.0), egui::Align2::LEFT_TOP, name, mono(15.0), name_color);
+        let name_color = match gun {
+            Some(g) => super::items_hud::rarity_color(g.rarity),
+            None if slot == Slot::Grapple => ink,
+            None => dim,
+        };
+        // Rolled names run long: smaller, clear of the mag count.
+        let size = if name.chars().count() > 12 { 11.0 } else { 15.0 };
+        painter.text(inner.left_top() + egui::vec2(0.0, 14.0), egui::Align2::LEFT_TOP, name, mono(size), name_color);
         let bar = egui::Rect::from_min_size(inner.left_bottom() - egui::vec2(0.0, 4.0), egui::vec2(inner.width(), 4.0));
         match (slot, gun) {
             (Slot::Gun(_), Some(gun)) => {
-                let stats = gun.kind.stats();
+                let stats = gun.stats();
+                let reserve = loadout.reserve(hand).unwrap_or(0);
                 let state = loadout.hands[hand as usize];
                 let fill = gun.mag as f32 / stats.mag as f32;
                 let color = match fill {
@@ -840,21 +847,20 @@ pub fn loadout_hud(
                 painter.text(
                     inner.right_top() + egui::vec2(0.0, 36.0),
                     egui::Align2::RIGHT_TOP,
-                    format!("/ {}", gun.reserve),
+                    format!("/ {reserve}"),
                     mono(11.0),
-                    if gun.reserve == 0 { red } else { dim },
+                    if reserve == 0 { red } else { dim },
                 );
                 let mut tag = None;
                 painter.rect_filled(bar, 1.0, egui::Color32::from_white_alpha(25));
-                if let Some(left) = state.reloading {
-                    let done = 1.0 - (left / stats.reload).clamp(0.0, 1.0);
+                if let Some(done) = loadout.reload_progress(hand) {
                     painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * done, bar.height())), 1.0, cyan);
                     tag = Some(("RELOADING", cyan));
                 } else {
                     painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * fill, bar.height())), 1.0, color);
                     if state.reload_queued {
                         tag = Some(("QUEUED", cyan));
-                    } else if gun.mag == 0 && gun.reserve == 0 {
+                    } else if gun.mag == 0 && reserve == 0 {
                         tag = Some(("EMPTY", red));
                     } else if loadout.braced(hand) {
                         tag = Some(("BRACED", dim));
@@ -864,8 +870,8 @@ pub fn loadout_hud(
                     painter.text(inner.left_top() + egui::vec2(0.0, 34.0), egui::Align2::LEFT_TOP, tag, mono(10.0), color);
                 }
             }
-            (Slot::Gun(_), None) => {
-                painter.text(inner.left_top() + egui::vec2(0.0, 34.0), egui::Align2::LEFT_TOP, "not carried", mono(10.0), amber);
+            (Slot::Gun(_), None) if !loadout.hands_full() => {
+                painter.text(inner.left_top() + egui::vec2(0.0, 34.0), egui::Align2::LEFT_TOP, "empty slot", mono(10.0), amber);
             }
             (Slot::Grapple, _) => {
                 let text = match &player.grapple {
@@ -874,7 +880,7 @@ pub fn loadout_hud(
                 };
                 painter.text(inner.left_top() + egui::vec2(0.0, 34.0), egui::Align2::LEFT_TOP, text, mono(10.0), dim);
             }
-            (Slot::Empty, _) => {}
+            _ => {}
         }
     }
 
@@ -882,8 +888,8 @@ pub fn loadout_hud(
     let short = |slot: Slot| match slot {
         Slot::Empty => "—",
         Slot::Grapple => "GRP",
-        Slot::Gun(i) => match loadout.guns.get(i as usize) {
-            Some(g) if g.carried => match g.kind {
+        Slot::Gun(i) => match loadout.inventory.weapons.get(i as usize).copied().flatten() {
+            Some(g) => match g.frame {
                 crate::sim::weapons::GunKind::Smg => "SMG",
                 crate::sim::weapons::GunKind::Rifle => "RFL",
                 _ => "GUN",
@@ -901,7 +907,7 @@ pub fn loadout_hud(
         painter.rect_filled(rect, 3.0, egui::Color32::from_black_alpha(if current { 160 } else { 80 }));
         if current {
             let underline = egui::Rect::from_min_size(rect.left_bottom() - egui::vec2(0.0, 2.0), egui::vec2(chip.x, 2.0));
-            let done = if switching { 1.0 - loadout.switching / crate::sim::weapons::SWITCH_SECONDS } else { 1.0 };
+            let done = 1.0 - loadout.switch_fraction();
             painter.rect_filled(
                 egui::Rect::from_min_size(underline.min, egui::vec2(chip.x * done, 2.0)),
                 0.0,
@@ -919,11 +925,11 @@ pub fn loadout_hud(
     }
 
     // No guns at all: say where they are.
-    if !loadout.guns.iter().any(|g| g.carried) {
+    if loadout.inventory.weapons.iter().all(Option::is_none) {
         painter.text(
             egui::pos2(right, top - 6.0),
             egui::Align2::RIGHT_BOTTOM,
-            format!("Unarmed: guns are in the weapons locker ({}: loadout)", bindings.label(Action::Loadout)),
+            format!("Unarmed: guns are in the weapons locker ({}: inventory)", bindings.label(Action::Loadout)),
             mono(12.0),
             amber,
         );
