@@ -84,6 +84,9 @@ pub struct HudMemory {
     pub kit: Option<Entity>,
     /// World direction toward each recent hit's source, and when.
     pub arcs: Vec<(Vec3, f32)>,
+    /// Where the mission strip was drawn, if it was (for the next frame's
+    /// marks to keep off).
+    pub mission_strip: Option<egui::Rect>,
     /// Where world markers' labels went this frame.
     pub labels: markers::Labels,
 }
@@ -93,7 +96,8 @@ fn begin_frame(mut contexts: EguiContexts, time: Res<Time>, mut memory: ResMut<H
     memory.labels.clear();
     // World markers' labels keep off the HUD's own blocks.
     let screen = contexts.ctx_mut()?.content_rect();
-    memory.labels.reserve(screen);
+    let strip = memory.mission_strip.take();
+    memory.labels.reserve(screen, strip);
     Ok(())
 }
 

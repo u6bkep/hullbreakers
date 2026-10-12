@@ -39,10 +39,11 @@ fn report(ship: &ShipDesign) -> bool {
     );
     let count = |gait: Gait| ship.posts.iter().filter(|p| p.robot.gait() == gait).count();
     println!(
-        "posts: {} walkers, {} flyers, {} mounts; {} controls, {} lights",
+        "posts: {} walkers, {} flyers, {} mounts, {} crawlers; {} controls, {} lights",
         count(Gait::Walker),
         count(Gait::Flyer),
         count(Gait::Mount),
+        count(Gait::Crawler),
         ship.controls.len(),
         ship.lights.len()
     );

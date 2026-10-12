@@ -13,7 +13,6 @@ use bevy::prelude::*;
 use bevy::world_serialization::WorldAssetRoot;
 use bevy_egui::{EguiContexts, egui};
 
-use super::camera::PlayerCamera;
 use super::guns::{self, GunLook, GunModels};
 use crate::sim::items::{Rarity, Weapon};
 use crate::sim::weapons::GunKind;
@@ -91,7 +90,7 @@ pub fn set_out_gallery(add: On<Add, GalleryAnchor>, assets: Res<AssetServer>, mu
         for (i, model) in models.iter().enumerate() {
             row.spawn((
                 Exhibit {
-                    label: model.trim_end_matches(".glb").to_string(),
+                    label: short_path(model),
                     radius: None,
                     index: i,
                 },
@@ -107,99 +106,163 @@ pub fn set_out_gallery(add: On<Add, GalleryAnchor>, assets: Res<AssetServer>, mu
 /// Where weapon parts' models are (they're shown on racks, not in the row).
 const PARTS: &str = "weapons/parts/";
 
-/// Something on the armoury's racks, and its label.
-#[derive(Component)]
-pub struct RackItem(String);
+/// The gallery's areas, from its anchor, round where visitors start (the
+/// anchor's `START`): the model row ahead of them, the robots to their left
+/// (set out by the authority, see `bots::spawn_zoo`), the weapon parts to
+/// their right, the rolled guns behind them. Each is seen whole from the
+/// start by turning, and close up by a short flight.
+pub const START: Vec3 = Vec3::new(0.0, 0.0, 7.0);
+/// The parts' wall: its middle, right of the start, facing it.
+const PARTS_AT: Vec3 = Vec3::new(3.2, 0.0, 7.4);
+/// The rolled guns' wall: its middle, behind the start, facing it.
+const ROLLED_AT: Vec3 = Vec3::new(0.0, 0.0, 11.0);
 
-/// Above the row, nearer the visitors: the armoury. A rack per crew frame
-/// of every part variant, side on (muzzle to the left), grouped by slot;
-/// below them, a row of rolled guns, each put together from its parts as
-/// it's drawn in play (see `guns`).
+/// Something in the armoury (a part, a rolled gun, a heading) and its
+/// label: under it, or (a heading) where it is, larger.
+#[derive(Component)]
+pub struct RackItem {
+    text: String,
+    heading: bool,
+    /// The middle of its area (`PARTS_AT` or `ROLLED_AT`): its label shows
+    /// only while you face that.
+    area: Vec3,
+}
+
+impl RackItem {
+    fn item(area: Vec3, text: impl Into<String>) -> RackItem {
+        RackItem { text: text.into(), heading: false, area }
+    }
+
+    fn heading(area: Vec3, text: impl Into<String>) -> RackItem {
+        RackItem { text: text.into(), heading: true, area }
+    }
+}
+
+/// The armoury. To the right of the start, every part variant: a block per
+/// crew frame, a row per slot, a column per variant, side on (muzzle to the
+/// left as you face it), headed by its frame and its slot. Behind the start,
+/// a dozen rolled guns, each put together from its parts as it's drawn in
+/// play (see `guns`), an SMG row over a rifle row.
 fn set_out_armoury(anchor: Entity, assets: &AssetServer, guns: &mut GunModels, commands: &mut Commands) {
-    let side_on = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
-    for (row, frame) in GunKind::CREW.into_iter().enumerate() {
-        let y = ARMOURY.y + 1.0 - row as f32 * 0.45;
-        let mut x = -RACK_WIDTH / 2.0;
-        let mut last_slot = None;
-        for part in guns::VARIANTS {
-            let Some(path) = guns::part_model(frame, part) else { continue };
-            if last_slot.is_some_and(|s| s != part.slot()) {
-                x += RACK_SLOT_GAP;
+    let put = |commands: &mut Commands, item: RackItem, at: Vec3, turn: Quat| {
+        commands.spawn((item, Transform::from_translation(at).with_rotation(turn), Visibility::default(), ChildOf(anchor))).id()
+    };
+    // Parts, on a wall facing −X (the start): along it, +Z is to the right.
+    let slots = ["Barrel", "Magazine", "Stock", "Sight", "Muzzle"];
+    let block = PART_COLUMNS as f32 * PART_SPACING;
+    let left = PARTS_AT.z - (2.0 * block + PART_BLOCK_GAP) / 2.0;
+    for (b, frame) in GunKind::CREW.into_iter().enumerate() {
+        let z0 = left + b as f32 * (block + PART_BLOCK_GAP);
+        let top = PARTS_AT.y + (slots.len() as f32 - 1.0) * PART_ROW / 2.0;
+        put(commands, RackItem::heading(PARTS_AT, format!("{} parts", frame.name())), Vec3::new(PARTS_AT.x, top + 0.45, z0 + block / 2.0), Quat::IDENTITY);
+        for (r, slot) in slots.iter().enumerate() {
+            let y = top - r as f32 * PART_ROW;
+            if b == 0 {
+                put(commands, RackItem::heading(PARTS_AT, slot.to_string()), Vec3::new(PARTS_AT.x, y, left - 0.55), Quat::IDENTITY);
             }
-            last_slot = Some(part.slot());
-            commands.spawn((
-                RackItem(format!("{} {}", frame.name(), part.name().to_lowercase())),
-                WorldAssetRoot(guns.get(assets, &path)),
-                Transform::from_xyz(x, y, ARMOURY.z).with_rotation(side_on),
-                ChildOf(anchor),
-            ));
-            x += RACK_SPACING;
+            for (c, part) in guns::VARIANTS.iter().filter(|p| p.slot() == *slot).enumerate() {
+                let Some(path) = guns::part_model(frame, *part) else { continue };
+                let at = Vec3::new(PARTS_AT.x, y, z0 + (c as f32 + 0.5) * PART_SPACING);
+                let item = put(commands, RackItem::item(PARTS_AT, variant_word(part.name())), at, Quat::IDENTITY);
+                commands.entity(item).insert(WorldAssetRoot(guns.get(assets, &path)));
+            }
         }
     }
-    // Rolled guns, each frame through every rarity.
+    // Rolled guns, on a wall facing −Z (the start): +X is to its left, so a
+    // gun turned a quarter about +Y has its muzzle to the left.
+    let side_on = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2);
     let rarities = [Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Exotic, Rarity::Common, Rarity::Rare];
-    let mut x = -ROLLED_SPACING * (2 * rarities.len()) as f32 / 2.0;
-    for frame in GunKind::CREW {
+    put(commands, RackItem::heading(ROLLED_AT, "Rolled guns"), ROLLED_AT + Vec3::Y * 1.05, Quat::IDENTITY);
+    for (row, frame) in GunKind::CREW.into_iter().enumerate() {
+        let y = ROLLED_AT.y + 0.45 - row as f32 * 0.9;
         for (i, rarity) in rarities.into_iter().enumerate() {
             let weapon = Weapon::new(frame, 1000 + i as u32 * 7919, rarity);
-            if let Some(gun) = guns::spawn_gun(
+            // Left to right as you face it: from +X to −X.
+            let x = ROLLED_AT.x + (rarities.len() as f32 - 1.0) * ROLLED_SPACING / 2.0 - i as f32 * ROLLED_SPACING;
+            // The name in two lines: maker and model, then epithet and
+            // rarity, so neighbours' labels keep apart.
+            let name = weapon.name();
+            let (first, last) = name.rsplit_once(' ').unwrap_or((name.as_str(), ""));
+            guns::spawn_gun(
                 commands,
                 guns,
                 assets,
                 GunLook::of(&weapon),
                 (
-                    RackItem(format!("{} ({:?})", weapon.name(), rarity)),
-                    Transform::from_xyz(x, ARMOURY.y, ARMOURY.z).with_rotation(side_on),
+                    RackItem::item(ROLLED_AT, format!("{first}\n{last} ({rarity:?})")),
+                    Transform::from_xyz(x, y, ROLLED_AT.z).with_rotation(side_on),
                     Visibility::default(),
                     ChildOf(anchor),
                 ),
-            ) {
-                commands.entity(gun).insert(Name::new(weapon.name()));
-            }
-            x += ROLLED_SPACING;
+            );
         }
     }
 }
 
-/// The armoury, from the gallery's anchor (m): the rolled guns' height and
-/// how far in front of the row; the racks above them.
-const ARMOURY: Vec3 = Vec3::new(0.0, -0.1, 5.2);
-/// Room per part on a rack, between slots, and the racks' width (m).
-const RACK_SPACING: f32 = 0.42;
-const RACK_SLOT_GAP: f32 = 0.35;
-const RACK_WIDTH: f32 = 16.0 * RACK_SPACING + 4.0 * RACK_SLOT_GAP;
-/// Room per rolled gun (m).
-const ROLLED_SPACING: f32 = 0.95;
+/// "Long barrel" → "long": a part's word, its slot being its row's heading.
+fn variant_word(name: &str) -> String {
+    name.split(' ').next().unwrap_or(name).to_lowercase()
+}
 
-/// The armoury's labels, under what they name, when you're near.
+/// The parts' wall: room per variant along a row, between rows, and
+/// between the frames' blocks (m); the most variants a slot has.
+const PART_SPACING: f32 = 0.5;
+const PART_ROW: f32 = 0.5;
+const PART_BLOCK_GAP: f32 = 0.8;
+const PART_COLUMNS: usize = 4;
+/// Room per rolled gun (m).
+const ROLLED_SPACING: f32 = 1.05;
+
+/// The armoury's labels, when you're near: an item's under it, a heading's
+/// where it is.
 pub fn label_armoury(
     mut contexts: EguiContexts,
-    camera: Single<(&Camera, &GlobalTransform), With<PlayerCamera>>,
-    items: Query<(&RackItem, &GlobalTransform)>,
+    camera: crate::client::hud::CameraView,
+    items: Query<(&RackItem, &GlobalTransform, &ChildOf)>,
+    anchors: Query<&GlobalTransform>,
 ) -> Result {
     if items.is_empty() {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let (camera, view) = *camera;
+    let (camera, eye) = *camera;
+    let view = crate::client::hud::Projector::new(camera, eye, ctx);
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("armoury")));
-    for (RackItem(label), at) in &items {
-        let below = at.translation() - Vec3::Y * 0.12;
-        let distance = view.translation().distance(below);
-        if (view.translation() - below).dot(view.forward().into()) > 0.0 || distance > 6.0 {
+    let forward = Vec3::from(view.eye.forward());
+    for (item, at, anchor) in &items {
+        let place = if item.heading { at.translation() } else { at.translation() - Vec3::Y * 0.16 };
+        let distance = view.eye.translation.distance(place);
+        // Only while you face it and its area, so an area's labels stay
+        // out of the view of the next.
+        let Ok(anchor) = anchors.get(anchor.parent()) else { continue };
+        let area = anchor.transform_point(item.area);
+        if forward.angle_between(place - view.eye.translation) > FACING
+            || forward.angle_between(area - view.eye.translation) > FACING
+            || distance > ARMOURY_LABELS
+        {
             continue;
         }
-        let Ok(p) = camera.world_to_viewport(view, below) else { continue };
+        let Some(p) = view.to_screen(place) else { continue };
+        let (size, color) = if item.heading {
+            (16.0, egui::Color32::from_rgb(255, 214, 150))
+        } else {
+            (12.0, egui::Color32::from_rgb(200, 225, 235))
+        };
         painter.text(
-            egui::pos2(p.x, p.y),
-            egui::Align2::CENTER_TOP,
-            label,
-            egui::FontId::proportional(11.0),
-            egui::Color32::from_rgb(200, 225, 235),
+            p,
+            if item.heading { egui::Align2::CENTER_CENTER } else { egui::Align2::CENTER_TOP },
+            &item.text,
+            egui::FontId::proportional(size),
+            color,
         );
     }
     Ok(())
 }
+
+/// The armoury's labels show within this (m), and within this of where
+/// you're looking (rad).
+const ARMOURY_LABELS: f32 = 9.0;
+pub const FACING: f32 = 0.9;
 
 /// Big things turn slowly: no faster at their rim than this (m/s).
 const RIM_SPEED: f32 = 1.5;
@@ -280,9 +343,8 @@ pub fn arrange_exhibits(
 const GAP: f32 = 1.5;
 
 /// Sockets as small axes: red along the socket's +X, green +Y, blue its
-/// forward (−Z).
-/// Only the row's exhibits': the robots and the armoury would be a thicket of
-/// them.
+/// forward (−Z): only the row's exhibits' (the robots and the armoury would
+/// be a thicket of them).
 pub fn draw_sockets(
     mut gizmos: Gizmos,
     sockets: Query<(&Name, &GlobalTransform)>,
@@ -301,10 +363,11 @@ pub fn draw_sockets(
     }
 }
 
-/// Each exhibit's name and size, floating above it.
+/// Each exhibit's name floating above it (alternate ones higher, so
+/// neighbours' keep apart), and, for the one nearest the crosshair, its size.
 pub fn label_exhibits(
     mut contexts: EguiContexts,
-    camera: Single<(&Camera, &GlobalTransform), With<PlayerCamera>>,
+    camera: crate::client::hud::CameraView,
     exhibits: Query<(Entity, &Exhibit, &GlobalTransform)>,
     children: Query<&Children>,
     meshes: Query<(&GlobalTransform, &Aabb)>,
@@ -313,8 +376,24 @@ pub fn label_exhibits(
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let (camera, view) = *camera;
+    let (camera, eye) = *camera;
+    let view = crate::client::hud::Projector::new(camera, eye, ctx);
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("gallery")));
+    let forward: Vec3 = view.eye.forward().into();
+    // Only while you face the row (its middle), so its ends' labels stay
+    // out of the gallery's other areas, seen to either side of it.
+    let middle = exhibits.iter().map(|(_, _, at)| at.translation()).sum::<Vec3>() / exhibits.iter().len() as f32;
+    if forward.angle_between(middle - view.eye.translation) > FACING {
+        return Ok(());
+    }
+    // The one looked at: the least angle off the crosshair, within a few
+    // degrees.
+    let looked_at = exhibits
+        .iter()
+        .map(|(e, _, at)| (e, forward.angle_between(at.translation() + Vec3::Y * 0.5 - view.eye.translation)))
+        .filter(|(_, angle)| *angle < LOOK_ANGLE)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(e, _)| e);
     for (entity, exhibit, at) in &exhibits {
         // Bounds of everything drawn under it, in its own frame (so they
         // don't change as it turns).
@@ -341,15 +420,17 @@ pub fn label_exhibits(
         } else {
             (at.translation() + Vec3::Y, Vec3::ZERO)
         };
-        let Ok(p) = camera.world_to_viewport(view, top) else { continue };
-        let distance = view.translation().distance(top);
-        if (view.translation() - top).dot(view.forward().into()) > 0.0 || distance > LABEL_RANGE {
+        let Some(p) = view.to_screen(top) else { continue };
+        let distance = view.eye.translation.distance(top);
+        // Only while you face the row, so its labels stay out of the view
+        // of the gallery's other areas.
+        if forward.angle_between(top - view.eye.translation) > FACING || distance > LABEL_RANGE {
             continue;
         }
         painter.text(
-            egui::pos2(p.x, p.y),
+            p,
             egui::Align2::CENTER_BOTTOM,
-            if distance < SIZE_RANGE {
+            if looked_at == Some(entity) && distance < SIZE_RANGE {
                 format!("{}\n{:.2} wide × {:.2} tall × {:.2} long (m)", exhibit.label, size.x, size.y, size.z)
             } else {
                 exhibit.label.clone()
@@ -359,6 +440,19 @@ pub fn label_exhibits(
         );
     }
     Ok(())
+}
+
+/// An exhibit this near the crosshair (rad) is the one looked at.
+const LOOK_ANGLE: f32 = 0.08;
+
+/// "robots/gunner/gunner.glb" → "robots/gunner": a model's path, without
+/// the file name that repeats its directory's.
+fn short_path(model: &str) -> String {
+    let path = model.trim_end_matches(".glb");
+    match path.rsplit_once('/') {
+        Some((dir, file)) if dir.ends_with(file) => dir.to_string(),
+        _ => path.to_string(),
+    }
 }
 
 /// The material name the asset pipeline gives weak-spot cores (see

@@ -1,0 +1,31 @@
+{
+  "name": "crawler",
+  "kind": "small_robot",
+  "brief": "Hull crawler: a low six-legged robot that walks on any surface (floors, walls, ceilings, a ship's outer hull) on magnetic feet, flanking players in EVA. A wide, flat, faceted oval carapace in slate blue with ochre bands, a small wedge head at the front with a cluster of four orange-red eyes and a short twin spray nozzle under it, six jointed legs splayed wide, each ending in a round magnetic foot pad glowing cyan underneath. Origin on the surface it stands on, centred in its feet's plane. Weak spot: a hot-magenta core in a cowled cup on the back, behind a grille, seen from above and above-behind, hidden from below and the front. Affix parts: bolted armour plates, a shield emitter, overclock radiator fins, a volatile canister on the tail.",
+  "palette": {
+    "paint_primary": "#3e4a52",
+    "paint_secondary": "#c9a227",
+    "emissive": "#ff6a2a",
+    "emissive_secondary": "#7ef0ff",
+    "emissive_core": "#ff40c8"
+  },
+  "expect": {
+    "size": {"x": [0.85, 1.05], "y": [0.32, 0.5], "z": [0.7, 0.95]},
+    "parts": [
+      "body", "head",
+      "leg_fl", "leg_ml", "leg_rl", "leg_fr", "leg_mr", "leg_rr",
+      "affix_armour_carapace", "affix_armour_head",
+      "affix_shield_emitter",
+      "affix_overclock_radiators",
+      "affix_volatile_canister"
+    ],
+    "colliders": ["COL_body", "COL_legs"],
+    "sockets": {
+      "SOCKET_eye":    {"at": [0, 0.305, -0.42], "forward": [0, 0, -1], "up": [0, 1, 0]},
+      "SOCKET_muzzle": {"at": [0, 0.175, -0.475], "forward": [0, 0, -1]},
+      "SOCKET_weak":   {"at": [0, 0.36, 0.12], "tol": 0.01},
+      "SOCKET_vent":   {"at": [0, 0.305, 0.30], "forward": [0, 1, 0], "up": [0, 0, 1]}
+    },
+    "tolerance": 0.01
+  }
+}

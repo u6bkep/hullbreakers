@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Live co-op smoke test, in the headless harness (tools/hl): a host (left
+# half, running the co-op tour: HULLBREAKERS_COOP_TOUR, see
+# src/client/coop_tour.rs) and a client (right half, with simulated lag).
+# The host puts the client through each scenario's set pieces; this drives
+# the client's own input at each (press, fire, reel) and screenshots the
+# client's view. Then check the logs it copies for errors and the client's
+# "prediction: N rollbacks/s" lines.
+#
+#   tools/coop-smoke <outdir> [lag ms (default 100)] [port (default 5986)]
+#
+# Harness state in target/hl-coop ($HL_STATE overrides it). Needs a built
+# target/debug/hullbreakers and python3 with PIL (for cropping).
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export HL_STATE="${HL_STATE:-$ROOT/target/hl-coop}"
+H="$ROOT/tools/hl"
+OUT="$1"
+LAG="${2:-100}"
+PORT="${3:-5986}"
+mkdir -p "$OUT"
+rm -f "$OUT/step" "$OUT/ack"
+"$H" stop >/dev/null 2>&1
+"$H" start 2560x720 >/dev/null
+HULLBREAKERS_COOP_TOUR="$OUT" "$H" game --port "$PORT" >/dev/null
+sleep 6
+HULLBREAKERS_LAG="$LAG" "$H" game --connect "127.0.0.1:$PORT" >/dev/null
+sleep 3
+"$H" focus "127.0.0.1" >/dev/null
+# shellcheck disable=SC1091
+source "$HL_STATE/env"
+
+N=0
+wait_step() {
+    # Done with the step before: let the host go on.
+    [[ $N -gt 0 ]] && echo $((N - 1)) > "$OUT/ack"
+    N=$((N + 1))
+    for _ in $(seq 900); do
+        # Input goes to the client (focus can wander to the host).
+        if grep -q " $1\$" "$OUT/step" 2>/dev/null; then
+            # Keys go to the focused window, clicks to the one under the
+            # pointer: both to the client (the right half).
+            "$H" focus "127.0.0.1" >/dev/null
+            swaymsg -s "$SWAYSOCK" 'seat * cursor set 1920 360' >/dev/null
+            return 0
+        fi
+        sleep 0.2
+    done
+    echo "coop: step $1 never came" >&2
+    return 1
+}
+shot() { "$H" shot "$OUT/full-$1.png"; python3 -I -c "
+import sys
+from PIL import Image
+Image.open(sys.argv[1]).crop((1280, 0, 2560, 720)).save(sys.argv[2])" "$OUT/full-$1.png" "$OUT/$1.png"; }
+
+wait_step field_idle && sleep 2 && shot field_1 && "$H" down w && sleep 1 && "$H" up w && sleep 2 && shot field_2
+wait_step boarding_locker && sleep 1.5 && shot locker_1 && "$H" key f && sleep 1.5 && shot locker_2
+if wait_step boarding_die; then
+    sleep 0.4; shot die_1; sleep 1; shot die_2; sleep 1.5; shot die_3
+fi
+wait_step boarding_kit && sleep 1.5 && shot kit_1 && "$H" key f && sleep 1.5 && shot kit_2
+wait_step boarding_crate && sleep 1.5 && shot crate_1 && "$H" key f && sleep 1.5 && shot crate_2
+if wait_step boarding_fight; then
+    sleep 1; "$H" press left
+    for i in 1 2 3; do sleep 0.8; shot fight_$i; done
+    "$H" release left
+    for i in 4 5 6 7; do sleep 1.2; shot fight_$i; done
+fi
+if wait_step boarding_console; then
+    sleep 1.5; shot console_1; "$H" key f
+    for i in 2 3 4 5 6 7; do sleep 3; shot console_$i; done
+fi
+wait_step derelict_reactor && sleep 1.5 && shot reactor_1 && "$H" key f && sleep 2 && shot reactor_2
+wait_step derelict_junction && sleep 1.5 && shot junction_1 && "$H" key f && sleep 2 && shot junction_2
+if wait_step run_gate; then
+    for i in 1 2 3; do sleep 2; shot run_$i; done
+fi
+if wait_step recovery_tow; then
+    sleep 1; "$H" down ctrl; "$H" press left
+    for i in 1 2 3; do sleep 1.5; shot tow_$i; done
+    "$H" release left; "$H" up ctrl; sleep 2; shot tow_4
+fi
+if wait_step gallery_zoo; then
+    sleep 1.5; shot zoo_1; "$H" press left
+    for i in 2 3 4; do sleep 1; shot zoo_$i; done
+    "$H" release left; sleep 1.5; shot zoo_5
+fi
+for what in shielded armoured volatile; do
+    if wait_step gallery_$what; then
+        sleep 1.2; shot ${what}_1; "$H" press left
+        for i in 2 3 4; do sleep 0.6; shot ${what}_$i; done
+        "$H" release left; sleep 1; shot ${what}_5
+    fi
+done
+wait_step done
+sleep 1
+cp "$HL_STATE/game.log" "$OUT/host.log"
+cp "$HL_STATE/game-2.log" "$OUT/client.log"
+"$H" stop >/dev/null
+rm -f "$OUT"/full-*.png
+ls "$OUT"

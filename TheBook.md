@@ -98,6 +98,19 @@ it.
   nothing. Worked around with `mkdir -p` first. Cost: one run (~1 min).
   (`src/client/debug_shots.rs`; not fixed.)
 
+## Our netcode (net/mod.rs)
+
+- 2026-10-12. A death where the respawn puts you back where you stood
+  (killed at your deck spot, carrying nothing) never reached the client:
+  the client only takes the authority's `Player` on a rollback, and
+  `player_diverged` saw nothing to roll back for, so the authority-only
+  `Died` stayed out of the client's log (no SUIT FAILURE, no fade). Found
+  in the live co-op smoke test. Fix: a death in the confirmed log that the
+  prediction lacks is a divergence (`died_unpredicted`; test
+  `a_death_where_you_stand_reaches_the_client`). Cost: an hour. Pattern to
+  watch: any other authority-only event that changes nothing predicted
+  would be lost the same way.
+
 ## Bevy rendering
 
 - 2026-10-12. We wanted the headlamp not to light the player's own arms.
@@ -170,6 +183,16 @@ it.
 
 ## Our gallery (client/gallery.rs)
 
+- 2026-10-12. Laying the gallery out as areas around the start (models
+  ahead, robots left, parts right, rolled guns behind), its world labels
+  were drawn with `world_to_viewport` positions straight into egui, so with
+  the HUD's zoom factor they all landed off their models (the entry under
+  egui). Fix: they go through `hud::Projector` like the HUD's markers.
+  Then each area's labels showed at the edges of its neighbours' views;
+  every label now shows only while you face its area's middle (`FACING`).
+  The turret's searchlight shaft is left out in the gallery, where it
+  crossed the other areas. Cost: four harness round-trips.
+
 - 2026-10-12. The gallery drew a socket gizmo for every `SOCKET_` node in the
   scenario, so once it showed live robots and weapon racks, those were a thicket of
   axes. Now only the model row's exhibits get them. Cost: one screenshot.
@@ -181,6 +204,12 @@ it.
   `/etc/alsa/conf.d/99-pipewire-default.conf` after anything on
   `ALSA_CONFIG_PATH`. Fix: point `ALSA_CONFIG_PATH` at our config alone
   (`tools/hl`, d46d850). Cost: a session's debugging.
+- 2026-10-12. Driving a client in a two-window harness: keys go to the
+  focused window (`tools/hl focus`), but clicks go to the window under the
+  pointer, which starts on the host's half; the client's shots were the
+  host's grapple. Fix: `swaymsg 'seat * cursor set X Y'` onto the client
+  before clicking (`tools/coop-smoke`). Focus also wanders, so it's set
+  again before each step. Cost: two smoke runs.
 
 ## Our ship designs (sim/design.rs, ship.rs)
 
@@ -248,3 +277,18 @@ it.
   reads zero a few ticks later). Robots float with their own brains' assist,
   so a Swarmer's shove fades the same way. Cost: half an hour
   (`tests/families.rs`, `target`).
+
+## Our robots' brains (sim/bots.rs)
+
+- 2026-10-12. The hull crawler (walks walls and ceilings) never fired from a
+  ceiling at someone below it: `on_target` compared the aim's yaw and pitch
+  with the view's, and near the up axis yaw is degenerate, so tiny aim
+  changes read as huge errors. Fix: `on_target` is now the angle between the
+  view's forward and the aim, for every robot (`think`, src/sim/bots.rs).
+  Cost: several test round-trips; walkers' and turrets' cone checks changed
+  with it (their tests still pass).
+- 2026-10-12. The crawler's climb up a wall oscillated: steering by the
+  tangent toward its goal re-picked the wall each tick as its up turned, so
+  it rocked at the wall's foot. Fix: when its goal is a ceiling perch it
+  commits to a climb (`Crawling::climb`: the wall's direction in its body,
+  held for a few seconds) instead of re-deciding. Cost: several test runs.

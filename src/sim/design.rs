@@ -463,7 +463,7 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
                     problems.push(format!("post {i} ({:?} at {}): inside the hull", post.robot, post.at));
                 }
             }
-            Gait::Mount => {
+            Gait::Mount | Gait::Crawler => {
                 if bots::mount(ship, post.at).is_none() {
                     problems.push(format!("post {i} ({:?} at {}): not on an open hull surface", post.robot, post.at));
                 }
@@ -514,6 +514,21 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
     {
         problems.push(format!("the objective ({o}) can't be walked to from the entry ({e}), even with every door open"));
     }
+    // Cable runs along surfaces, a few centimetres off them (or through
+    // them, as through a bulkhead), never across open space.
+    for d in &ship.devices {
+        let super::devices::DeviceKind::Conduit { path } = &d.kind else { continue };
+        for leg in path.windows(2) {
+            let steps = (leg[0].distance(leg[1]) / 0.25).ceil().max(1.0) as usize;
+            let off = (0..=steps)
+                .map(|k| leg[0].lerp(leg[1], k as f32 / steps as f32))
+                .find(|&p| !ship.boxes.iter().any(|b| surface_distance(b, p) <= CABLE_REACH));
+            if let Some(p) = off {
+                problems.push(format!("conduit {:?}: the run from {} to {} leaves the surfaces at {p}", d.id, leg[0], leg[1]));
+                break;
+            }
+        }
+    }
     if ship.id == super::ship::HOME {
         // The crew's ship: the mission wall and the locker.
         for kind in ScenarioKind::ALL {
@@ -548,6 +563,15 @@ const CONTROL_REACH: f32 = 2.0;
 
 fn near(a: Vec3, b: Vec3, across: f32) -> bool {
     Vec2::new(a.x - b.x, a.z - b.z).length() < across && (a.y - b.y).abs() < 0.5
+}
+
+/// How far a cable may run off a surface (m).
+const CABLE_REACH: f32 = 0.12;
+
+/// How far `p` is from box `b` (0 inside it).
+fn surface_distance(b: &HullBox, p: Vec3) -> f32 {
+    let local = b.rotation.inverse() * (p - b.center);
+    (local.abs() - b.size / 2.0).max(Vec3::ZERO).length()
 }
 
 /// Whether `p` is inside box `b` grown by `margin`.
@@ -602,6 +626,30 @@ mod tests {
         assert!(has("post 4 (Turret"), "{problems:#?}");
         assert!(has("no \"objective\" marker"), "{problems:#?}");
         assert!(!problems.iter().any(|p| p.contains("post 0")), "{problems:#?}");
+    }
+
+    #[test]
+    fn the_check_finds_cable_run_across_open_space() {
+        // A deck with a wall; one cable along the wall's foot, one up into
+        // the air.
+        let files = HashMap::from([(
+            "m",
+            "Module(parts: [ \
+               Span(lo: (-5.0, -0.3, -5.0), hi: (5.0, 0.0, 5.0)), \
+               WallAcross(z: 0.0, x: (-5.0, 5.0), y: (0.0, 3.0), thickness: 0.2), \
+             ], \
+             controls: [(action: Lurch, center: (0.0, 1.0, 0.2), half_size: (0.1, 0.1, 0.1))], \
+             devices: [ \
+               (id: \"along\", kind: Conduit(path: [(-4.0, 0.03, 0.15), (4.0, 0.03, 0.15)])), \
+               (id: \"astray\", kind: Conduit(path: [(0.0, 0.03, 2.0), (0.0, 2.0, 2.0)])), \
+             ])",
+        )]);
+        let text = "Design(name: \"T\", hostile: false, model: None, \
+                    shield: (center: (0.0, 0.0, 0.0), radii: (1.0, 1.0, 1.0)), turrets: [], \
+                    modules: [(module: \"m\")])";
+        let problems = check(&assemble("t", text, &files).unwrap());
+        assert!(problems.iter().any(|p| p.contains("conduit \"astray\"")), "{problems:#?}");
+        assert!(!problems.iter().any(|p| p.contains("conduit \"along\"")), "{problems:#?}");
     }
 
     #[test]

@@ -84,12 +84,15 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   spans only once someone on the far side throws its lever (or jump it on
   your jetpack); then the gap home.
 
-- **Model gallery** (debug): every model under `assets/` in a row behind
-  our ship, turning slowly, labelled with its path and size, sockets drawn
-  as small axes (red +X, green +Y, blue forward), with every robot model's
-  affix parts showing at once. Below it, a labelled row of live robots: each
-  kind, and each with every affix it can have. They don't fight back. You
-  start floating in front of it.
+- **Model gallery** (debug): you start floating behind our ship, with an
+  area to see each way you turn. Ahead, every model under `assets/` in a
+  row, turning slowly, labelled with its path (and its size, for the one
+  under the crosshair), sockets drawn as small axes (red +X, green +Y, blue
+  forward), with every robot model's affix parts showing at once. To the
+  left, a table of live robots: a row per kind, the plain one and then one
+  with each affix it can have; they don't fight back. To the right, every
+  weapon part; behind, a dozen rolled guns. An area's labels show only
+  while you face it.
 
 You start with the base kit (your suit and its grapple) and whatever your
 profile says you carry (see **Progression**). Guns are in the **weapons
@@ -151,7 +154,7 @@ A gun looks like what it rolled: it's drawn from its frame's receiver with
 each of its parts on (a long barrel is long, a drum is a drum, a quick mag
 is two taped together, a compensator is ported, a scope has a big objective
 bell), in its maker's paint, in your hands, your crewmates' and on pickups.
-The model gallery has racks of every part and a row of rolled guns.
+The model gallery has a wall of every part and two rows of rolled guns.
 
 The frames have their own jobs. The **SMG** sprays; the **rifle** reaches
 (and with a scope zooms x2.5). The **shotgun** fires eight pellets a shell,
@@ -218,6 +221,13 @@ weak-spot hits (magenta) and kills (an X); robots don't heal. Four kinds:
   approach to the hangar: a searchlight sweeps for anyone crossing, and the
   slow shells lead you, so change your velocity. Weak spot: the coolant
   core at the back of the base.
+- **Hull crawlers**: six-legged things on magnetic feet that walk any
+  surface, inside or out, and take the ones you don't: over the outer hull
+  to come at you mid-crossing from the far side, up walls and across
+  ceilings to drop their spray on you from above. You hear them through the
+  hull (a clack of feet, a clamp as they take a new surface) before you see
+  them. Weak spot: the magenta core in the cowl on the back, best shot from
+  above.
 
 Robots can have **affixes**, each shown on the model: **Armoured** (dark
 slabs; body hits do 30%, the weak spot is soft), **Shielded** (a shell that
@@ -231,10 +241,11 @@ shot, its aim locking just before it fires: move then) and **Leader**
 (Gunners: an antenna mast and crest; robots near it aim and fire better, their
 lights pulsing gold with its beacon, until it dies). A ship is crewed for a
 **threat** level that sets how many affixes, and which kinds man which
-posts (`sim::bots::crew`); the boarding action's carrier is threat 3: two
-Grapplers, three turrets, a Leader on the bridge and six affixes. The model
-gallery has a row of every kind with each of its affixes, dormant but
-shootable.
+posts (`sim::bots::crew`); crawlers come from threat 2 (one fewer than the
+threat). The boarding action's carrier is threat 3: two Grapplers, three
+turrets, two crawlers on its hull, a Leader on the bridge and six affixes.
+The model gallery has a row of every kind with each of its affixes,
+dormant but shootable.
 
 The F1 panel can spawn a Gunner on our bridge or three Swarmers off our
 port side, for trying out a fight.
@@ -299,8 +310,17 @@ side is `HULLBREAKERS_PROFILE=<dir>` (`src/client/profile.rs`), off by default.
 
 Run `tools/hl game` again (e.g. `tools/hl game --connect 127.0.0.1`) for more
 instances; sway tiles them side by side (`tools/hl start 2560x720` gives each
-a 1280-wide half). `tools/hl focus <title>` picks which one gets input; the
-client's title is `Hullbreakers — HOST:PORT`.
+a 1280-wide half). `tools/hl focus <title>` picks which one gets keys (clicks
+go to the window under the pointer); the client's title is
+`Hullbreakers — HOST:PORT`.
+
+`tools/coop-smoke <dir> [lag ms] [port]` is a live co-op smoke test: a host
+and a client with simulated lag in one harness. The host
+(`HULLBREAKERS_COOP_TOUR=<dir>`, `src/client/coop_tour.rs`) puts the client
+through every scenario's set pieces (the locker, a death and the kit, a
+crate, a fight, the shield console, the derelict's devices, a gate, a tow,
+the gallery's affixed robots); the script presses, fires and reels as the
+client, screenshots its view into `<dir>`, and copies both logs there.
 
 ## Controls
 

@@ -723,3 +723,74 @@ fn a_destroyed_robot_drops_loot_once_and_a_turret_none() {
     assert!(app.world().get_entity(gunner).is_err() && app.world().get_entity(turret).is_err());
     assert_eq!(pickups(&mut app), before + 1, "one drop, the gunner's");
 }
+
+// ---------------------------------------------------------------------------
+// The crawler
+
+/// Runs `ticks` ticks, noting the crawler's surfaces' normals (in its
+/// body's frame), whether it ever left its boots, and the crew member's
+/// health (which comes back after a while unhurt); returns the most
+/// downward and the most +X of those normals' components, whether it stayed
+/// on its feet, and the crew member's lowest health.
+fn crawl_for(app: &mut App, crawler: Entity, me: Entity, ticks_n: usize) -> (f32, f32, bool, f32) {
+    let (mut lowest_up, mut most_x, mut booted, mut lowest) = (1.0f32, -1.0f32, true, f32::MAX);
+    for _ in 0..ticks_n {
+        ticks(app, 1);
+        lowest = lowest.min(health(app, me));
+        match app.world().get::<Player>(crawler).unwrap().mode {
+            Mode::Booted { up, .. } => {
+                lowest_up = lowest_up.min(up.y);
+                most_x = most_x.max(up.x);
+            }
+            Mode::Eva { .. } => booted = false,
+        }
+    }
+    (lowest_up, most_x, booted, lowest)
+}
+
+#[test]
+fn a_crawler_climbs_the_walls_to_come_at_the_crew_from_the_ceiling() {
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    let me = crew(&mut app);
+    // The crew member in the carrier's lower corridor (3 m to its
+    // ceiling); the crawler 8 m along it, on the floor, in sight.
+    app.world_mut().get_mut::<Player>(me).unwrap().mode = booted(carrier, Vec3::new(0.0, 0.01, -12.0), 0.0);
+    let tuning = Tuning::default();
+    let start = Vec3::new(0.0, 0.01, -4.0);
+    let crawler = app
+        .world_mut()
+        .spawn(new_robot(Robot::Crawler, Affixes::NONE, booted(carrier, start, 0.0), carrier, start, &tuning, 0))
+        .id();
+    let full = health(&app, me);
+    let (lowest_up, _, stayed, lowest) = crawl_for(&mut app, crawler, me, 60 * 12);
+    assert!(stayed, "fell off its feet");
+    assert!(lowest_up < -0.9, "never got onto the ceiling (lowest up.y {lowest_up})");
+    assert!(lowest < full, "never hurt them");
+}
+
+#[test]
+fn a_crawler_on_the_outer_hull_goes_over_the_edge_to_whoever_is_crossing() {
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    let me = crew(&mut app);
+    // On the carrier's roof; the crew member floating off its starboard
+    // side, just above the roof's height: in sight, but the way to them is
+    // over the edge.
+    {
+        let mut p = app.world_mut().get_mut::<Player>(me).unwrap();
+        p.mode = eva(Vec3::new(12.0, 7.0, 300.0));
+        p.flight_assist = false;
+    }
+    let tuning = Tuning::default();
+    let roof = Vec3::new(2.0, 6.61, 0.0);
+    let crawler = app
+        .world_mut()
+        .spawn(new_robot(Robot::Crawler, Affixes::NONE, booted(carrier, roof, 0.0), carrier, roof, &tuning, 0))
+        .id();
+    let full = health(&app, me);
+    let (_, most_x, stayed, lowest) = crawl_for(&mut app, crawler, me, 60 * 12);
+    assert!(stayed, "fell off the hull");
+    assert!(most_x > 0.9, "never went over onto the starboard side (most up.x {most_x})");
+    assert!(lowest < full, "never hurt them");
+}

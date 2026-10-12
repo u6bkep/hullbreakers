@@ -58,6 +58,7 @@ enum Body {
 /// The parts each kind of body moves.
 fn parts_of(body: Body) -> &'static [&'static str] {
     match body {
+        Body::Robot(Robot::Crawler) => &["body", "head", "leg_fl", "leg_ml", "leg_rl", "leg_fr", "leg_mr", "leg_rr"],
         Body::Robot(Robot::Gunner) => &[
             "pelvis",
             "torso",
@@ -153,6 +154,8 @@ const KICK_DECAY: f32 = 12.0;
 const AIM_RAISE: f32 = 0.25;
 /// A Gunner's stride (m): one full leg cycle covers two.
 const STRIDE: f32 = 0.9;
+/// A crawler's (m): short and quick.
+const CRAWL_STRIDE: f32 = 0.22;
 
 pub fn animate_avatars(
     time: Res<Time>,
@@ -315,6 +318,34 @@ pub fn animate_avatars(
                 // aim's pitch, and the barrel recoils into it as it fires.
                 pose("head", Quat::from_rotation_x(pitch), Vec3::ZERO);
                 pose("barrel", Quat::IDENTITY, Vec3::Z * rig.kick[0] * 1.2);
+            }
+            Body::Robot(Robot::Crawler) => {
+                // A tripod gait, quick and short: three legs swing forward,
+                // lifted, while the other three push back, by turns. The head
+                // follows the aim and jolts as it sprays; the body bobs.
+                let target = (speed / walk).min(1.3);
+                rig.stride += (target - rig.stride) * (1.0 - (-10.0 * dt).exp());
+                rig.phase += speed / CRAWL_STRIDE * std::f32::consts::PI * dt;
+                rig.bob += dt;
+                for (leg, side, group) in [
+                    ("leg_fl", -1.0f32, 0.0f32),
+                    ("leg_mr", 1.0, 0.0),
+                    ("leg_rl", -1.0, 0.0),
+                    ("leg_fr", 1.0, std::f32::consts::PI),
+                    ("leg_ml", -1.0, std::f32::consts::PI),
+                    ("leg_rr", 1.0, std::f32::consts::PI),
+                ] {
+                    let s = (rig.phase + group).sin();
+                    let lift = 0.35 * rig.stride * (rig.phase + group).cos().max(0.0);
+                    // About Y the foot goes fore and aft (the same way for
+                    // either side, so the sign follows the side); about Z
+                    // it rises.
+                    let swing = 0.35 * rig.stride * s * side;
+                    pose(leg, Quat::from_rotation_y(swing) * Quat::from_rotation_z(lift * side), Vec3::ZERO);
+                }
+                let bob = 0.012 * rig.stride * (2.0 * rig.phase).cos().abs() + 0.004 * (rig.bob * 2.1).sin();
+                pose("body", Quat::IDENTITY, Vec3::Y * bob);
+                pose("head", Quat::from_rotation_x(pitch * 0.8 + rig.kick[0] * 0.4), Vec3::ZERO);
             }
         }
     }

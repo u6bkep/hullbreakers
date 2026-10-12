@@ -61,6 +61,11 @@ pub enum Robot {
     /// A gun on a hull, bolted down: tracks whoever crosses open space to
     /// its ship, leading them, by a searchlight.
     Turret,
+    /// A small six-legged robot on magnetic feet that walks any surface:
+    /// over the outer hull to whoever's crossing to it, up walls and across
+    /// ceilings inside to come at the crew from above. Heard through the
+    /// hull before it's seen.
+    Crawler,
 }
 
 /// How a kind of robot gets about.
@@ -72,6 +77,9 @@ pub enum Gait {
     Flyer,
     /// Bolted to a hull surface; only turns.
     Mount,
+    /// Walks any surface: floors, walls, ceilings, the outside of the hull.
+    /// Posted on a hull surface, as a mount is.
+    Crawler,
 }
 
 /// A body's own tuning, where it differs from the crew's.
@@ -84,7 +92,7 @@ pub fn tuning_of<'a>(base: &'a Tuning, own: Option<&'a BodyTuning>) -> &'a Tunin
 }
 
 impl Robot {
-    pub const ALL: [Robot; 4] = [Robot::Gunner, Robot::Swarmer, Robot::Grappler, Robot::Turret];
+    pub const ALL: [Robot; 5] = [Robot::Gunner, Robot::Swarmer, Robot::Grappler, Robot::Turret, Robot::Crawler];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -92,6 +100,7 @@ impl Robot {
             Robot::Swarmer => "Swarmer",
             Robot::Grappler => "Grappler",
             Robot::Turret => "Turret",
+            Robot::Crawler => "Crawler",
         }
     }
 
@@ -100,6 +109,7 @@ impl Robot {
             Robot::Gunner | Robot::Grappler => Gait::Walker,
             Robot::Swarmer => Gait::Flyer,
             Robot::Turret => Gait::Mount,
+            Robot::Crawler => Gait::Crawler,
         }
     }
 
@@ -159,6 +169,21 @@ impl Robot {
                 t.adhesion_accel = 1000.0;
                 t.shear_accel = 1000.0;
             }
+            Robot::Crawler => {
+                t.player_mass = 60.0;
+                t.capsule_radius = 0.3;
+                t.capsule_height = 0.6;
+                t.eye_height = 0.34;
+                t.walk_speed = 4.5;
+                t.sprint_speed = 6.5;
+                t.walk_accel = 40.0;
+                t.player_health = 50.0;
+                // Any surface is somewhere to walk, and its magnets hold it
+                // there upside down.
+                t.wall_walk = true;
+                t.adhesion_accel = 90.0;
+                t.shear_accel = 90.0;
+            }
         }
         t
     }
@@ -172,6 +197,7 @@ impl Robot {
             Robot::Swarmer => (WEAK_SWARMER, 0.09),
             Robot::Grappler => (WEAK_GRAPPLER, 0.15),
             Robot::Turret => (WEAK_TURRET, 0.17),
+            Robot::Crawler => (WEAK_CRAWLER, 0.08),
         }
     }
 
@@ -183,6 +209,7 @@ impl Robot {
             Robot::Swarmer => Some(GunKind::SwarmerSprayer),
             Robot::Grappler => None,
             Robot::Turret => Some(GunKind::TurretCannon),
+            Robot::Crawler => Some(GunKind::SwarmerSprayer),
         }
     }
 
@@ -218,6 +245,17 @@ impl Robot {
                 burst_off: 1.0,
                 fire_cone: 0.05,
                 range: (6.0, GRAPPLE_REACH - 4.0),
+                lead: false,
+                calls: CALL_RANGE,
+            },
+            Robot::Crawler => Mind {
+                sight: 60.0,
+                turn_rate: 4.0,
+                aim_error: 0.05,
+                burst_on: 0.4,
+                burst_off: 1.0,
+                fire_cone: 0.15,
+                range: (0.0, CRAWLER_REACH),
                 lead: false,
                 calls: CALL_RANGE,
             },
@@ -319,8 +357,25 @@ pub struct Brain {
     /// Its own phase for wobble and timers, so robots don't move in lockstep.
     seed: f32,
     attack: Attack,
+    /// A crawler's way about (see [`crawl`]).
+    crawling: Crawling,
     /// What its affixes are doing (see [`affixes`]).
     pub(crate) state: affixes::State,
+}
+
+/// How a crawler is getting about: where its feet were a moment ago (in its
+/// body's frame) and how long until it looks again, how long it has left
+/// wandering sideways to get unstuck, whether it's on its way round to its
+/// ship's way in (its goal is on the other side of the hull), and a climb
+/// it's committed to: the way to a wall (in its body's frame), from the
+/// surface it was on then (its up), and how long it keeps at it.
+#[derive(Clone, Copy, Debug, Default)]
+struct Crawling {
+    from: Vec3,
+    check: f32,
+    wander: f32,
+    via_entry: bool,
+    climb: Option<(Vec3, Vec3, f32)>,
 }
 
 impl Brain {
@@ -344,6 +399,7 @@ impl Brain {
             replan: 0.0,
             seed: index as f32 * 1.618,
             attack: Attack::Ready,
+            crawling: Crawling::default(),
             state,
         }
     }
@@ -637,7 +693,10 @@ pub fn think(
             if !locked {
                 input.add_look(turn(want));
             }
-            on_target = want.length() < mind.fire_cone;
+            // On target by the angle off it (yaw and pitch alone mislead
+            // where the target is nearly along its up: a crawler looking
+            // up off a wall), allowing for its aim's own wander.
+            on_target = (view * Vec3::NEG_Z).angle_between(aim_at - eye) < mind.fire_cone + mind.aim_error * 1.5;
         }
         input.sprint = false;
         input.reel_in = false;
@@ -667,7 +726,8 @@ pub fn think(
             };
         } else {
             brain.burst = (brain.burst + dt) % (mind.burst_on + mind.burst_off);
-            input.main.held = on_target && brain.burst < mind.burst_on;
+            let in_reach = *kind != Robot::Crawler || distance.is_some_and(|d| d < CRAWLER_REACH * 2.0);
+            input.main.held = on_target && in_reach && brain.burst < mind.burst_on;
         }
         // Standing its ground: venting, or in the middle of an attack that
         // needs it braced.
@@ -705,6 +765,31 @@ pub fn think(
         }
         if braced {
             input.movement = Vec3::ZERO;
+            continue;
+        }
+        if kind.gait() == Gait::Crawler
+            && let Mode::Booted { feet, up, orientation, .. } = me.mode
+            && let Some(f) = frame
+        {
+            // Over whatever surface it's on: to a perch above whoever it can
+            // see, or where it last knew them to be, or its post.
+            let ship_up = home.as_ref().map_or(Vec3::Y, |h| h.rotation * Vec3::Y);
+            let (goal, under_ceiling) = match aiming {
+                Some((at, _)) => perch(&spatial, at, ship_up),
+                None => (to_world(brain.lead.unwrap_or(brain.post)), false),
+            };
+            let entry = hulls.get(brain.home).ok().and_then(|h| h.0.design().markers.get("entry").copied()).map(to_world);
+            let dir = crawl(&mut brain.crawling, &spatial, entity, &f, feet, up, position, goal, under_ceiling, entry, dt);
+            if aiming.is_none()
+                && let Some(d) = dir
+            {
+                input.add_look(turn(look_toward(body, pitch, d)));
+            }
+            input.sprint = aiming.is_some() || brain.lead.is_some();
+            input.movement = dir.map_or(Vec3::ZERO, |d| {
+                let local = (f.rotation * orientation).inverse() * d;
+                Vec3::new(local.x, 0.0, -local.z).normalize_or_zero()
+            });
             continue;
         }
         input.movement = match me.mode {
@@ -898,6 +983,111 @@ fn grapple_attack(brain: &mut Brain, input: &mut PlayerInput, me: &Player, targe
     };
 }
 
+/// Where a crawler goes for a target at `at`: the ceiling above them, if
+/// there's one within reach (it comes at them from above: the point is
+/// just into the ceiling, so making for it carries the crawler up the wall
+/// and onto it), else the target itself. And whether it was a ceiling.
+fn perch(spatial: &SpatialQuery, at: Vec3, ship_up: Vec3) -> (Vec3, bool) {
+    let Ok(up) = Dir3::new(ship_up) else { return (at, false) };
+    match spatial.cast_ray(at, up, PERCH_REACH, true, &SpatialQueryFilter::from_mask(Layer::World)) {
+        Some(hit) => (at + ship_up * (hit.distance + 0.25), true),
+        None => (at, false),
+    }
+}
+
+/// Which way (world, along the surface) a crawler at `position`, its `feet`
+/// and `up` in `frame`, walks for `goal`; `None` to hold where it is.
+///
+/// Along the surface toward it: walking into a wall climbs it and walking
+/// off an edge wraps round it (the boots do both), so heading straight for
+/// the goal takes it up walls, across ceilings and round the hull. Under a
+/// goal that's above it (a perch under a ceiling), it makes for the nearest
+/// wall to climb. A goal on the far side of the surface it's on (the crew
+/// inside, it outside) sends it round to its ship's way in (`entry`) first.
+/// Making no headway, it wanders sideways a moment.
+#[allow(clippy::too_many_arguments)]
+fn crawl(
+    c: &mut Crawling,
+    spatial: &SpatialQuery,
+    me: Entity,
+    frame: &super::frame::BodyFrame,
+    feet: Vec3,
+    up: Vec3,
+    position: Vec3,
+    goal: Vec3,
+    under_ceiling: bool,
+    entry: Option<Vec3>,
+    dt: f32,
+) -> Option<Vec3> {
+    let up_w = (frame.rotation * up).normalize_or(Vec3::Y);
+    let along = |to: Vec3| to - up_w * to.dot(up_w);
+    let to = goal - position;
+    // Round to the way in while the goal's through the hull.
+    if c.via_entry && entry.is_none_or(|e| e.distance(position) < 1.5) {
+        c.via_entry = false;
+    }
+    let to = match entry {
+        Some(e) if c.via_entry => e - position,
+        _ => to,
+    };
+    let flat = along(to);
+    // A climb under way holds until it's on the wall (its surface changed),
+    // or it's been at it long enough.
+    if let Some((_, from_up, left)) = &mut c.climb {
+        *left -= dt;
+        if *left <= 0.0 || from_up.dot(up) < 0.99 {
+            c.climb = None;
+        }
+    }
+    let want = if let Some((dir, ..)) = c.climb {
+        Some(frame.rotation * dir)
+    } else if to.dot(up_w) > 1.0 && under_ceiling && flat.length() < 1.5 {
+        // Right under its perch: up the nearest wall, all the way.
+        let wall = nearest_wall(spatial, me, position, up_w);
+        c.climb = wall.map(|w| (frame.rotation.inverse() * w, up, CLIMB_SECONDS));
+        wall
+    } else if flat.length() > 0.8 {
+        flat.try_normalize()
+    } else if to.dot(up_w) < -1.0 && !c.via_entry && entry.is_some() {
+        // On the wrong side of the hull from it: round by the way in.
+        c.via_entry = true;
+        entry.map(|e| along(e - position)).and_then(|d| d.try_normalize())
+    } else {
+        None
+    };
+    // Stuck (against something it can't climb, in a corner): sideways a
+    // moment.
+    c.check -= dt;
+    if c.check <= 0.0 {
+        if want.is_some() && feet.distance(c.from) < CRAWL_STUCK {
+            c.wander = CRAWL_WANDER;
+        }
+        c.from = feet;
+        c.check = CRAWL_CHECK;
+    }
+    if c.wander > 0.0 {
+        c.wander -= dt;
+        let base = want.unwrap_or_else(|| up_w.any_orthonormal_vector());
+        return up_w.cross(base).try_normalize();
+    }
+    want
+}
+
+/// The way (along the surface with normal `up`) to the nearest wall within
+/// reach of `position`, if there's one.
+fn nearest_wall(spatial: &SpatialQuery, me: Entity, position: Vec3, up: Vec3) -> Option<Vec3> {
+    let first = up.any_orthonormal_vector();
+    let filter = SpatialQueryFilter::from_mask(Layer::World).with_excluded_entities([me]);
+    (0..8)
+        .filter_map(|k| {
+            let dir = Quat::from_axis_angle(up, k as f32 * std::f32::consts::FRAC_PI_4) * first;
+            let hit = spatial.cast_ray(position, Dir3::new(dir).ok()?, WALL_SEEK, true, &filter)?;
+            Some((hit.distance, dir))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, dir)| dir)
+}
+
 /// The way to walk along `route` from `feet` (both in the grid's frame):
 /// past the points already reached, toward the furthest of the next few it
 /// can walk straight to. `None` when the route's done.
@@ -959,6 +1149,24 @@ const WEAK_GRAPPLER: Vec3 = Vec3::new(0.0, 0.30, 0.40);
 // Turret: the coolant core behind its gun, SOCKET_weak at (0, 0.86, 0.56)
 // from its base, its middle 0.65 up.
 const WEAK_TURRET: Vec3 = Vec3::new(0.0, 0.21, 0.56);
+
+// Crawler: the core in its back, SOCKET_weak at (0, 0.36, 0.12) from its
+// feet, its middle 0.3 up.
+const WEAK_CRAWLER: Vec3 = Vec3::new(0.0, 0.06, 0.12);
+
+/// A crawler sprays what's within this (m) of it.
+pub const CRAWLER_REACH: f32 = 9.0;
+/// How far above a target a crawler looks for a ceiling to come at them
+/// from (m), and how far round it looks for a wall to climb to it (m).
+const PERCH_REACH: f32 = 4.5;
+const WALL_SEEK: f32 = 8.0;
+/// A crawler that's moved less than this (m) in this long (s) is stuck,
+/// and wanders sideways this long (s).
+const CRAWL_STUCK: f32 = 0.25;
+const CRAWL_CHECK: f32 = 1.0;
+const CRAWL_WANDER: f32 = 1.2;
+/// How long a crawler keeps making for a wall to climb it (s).
+const CLIMB_SECONDS: f32 = 4.0;
 
 /// Damage multiplier for a hit on a weak spot.
 pub const WEAK_MULTIPLIER: f32 = 2.5;
@@ -1092,7 +1300,7 @@ pub fn debug_spawn_robots(
     for SpawnRobots(kind) in orders.read() {
         *spawned += 1;
         match kind.gait() {
-            Gait::Walker | Gait::Mount => {
+            Gait::Walker | Gait::Mount | Gait::Crawler => {
                 let feet = Vec3::new(0.0, 0.01, -11.0);
                 let mode = Mode::Booted {
                     body: *home,
