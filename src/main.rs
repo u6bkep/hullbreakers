@@ -61,14 +61,10 @@ fn main() {
     });
     // `HULLBREAKERS_SCENARIO=boarding`: start there instead of the field.
     if let Ok(name) = std::env::var("HULLBREAKERS_SCENARIO") {
-        let kind = match name.as_str() {
-            "field" => ScenarioKind::Field,
-            "boarding" => ScenarioKind::Boarding,
-            "gallery" => ScenarioKind::Gallery,
-            other => {
-                eprintln!("hullbreakers: unknown scenario {other:?} (field, boarding, gallery)");
-                std::process::exit(2);
-            }
+        let Some(kind) = ScenarioKind::from_id(&name) else {
+            let known: Vec<&str> = ScenarioKind::ALL.iter().map(|k| k.id()).collect();
+            eprintln!("hullbreakers: unknown scenario {name:?} ({})", known.join(", "));
+            std::process::exit(2);
         };
         if let Some(mut director) = app.world_mut().get_resource_mut::<Director>() {
             director.start(kind);

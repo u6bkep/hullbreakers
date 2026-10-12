@@ -272,7 +272,7 @@ fn control_prompt(
             frame.dir_to_local(*dir),
             control.half_size,
         )?;
-        (t <= CONTROL_REACH && t <= blocked).then(|| (t, control.action.label().to_string()))
+        (t <= CONTROL_REACH && t <= blocked).then(|| (t, control.label.to_string()))
     });
     // Pickups sit in the open, a little further than a wall behind them.
     let blocked = blocked + 0.1;
@@ -604,12 +604,7 @@ pub fn mission_hud(
         let ours_integrity = ours.map_or(0.0, |c| c.integrity);
         let enemy_integrity = enemy.map_or(0.0, |c| c.integrity);
         let shield_up = enemy.is_some_and(|c| c.shield);
-        let objective = match mission.phase {
-            Phase::Won => "Carrier destroyed — return to the mission wall",
-            Phase::Lost => "Hull breached — abandon ship",
-            Phase::Underway if shield_up => "Board the carrier and disable its shield on the bridge",
-            Phase::Underway => "Shield down — get clear!",
-        };
+        let objective = &mission.objective;
         egui::Area::new(egui::Id::new("mission"))
             .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
             .show(ctx, |ui| {
@@ -632,17 +627,33 @@ pub fn mission_hud(
                     );
                 });
             });
+    } else if !mission.objective.is_empty() {
+        // Any other scenario: its objective, and its own board.
+        egui::Area::new(egui::Id::new("mission"))
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
+            .show(ctx, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{}   {}", mission.objective, clock(elapsed)))
+                            .monospace()
+                            .size(15.0)
+                            .color(INK),
+                    );
+                    for line in &mission.status {
+                        ui.label(egui::RichText::new(line).monospace().size(13.0).color(INK));
+                    }
+                });
+            });
     }
 
-    // Banner for a few seconds after the fight is decided.
-    if let Some(ended) = mission.ended
-        && mission.kind == ScenarioKind::Boarding
-    {
+    // Banner for a few seconds after the mission is decided.
+    if let Some(ended) = mission.ended {
         let since = seconds_since(tick.0, ended);
         if (0.0..5.0).contains(&since) {
             let (text, color) = match mission.phase {
-                Phase::Won => ("CARRIER DESTROYED", HULL_COLOR),
-                Phase::Lost => ("SHIP LOST", FOE_COLOR),
+                Phase::Won => (mission.outcome.as_str(), HULL_COLOR),
+                Phase::Lost => (mission.outcome.as_str(), FOE_COLOR),
                 Phase::Underway => ("", INK),
             };
             // Fades in fast, out slowly.
@@ -667,11 +678,8 @@ pub fn mission_hud(
         && elapsed < 15.0
     {
         let won = debrief.phase == Phase::Won;
-        let (title, color) = if won {
-            ("CARRIER DESTROYED", HULL_COLOR)
-        } else {
-            ("SHIP LOST", FOE_COLOR)
-        };
+        let title = debrief.outcome.as_str();
+        let color = if won { HULL_COLOR } else { FOE_COLOR };
         egui::Area::new(egui::Id::new("debrief"))
             .anchor(egui::Align2::CENTER_TOP, [0.0, 120.0])
             .show(ctx, |ui| {
@@ -689,19 +697,30 @@ pub fn mission_hud(
                         ui.label(egui::RichText::new(title).monospace().size(28.0).color(color));
                         line(ui, format!("{}  —  {}", debrief.scenario.button_label(), clock(debrief.seconds)));
                         ui.separator();
-                        line(
-                            ui,
-                            match (&debrief.shield_breaker, won) {
-                                (Some(who), _) => format!("Shield dropped by {who}. Remember that name."),
-                                (None, true) => "Nobody dropped the shield; it fell on its own. Suspicious.".into(),
-                                (None, false) => "Nobody ever dropped the shield. Bold strategy.".into(),
-                            },
-                        );
-                        if !debrief.aboard.is_empty() {
-                            line(ui, format!("Made it home: {}", debrief.aboard.join(", ")));
+                        for l in &debrief.lines {
+                            line(ui, l.clone());
                         }
-                        if !debrief.adrift.is_empty() {
-                            line(ui, format!("Left drifting: {}. Send a postcard.", debrief.adrift.join(", ")));
+                        // The crew's score cards (a stand-in until the HUD
+                        // styles them).
+                        ui.separator();
+                        for card in &debrief.crew {
+                            let mut s = format!(
+                                "{}: {} in vacuum, longest swing {:.0} m, {} presses",
+                                card.name,
+                                clock(card.vacuum_seconds),
+                                card.longest_swing,
+                                card.presses
+                            );
+                            if card.deaths > 0 {
+                                s += &format!(", died {}x", card.deaths);
+                            }
+                            if !card.credits.is_empty() {
+                                s += &format!("; {}", card.credits.join(", "));
+                            }
+                            line(ui, s);
+                        }
+                        for award in &debrief.awards {
+                            line(ui, award.clone());
                         }
                     });
             });

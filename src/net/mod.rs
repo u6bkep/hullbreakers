@@ -30,9 +30,11 @@ use crate::sim::combat::Combatant;
 use crate::sim::vitals::{HitLog, Vitals};
 use crate::sim::flight::Flight;
 use crate::sim::input::PlayerInput;
-use crate::sim::mission::{Debris, GalleryAnchor, Mission};
+use crate::sim::devices::Devices;
+use crate::sim::mission::{Debris, Mission};
+use crate::sim::scenarios::gallery::GalleryAnchor;
 use crate::sim::player::{DeckSlot, Mode, Player, PlayerTelemetry, PreviousMode, new_player};
-use crate::sim::ship::{Drift, HomeShip, ShipHull};
+use crate::sim::ship::{Drift, HomeShip, ShipHull, Site};
 use crate::sim::tuning::Tuning;
 use crate::sim::motion::{Motion, rotation_error};
 use crate::sim::bodies::Bodies;
@@ -154,6 +156,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_body::<Drift>)
             .add_observer(replicate_body::<Asteroid>)
             .add_observer(replicate_body::<Debris>)
+            .add_observer(replicate_body::<Site>)
             .add_observer(replicate_flight)
             .add_observer(replicate_mission)
             .add_observer(replicate_gallery)
@@ -263,6 +266,8 @@ impl Plugin for ProtocolPlugin {
         app.component::<Name>().replicate();
         app.component::<ShipHull>().replicate_once();
         app.component::<HomeShip>().replicate_once();
+        app.component::<Site>().replicate_once();
+        app.component::<Devices>().replicate();
         app.component::<Asteroid>().replicate_once();
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();

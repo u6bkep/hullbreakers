@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::sim::player::{Grapple, Mode, Player};
-use crate::sim::mission::CARRIER;
+use crate::sim::scenarios::boarding::CARRIER;
 use crate::sim::ship::{HOME, ShipHull};
 
 #[derive(Resource)]

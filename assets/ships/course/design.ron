@@ -1,0 +1,13 @@
+// The grapple run's course: ten gates in a loop, from just off our ship's
+// stern, out through a cluster of rocks and back past its bow (the
+// "Grapple run" scenario places it with its origin at the first gate, 17 m
+// behind our stern). The rocks are the scenario's, kept clear of the gates.
+// See docs/ships.md.
+Design(
+    name: "COURSE",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 0.0, 0.0), radii: (5.0, 5.0, 5.0)),
+    turrets: [],
+    modules: [(module: "course/gates")],
+)

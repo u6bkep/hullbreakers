@@ -970,7 +970,7 @@ enum ButtonStyle {
 impl ButtonStyle {
     fn of(action: ControlAction) -> Self {
         match action {
-            ControlAction::Scenario(_) | ControlAction::Armory => ButtonStyle::Go,
+            ControlAction::Scenario(_) | ControlAction::Armory | ControlAction::Device(_) => ButtonStyle::Go,
             ControlAction::Lurch => ButtonStyle::Hazard,
             ControlAction::DisableShields => ButtonStyle::Danger,
         }
@@ -998,6 +998,10 @@ fn fit_buttons(
     mut commands: Commands,
 ) {
     for (entity, control, transform) in &controls {
+        // Devices are drawn as themselves (see `client::devices`).
+        if matches!(control.action, ControlAction::Device(_)) {
+            continue;
+        }
         let style = ButtonStyle::of(control.action);
         let half = control.half_size;
         // The face is across the button's thinnest axis, toward the
@@ -1138,7 +1142,7 @@ fn face_image(label: &str, size: Vec2, style: ButtonStyle) -> Image {
 }
 
 /// Splits `text` into lines so it reads largest on a face of `size`.
-fn wrap(text: &str, size: Vec2) -> Vec<String> {
+pub(crate) fn wrap(text: &str, size: Vec2) -> Vec<String> {
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut best = (0.0, vec![text.to_string()]);
     for width in 1..=text.len().max(1) {
@@ -1164,7 +1168,7 @@ fn wrap(text: &str, size: Vec2) -> Vec<String> {
 
 /// A 5x7 glyph, one row per byte (bit 4 is the left column). Unknown
 /// characters are blank.
-fn glyph(c: char) -> [u8; 7] {
+pub(crate) fn glyph(c: char) -> [u8; 7] {
     match c {
         'A' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
         'B' => [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],

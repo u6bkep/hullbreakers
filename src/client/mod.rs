@@ -8,6 +8,7 @@ pub mod camera;
 pub mod combat_fx;
 pub mod crew;
 pub mod debug_shots;
+pub mod devices;
 pub mod events;
 pub mod gallery;
 pub mod hud;
@@ -67,6 +68,7 @@ impl Plugin for ClientPlugin {
             .add_observer(render::attach_meshes)
             .add_observer(render::add_ship_lights)
             .add_observer(render::add_ship_model)
+            .add_observer(devices::build_devices)
             .add_observer(sky::add_sky_to_cameras)
             .add_observer(gallery::set_out_gallery)
             .add_observer(viewmodel::spawn_view_hands)
@@ -90,6 +92,7 @@ impl Plugin for ClientPlugin {
                     render::setup_lighting,
                     render::setup_dust,
                     render::setup_pickup_look,
+                    devices::setup_device_look,
                     weapons_fx::setup_weapon_fx,
                     sfx::setup_sounds,
                 ),
@@ -133,6 +136,7 @@ impl Plugin for ClientPlugin {
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
                     sfx::play_hit_sounds,
+                    (devices::show_devices, devices::dim_dark_cabins),
                     (gallery::hide_colliders, gallery::arrange_exhibits, gallery::turn_exhibits, gallery::draw_sockets, gallery::pulse_cores, sky::settle_environment_maps),
                     (
                         weapons_fx::spawn_tracers,
