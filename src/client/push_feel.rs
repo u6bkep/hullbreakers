@@ -21,6 +21,7 @@ use bevy::prelude::*;
 use super::LocalPlayer;
 use super::ViewCorrection;
 use super::camera::{CameraFx, PlayerCamera};
+use super::events::Presented;
 use super::sfx::Sounds;
 use crate::sim::vitals::HurtLog;
 
@@ -33,6 +34,7 @@ pub struct Felt(Option<u32>);
 
 pub fn feel_pushes(
     correction: Res<ViewCorrection>,
+    mut presented: MessageReader<Presented>,
     hurts: Option<Single<&HurtLog, With<LocalPlayer>>>,
     camera: Option<Single<&Transform, With<PlayerCamera>>>,
     sounds: Option<Res<Sounds>>,
@@ -42,9 +44,12 @@ pub fn feel_pushes(
 ) {
     let mut thump = 0.0f32;
     // A correction: the authority moved us. The way we went is new minus
-    // old (the correction holds old minus new).
+    // old (the correction holds old minus new). Not when the view jumped
+    // anyway (a respawn, a scenario switch, a landing): the camera drops
+    // that correction, and it's no blow.
+    let relocated = presented.read().any(|p| p.0.relocates_view());
     let size = correction.position.length();
-    if size > FELT {
+    if size > FELT && !relocated {
         let dir = -correction.position / size;
         fx.push(dir, 0.02 + 0.025 * size);
         fx.shake((0.15 + 0.15 * size).min(0.8));
@@ -89,6 +94,7 @@ mod tests {
             rotation: Quat::IDENTITY,
         });
         app.init_resource::<CameraFx>();
+        app.add_message::<Presented>();
         app.add_systems(Update, feel_pushes);
         app.update();
         app.world().resource::<CameraFx>().felt()
@@ -102,5 +108,20 @@ mod tests {
         assert!(small_kick > 0.0 && small_kick < kick && small_shake < shake, "a shove's: shake {small_shake}, kick {small_kick}");
         assert_eq!(felt_after(Vec3::new(0.05, 0.0, 0.0)), (0.0, 0.0), "noise isn't a push");
     }
-}
 
+    #[test]
+    fn a_respawn_is_not_a_blow() {
+        use crate::sim::events::PlayerEvent;
+        let mut app = App::new();
+        app.insert_resource(ViewCorrection {
+            position: Vec3::new(-40.0, 0.0, 0.0),
+            rotation: Quat::IDENTITY,
+        });
+        app.init_resource::<CameraFx>();
+        app.add_message::<Presented>();
+        app.add_systems(Update, feel_pushes);
+        app.world_mut().write_message(Presented(PlayerEvent::Respawned));
+        app.update();
+        assert_eq!(app.world().resource::<CameraFx>().felt(), (0.0, 0.0));
+    }
+}

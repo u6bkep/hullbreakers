@@ -5,7 +5,8 @@
 //! - [`reticle`]: the crosshair, grapple ring, rope gauge, interact prompt
 //!   and hit markers (the centre).
 //! - [`markers`]: things in the world: ships, the reference body,
-//!   objectives (see [`markers::Objectives`]), your dropped kit.
+//!   objectives (see [`markers::Objectives`]), your dropped kit, and your
+//!   crewmates' names.
 //! - [`flight`]: the suit's nav readouts and the event feed.
 //! - [`mission`]: the scenario strip, banners, the debrief.
 //! - [`vitals`]: health, regen, low-health and damage-direction cues, and
@@ -50,6 +51,7 @@ impl Plugin for HudPlugin {
                     markers::objective_markers,
                     markers::reference_overlay,
                     markers::ship_markers,
+                    markers::crew_markers,
                     reticle::reticle,
                     crate::client::items_hud::pickup_card,
                     flight::flight_hud,

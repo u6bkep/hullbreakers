@@ -10,7 +10,7 @@ use egui::{Align2, Rect, Stroke, pos2, vec2};
 use super::style::{self, BOLD, EDGE, HOSTILE, INK, INK_DIM, MICRO, SUIT, WARNING};
 use super::{CameraView, HudMemory, Projector, view};
 use crate::client::LocalPlayer;
-use crate::sim::events::{LOG_TICKS, PlayerEvent};
+use crate::sim::events::{AuthorityLog, PlayerEvent};
 use crate::sim::pickups::Pickup;
 use crate::sim::player::Player;
 use crate::sim::tuning::Tuning;
@@ -27,10 +27,9 @@ const ARC_SECONDS: f32 = 1.2;
 /// What the HUD has read of your own logs.
 #[derive(Default)]
 pub struct Threats {
-    /// Your deaths already seen, by tick.
-    deaths: Vec<u32>,
-    /// Whether your event log has been seen at all.
-    started: bool,
+    /// How many entries of your authority log have been read (`None`: not
+    /// yet any).
+    told: Option<u32>,
     /// How many of your hurts have been read (`None`: not yet any).
     hurts: Option<u32>,
     /// World direction toward each recent hurt's source, and when.
@@ -40,15 +39,12 @@ pub struct Threats {
 /// Reads your hurts (for the arcs) and notices dying, and the case your
 /// kit was left in.
 ///
-/// Deaths are read straight from your event log, not as presented events:
-/// presentation drops what arrives late, and a death (which only the
-/// authority decides) reaches a laggy client late. Your log is rewritten
-/// under prediction, so each is taken once, however late (a re-timed copy
-/// within a few ticks is the same one).
+/// Deaths are read from your [`AuthorityLog`] (with the tick they happened
+/// on, which the presented events don't carry), each once, however late.
 pub fn track_threats(
     mut memory: ResMut<HudMemory>,
     mut threats: Local<Threats>,
-    me: Option<Single<(&Player, Option<&HurtLog>), With<LocalPlayer>>>,
+    me: Option<Single<(Entity, &Player, &AuthorityLog, Option<&HurtLog>), With<LocalPlayer>>>,
     camera: CameraView,
     cases: Query<(Entity, &Pickup, &Transform)>,
 ) {
@@ -60,21 +56,13 @@ pub fn track_threats(
     let Some(me) = me else {
         return;
     };
-    let (player, hurts) = *me;
+    let (me_entity, player, told, hurts) = *me;
 
-    let log_now = player.events.tick();
-    threats.deaths.retain(|t| log_now.wrapping_sub(*t) <= LOG_TICKS);
-    let started = std::mem::replace(&mut threats.started, true);
     let mut died = None;
-    for (tick, event) in player.events.iter() {
-        if event != PlayerEvent::Died || threats.deaths.iter().any(|&t| (tick.wrapping_sub(t) as i32).unsigned_abs() <= 3) {
-            continue;
-        }
-        threats.deaths.push(tick);
-        if started {
-            died = Some(tick);
-        }
+    if let Some(seen) = threats.told {
+        died = told.since(seen).filter(|&(_, e)| e == PlayerEvent::Died).map(|(tick, _)| tick).last();
     }
+    threats.told = Some(told.count);
     if let Some(tick) = died
         && let Some(place) = memory.last_eye
     {
@@ -103,7 +91,9 @@ pub fn track_threats(
     threats.arcs.retain(|(_, at)| now - at < ARC_SECONDS);
     memory.arcs.clone_from(&threats.arcs);
 
-    // Your kit is in the case left on the tick you died, where you fell.
+    // Your kit is the case only you may take: the newest of those, after a
+    // death (a robot's loot from the same blast, or a crewmate's case,
+    // isn't).
     if let Some(death) = memory.died
         && death.carried
         && memory.kit.is_none()
@@ -111,12 +101,9 @@ pub fn track_threats(
     {
         memory.kit = cases
             .iter()
-            .filter_map(|(e, case, t)| {
-                let d = t.translation.distance(death.place);
-                ((case.since.wrapping_sub(death.tick) as i32).abs() <= 2 && d < 8.0).then_some((e, d))
-            })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(e, _)| e);
+            .filter(|(_, case, _)| case.owner_only && case.owner == Some(me_entity))
+            .max_by_key(|(_, case, _)| case.since)
+            .map(|(e, ..)| e);
     }
     memory.last_eye = Some(eye);
 }

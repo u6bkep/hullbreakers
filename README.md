@@ -76,7 +76,8 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
 
 - **Escort**: a disabled freighter lies 20 m off our stern, robots
   aboard, a power cell in its cargo bay. Bring the cell to our hold. It's
-  bulky: whoever carries it can't shoot, grapple or work a switch, so the
+  bulky: whoever carries it can't shoot, grapple, work a switch or button, or
+  pick anything up, so the
   crew escorts them, or alone you set it down (G) and pick it up again
   (F). The way out: the bay door opens for 3 s at a turn of either key
   (one in the hall, one in the bay) and stays open while anyone stands in
@@ -116,6 +117,12 @@ profile; an unparseable one is kept as `profile.ron.bad` and a fresh one
 started; one that can't be read at all is left alone (a fresh profile, not
 saved). `HULLBREAKERS_SAVE=path` keeps it elsewhere; `tools/hl` gives each
 game it runs its own. Mission cargo (a data core) stays in its mission.
+
+A profile is someone: it's made with a random id (never shown) and a
+**callsign** ("Kestrel 42"), which you can change at the top of the menu's
+Controls tab. It's what the crew sees over your head and in the debrief and
+the run board; records (the grapple run's personal bests) go by the id, so
+a new player in a reused slot, or one who takes your name, starts their own.
 
 - **Your guns are yours, for good.** Every gun you pick up is yours. Store
   the ones you aren't carrying in the **armory** (up to 40). What you leave
@@ -342,12 +349,24 @@ go to the window under the pointer); the client's title is
 `Hullbreakers — HOST:PORT`.
 
 `tools/coop-smoke <dir> [lag ms] [port]` is a live co-op smoke test: a host
-and a client with simulated lag in one harness. The host
-(`HULLBREAKERS_COOP_TOUR=<dir>`, `src/client/coop_tour.rs`) puts the client
-through every scenario's set pieces (the locker, a death and the kit, a
-crate, a fight, the shield console, the derelict's devices, a gate, a tow,
-the gallery's affixed robots); the script presses, fires and reels as the
-client, screenshots its view into `<dir>`, and copies both logs there.
+and a client with simulated lag in one harness, the client starting from a
+seeded profile. The host (`HULLBREAKERS_COOP_TOUR=<dir>`,
+`src/client/coop_tour.rs`) puts the client (and itself, where a step needs
+it) through every scenario's set pieces: the armory (store and take) and
+the workbench (tune, scrap, refit, repaint) by clicking their buttons, a
+scenario switch with kit, damage control (faults forced on, a junction and
+a breaker reset, the board), a death and the kit (the host tries it first:
+it isn't theirs), a crate, a fight, a hull crawler, the shield console and
+the mission wall (the pay and a rank-up on the debrief), the escort (key,
+gangway, the cell carried, set down, carried home), the derelict's
+devices, a gate, a tow, and the gallery's affixed robots. The script
+presses, fires, reels and clicks as the client, screenshots its view (and
+the host's, where it matters) into `<dir>`, and copies both logs and the
+client's profile file there; the host's log has the client's profile and
+damage control's state as the host holds them. `COOP_ONLY=a,b` runs only
+the named steps. `tools/hl wheel <steps>` scrolls under the pointer;
+`swaymsg 'seat * cursor set X Y'` puts the pointer anywhere (for clicking
+menus).
 
 ## Controls
 
@@ -412,7 +431,15 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     `InputCursor`, so a repeated input is a no-op and a skipped one catches up.
   - **Events** (`sim/events.rs`) are tick-stamped entries in each player's
     `EventLog`, not messages. A re-simulated tick rewrites its own entries.
-    The client presents each one once (`client/events.rs`).
+    The client presents each one once (`client/events.rs`); one a
+    correction brings in late (more than 15 ticks) is dropped, as stale.
+    What only the authority decides (`Died`, `Respawned`,
+    `Detached(Blasted)` from a blast, a shot or a ship coming apart, and the
+    rope that snaps then) isn't in that log: a client can't predict it, so
+    it would arrive only by a correction, late or (a respawn on the spot you
+    stood on corrects nothing) never. It goes in the player's
+    `AuthorityLog`, written only by the authority, replicated and not
+    predicted, and read by count: presented once, however late it arrives.
   - Time-dependent behaviour (ship wobble, lurch, turret fire, scripted
     flight) derives from `SimTick`. Orders to a drifting ship arrive as
     `ShipCommand` messages.
@@ -422,7 +449,7 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     `sim/mission.rs` is what they share: button presses are player events
     (`Pressed`) that the `Director` acts on after the players move; a switch
     despawns the world, spawns the scenario's, and respawns every player on
-    deck (`Respawned`, a view relocation). `Mission` is replicated for the
+    deck (`Respawned`, in the `AuthorityLog`, a view relocation). `Mission` is replicated for the
     HUD: the objective, a status board, markers (label, place, kind, for an
     objective-marker list), the banner, the report and the debrief, and the
     report as numbers (`results`: `won`, `seconds`, and each scenario's
@@ -459,7 +486,9 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 - **Prediction**: a client simulates its own player ahead of the server
   (`PlayerSimPlugin`: a player with `PlayerInput` is simulated wherever it
   is) against bodies posed at the same tick from their motion, and rolls
-  back when the server's state differs beyond tolerance (`player_diverged`).
+  back when the server's state differs beyond tolerance (`player_diverged`),
+  up to a second back (`MAX_ROLLBACK_TICKS`: lightyear's default of 20 ticks
+  refused every correction past ~220 ms of round trip).
   The camera blends over corrections (`ViewCorrection`). Other players are
   interpolated. `HULLBREAKERS_LAG=ms[,loss%]` simulates a bad link on a client;
   clients log their rollback rate every 10 s.
@@ -508,6 +537,13 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 - Sounds are synthesized at startup (`client/sfx.rs`) and heard through the
   suit (non-spatial): footsteps, landing/impact clanks, release, jetpack hiss,
   grapple fire/attach/release, reel whine under load, rope twang, rip-off warning.
+  Other players (crew and robots alike) are heard only through a body you
+  stand on together, from where they are, fading with distance: footsteps,
+  landings, bumps, grapple strikes and gunfire (every frame and family, a
+  laser's hum while its beam is on). One floating in EVA isn't heard: there's
+  no sound in vacuum.
+- Crewmates' callsigns show over their heads (and how far off they are)
+  while they're within 80 m and on screen.
 - Rope: grey and sagging when slack, straight pale gold when taut, orange to red
   under load with dashes running in while reeling; load gauge under the crosshair.
 - Crosshair ring + distance when a surface is within grapple range; the

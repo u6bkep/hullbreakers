@@ -184,9 +184,14 @@ pub fn armed(player: &Player) -> bool {
     player.loadout.inventory.weapons.iter().any(Option::is_some)
 }
 
-/// What looking at a pickup offers.
-pub fn pickup_label(pickup: &Pickup) -> String {
-    pickup.label()
+/// What looking at a pickup offers `me`, and whether it's mine to take: a
+/// crewmate's death case is theirs alone (`owner`'s name, if known).
+pub fn pickup_label(pickup: &Pickup, me: bevy::prelude::Entity, owner: Option<&str>) -> (String, bool) {
+    if pickup.owner_only && pickup.owner != Some(me) {
+        let whose = owner.map_or("A crewmate's".to_string(), |n| format!("{n}'s"));
+        return (format!("{whose} kit: theirs to take"), false);
+    }
+    (pickup.label(), true)
 }
 
 /// Whether dying now would leave a case behind: anything in the weapon

@@ -112,6 +112,9 @@ impl Plugin for SimSharedPlugin {
             .add_observer(asteroids::shape_asteroid)
             .add_observer(fauna::shape_grazer)
             .add_observer(mission::shape_debris)
+            .init_resource::<bodies::VanishedBodies>()
+            .add_observer(bodies::note_vanished)
+            .add_systems(FixedFirst, bodies::forget_vanished.after(advance_tick))
             .add_observer(scenarios::recovery::shape_pod)
             // How its devices look here (a client's own presses at once).
             .add_systems(Update, devices::show_devices)
@@ -191,6 +194,7 @@ impl Plugin for SimPlugin {
             .add_message::<bots::Detonation>()
             .init_resource::<shots::Shots>()
             .init_resource::<shots::Shoves>()
+            .init_resource::<vitals::SteadyHits>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
             .add_observer(pickups::note_owned)
@@ -201,6 +205,7 @@ impl Plugin for SimPlugin {
             .add_observer(mission::name_body::<scenarios::recovery::Pod>)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
+            .add_observer(mission::drop_cargo_on_leaving)
             .add_systems(
                 FixedUpdate,
                 (
@@ -285,7 +290,7 @@ impl Plugin for SimPlugin {
                     )
                         .chain()
                         .in_set(mission::MissionSystems::Settle),
-                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders, progression::open_slots)
+                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders, progression::open_slots, progression::publish_rank)
                         .chain()
                         .in_set(mission::MissionSystems::React),
                     (

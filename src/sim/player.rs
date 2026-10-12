@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SimTick;
 use super::bodies::{Bodies, BodyInertia};
-use super::events::{Detach, EventLog, PlayerEvent};
+use super::events::{AuthorityLog, Detach, EventLog, PlayerEvent};
 use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
 use super::combat::{Beams, beam_shove};
@@ -177,8 +177,12 @@ pub struct Grapple {
 }
 
 /// Everything about a player that the simulation carries from tick to tick.
+///
+/// Every player has an [`AuthorityLog`] beside it, for what only the
+/// authority decides happens to them.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[component(map_entities)]
+#[require(AuthorityLog)]
 pub struct Player {
     pub mode: Mode,
     pub boots_on: bool,
@@ -219,8 +223,9 @@ impl Player {
     /// Puts the player back aboard `ship`, on deck spot `slot`, as at the
     /// start of a game: boots on, nothing grappled.
     /// What they carry they keep (it's theirs: see `sim::progression`); a
-    /// death has already left it where they fell.
-    pub fn respawn(&mut self, ship: Entity, slot: u32) {
+    /// death has already left it where they fell. Authority: it's told in
+    /// `told`, at `tick`.
+    pub fn respawn(&mut self, ship: Entity, slot: u32, told: &mut AuthorityLog, tick: u32) {
         self.mode = deck_mode(ship, slot);
         self.boots_on = true;
         self.grapple = None;
@@ -231,13 +236,13 @@ impl Player {
             hand.reload_queued = false;
             hand.beam = None;
         }
-        self.emit(PlayerEvent::Respawned);
+        told.push(tick, PlayerEvent::Respawned);
     }
 
     /// `ship` (whose frame is `frame`) is coming apart: a player standing on
     /// it is thrown clear, and one tied to it or flying relative to it lets
-    /// go.
-    pub fn thrown_off(&mut self, ship: Entity, frame: &BodyFrame, tuning: &Tuning) {
+    /// go. Authority: it's told in `told`, at `tick`.
+    pub fn thrown_off(&mut self, ship: Entity, frame: &BodyFrame, tuning: &Tuning, told: &mut AuthorityLog, tick: u32) {
         if let Mode::Booted {
             body,
             feet,
@@ -258,11 +263,11 @@ impl Player {
             }
             self.mode = mode;
             self.detach_timer = tuning.detach_cooldown;
-            self.emit(PlayerEvent::Detached(Detach::Blasted));
+            told.push(tick, PlayerEvent::Detached(Detach::Blasted));
         }
         if self.grapple.is_some_and(|g| g.target == ship) {
             self.grapple = None;
-            self.emit(PlayerEvent::RopeSnapped);
+            told.push(tick, PlayerEvent::RopeSnapped);
         }
         if self.reference_body == Some(ship) {
             self.reference_body = None;
@@ -272,8 +277,9 @@ impl Player {
     /// Shoved (by a blast): `dv` (world, m/s) is added to the player's
     /// velocity. On boots (`frame` the body underfoot's), a shove that beats
     /// their grip, lifting them off the deck or sliding them along it, knocks
-    /// them off; a lesser one is a stagger along the deck.
-    pub fn shove(&mut self, dv: Vec3, frame: Option<&BodyFrame>, tuning: &Tuning) {
+    /// them off; a lesser one is a stagger along the deck. Authority: being
+    /// knocked off is told in `told`, at `tick`.
+    pub fn shove(&mut self, dv: Vec3, frame: Option<&BodyFrame>, tuning: &Tuning, told: &mut AuthorityLog, tick: u32) {
         match self.mode {
             Mode::Eva { ref mut velocity, .. } => *velocity += dv,
             Mode::Booted {
@@ -291,7 +297,7 @@ impl Player {
                 if peel > tuning.adhesion_accel * SHOVE_SECONDS || along.length() > tuning.shear_accel * SHOVE_SECONDS {
                     self.mode = booted_to_eva(frame, feet, up, velocity + local, orientation, pitch, tuning);
                     self.detach_timer = tuning.detach_cooldown;
-                    self.emit(PlayerEvent::Detached(Detach::Blasted));
+                    told.push(tick, PlayerEvent::Detached(Detach::Blasted));
                 } else if let Mode::Booted { velocity, .. } = &mut self.mode {
                     *velocity += along;
                 }
@@ -558,6 +564,9 @@ struct TickContext<'a, 'w, 's> {
     pickups: &'a [PickupPoint],
     /// Every laser beam firing this tick.
     beams: &'a Beams,
+    /// Bodies with minds of their own (fauna): never a tow (see
+    /// [`TOW_MAX_MASS`]).
+    untowable: &'a [Entity],
 }
 
 impl<'a, 'w, 's> TickContext<'a, 'w, 's> {
@@ -845,7 +854,9 @@ pub fn player_tick(
     mut players: Query<PlayerQuery>,
     controls: Query<(&Control, &Transform, &ChildOf)>,
     pickups: Query<(Entity, &Pickup)>,
+    fauna: Query<Entity, With<super::fauna::Grazer>>,
 ) {
+    let untowable: Vec<Entity> = fauna.iter().collect();
     let controls: Vec<ControlPoint> = controls
         .iter()
         .map(|(control, transform, ship)| ControlPoint {
@@ -893,6 +904,7 @@ pub fn player_tick(
         players: &points,
         controls: &controls,
         pickups: &pickups,
+        untowable: &untowable,
         beams: &beams,
     };
     if ctx.dt <= 0.0 {
@@ -929,7 +941,9 @@ pub fn player_tick(
         // Recorded after look so the camera interpolates movement only; look
         // is applied immediately (see `update_camera`).
         previous.0 = player.mode;
-        if cmd.interact {
+        // Bulky cargo fills both hands: nothing else can be worked or taken
+        // until it's set down (drop).
+        if cmd.interact && !player.loadout.hands_full() {
             // The nearest of a button or a pickup under the crosshair.
             let control = control_under_crosshair(&ctx, &bodies, entity, player);
             let pickup = pickup_under_crosshair(&ctx, &bodies, entity, player);
@@ -1045,7 +1059,10 @@ pub fn player_tick(
 }
 
 /// The heaviest thing (kg, along the rope) flight assist treats as a tow
-/// rather than an anchor: survivors, lifeboats, wreckage; not rocks.
+/// rather than an anchor: survivors, lifeboats, cargo, wreckage, crew-sized
+/// rocks (under about half a metre); not big rocks, which are anchors, and
+/// never fauna (a hooked grazer bolts: the assist would chase it), which
+/// the context lists as `untowable`.
 const TOW_MAX_MASS: f32 = 1000.0;
 
 /// How far away a body can be picked as the reference frame.
@@ -1299,14 +1316,16 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     else {
         return;
     };
+    // The body underfoot has gone (a recycled rock, a killed grazer, a pod
+    // brought home): float free where we were on it, moving as it was.
+    if let Some(last) = bodies.vanished(body) {
+        player.mode = booted_to_eva(&last, feet, up, velocity, orientation, pitch, t);
+        player.detach_timer = t.detach_cooldown;
+        player.emit(PlayerEvent::Detached(Detach::Blasted));
+        return;
+    }
+    // A body this peer hasn't got (yet): stay as we are.
     let Some(frame) = bodies.frame(body) else {
-        // Body vanished: float free where we were, at rest.
-        player.mode = Mode::Eva {
-            position: feet,
-            velocity: Vec3::ZERO,
-            orientation,
-            pitch,
-        };
         return;
     };
     let previous_frame = bodies.previous_frame(body).unwrap_or(frame);
@@ -1666,11 +1685,11 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
         .filter(|_| cmd.reel_in)
         .and_then(|g| rope_point(ctx, bodies, &g));
     let swinging = !cmd.reel_in && player.grapple.is_some_and(|g| g.tension > 0.0);
-    // Towing: a rope on something light enough to tow (not a rock). With
-    // no input the assist keeps station with the load (how fast its end of
-    // the rope is going) instead of braking, so a tow you let go of coasts
-    // with you rather than overrunning you.
-    let towing = player.grapple.filter(|_| !cmd.reel_in).and_then(|g| {
+    // Towing: a rope on something light enough to tow (see [`TOW_MAX_MASS`]:
+    // not big rocks, not fauna). With no input the assist keeps station with
+    // the load (how fast its end of the rope is going) instead of braking,
+    // so a tow you let go of coasts with you rather than overrunning you.
+    let towing = player.grapple.filter(|g| !cmd.reel_in && !ctx.untowable.contains(&g.target)).and_then(|g| {
         let end = far_end(bodies, &g)?;
         let along = (end.point - position).normalize_or_zero();
         (end.inverse_mass(along) > 1.0 / TOW_MAX_MASS).then(|| end.velocity())

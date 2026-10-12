@@ -337,6 +337,7 @@ fn hit(app: &mut App, target: Entity, amount: f32, weak: bool) {
         source: None,
         weak,
         from: None,
+        steady: false,
     });
     ticks(app, 1);
 }
@@ -546,7 +547,8 @@ fn a_blast_knocks_the_crew_off_their_boots_but_not_through_a_wall() {
     assert!(health(&app, me) < full - 20.0, "at {}", health(&app, me));
     let p = app.world().get::<Player>(me).unwrap();
     assert!(matches!(p.mode, Mode::Eva { .. }), "still on its feet: {:?}", p.mode);
-    assert!(p.events.iter().any(|(_, e)| e == PlayerEvent::Detached(Detach::Blasted)));
+    let told = app.world().get::<hullbreakers::sim::events::AuthorityLog>(me).unwrap();
+    assert!(told.iter().any(|(_, e)| e == PlayerEvent::Detached(Detach::Blasted)));
 }
 
 #[test]

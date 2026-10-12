@@ -35,7 +35,7 @@ use bevy::prelude::*;
 use super::SimTick;
 use super::bodies::Bodies;
 use super::bots::{BodyTuning, Robot, WEAK_MULTIPLIER, body_rotation, tuning_of};
-use super::events::PlayerEvent;
+use super::events::{AuthorityLog, PlayerEvent};
 use super::player::Player;
 use super::tuning::Tuning;
 use super::vitals::{Damage, Vitals};
@@ -288,7 +288,9 @@ pub fn fly_shots(
             continue;
         };
         let point = shot.position + dir * hit.distance;
+        let steady = matches!(shot.kind, ShotKind::Laser { .. });
         let hurt = |target: Entity, amount: f32, weak: bool| Damage {
+            steady,
             target,
             amount,
             source: Some(shot.shooter),
@@ -415,15 +417,16 @@ pub fn fly_shots(
 /// hard enough one knocks them off the deck). A client learns of its own by
 /// correction: being shot is the authority's to know.
 pub fn apply_shoves(
+    tick: Res<SimTick>,
     base: Res<Tuning>,
     bodies: Bodies,
     mut shoves: ResMut<Shoves>,
-    mut players: Query<(&mut Player, Option<&BodyTuning>)>,
+    mut players: Query<(&mut Player, &mut AuthorityLog, Option<&BodyTuning>)>,
 ) {
     for (entity, impulse) in shoves.0.drain(..) {
-        let Ok((mut player, own)) = players.get_mut(entity) else { continue };
+        let Ok((mut player, mut told, own)) = players.get_mut(entity) else { continue };
         let tuning = tuning_of(&base, own);
         let frame = player.mode.body().and_then(|b| bodies.frame(b));
-        player.shove(impulse / tuning.player_mass, frame.as_ref(), tuning);
+        player.shove(impulse / tuning.player_mass, frame.as_ref(), tuning, &mut told, tick.0);
     }
 }

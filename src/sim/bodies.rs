@@ -107,6 +107,45 @@ pub struct Bodies<'w, 's> {
     bodies: Query<'w, 's, BodyData>,
     collider_of: Query<'w, 's, &'static ColliderOf>,
     shapes: Query<'w, 's, &'static Collider>,
+    vanished: Option<Res<'w, VanishedBodies>>,
+}
+
+/// Bodies that have just gone (despawned: a rock recycled, a grazer
+/// killed, a pod brought home, a ship wrecked) and how they were posed and
+/// moving as they went, for a little while, on every peer. Whatever was on
+/// them or measured against them (boots, positions in their frame) still
+/// has a frame to leave from; see [`Bodies::vanished`].
+#[derive(Resource, Default)]
+pub struct VanishedBodies(Vec<(Entity, u32, BodyFrame)>);
+
+/// How long (ticks) a vanished body's last frame is kept.
+const VANISHED_TICKS: u32 = 120;
+
+/// Notes a body's last frame as it goes.
+pub fn note_vanished(
+    remove: On<Remove, BodyInertia>,
+    tick: Option<Res<super::SimTick>>,
+    bodies: Query<(&Position, &Rotation, Option<&LinearVelocity>, Option<&AngularVelocity>, &BodyInertia)>,
+    mut vanished: ResMut<VanishedBodies>,
+) {
+    let Ok((pos, rot, lin, ang, inertia)) = bodies.get(remove.entity) else { return };
+    let tick = tick.map_or(0, |t| t.0);
+    vanished.0.push((
+        remove.entity,
+        tick,
+        BodyFrame {
+            position: pos.0,
+            rotation: rot.0,
+            center_of_mass: pos.0 + rot.0 * inertia.center_of_mass,
+            linear_velocity: lin.map_or(Vec3::ZERO, |v| v.0),
+            angular_velocity: ang.map_or(Vec3::ZERO, |v| v.0),
+        },
+    ));
+}
+
+/// Forgets vanished bodies after [`VANISHED_TICKS`].
+pub fn forget_vanished(tick: Res<super::SimTick>, mut vanished: ResMut<VanishedBodies>) {
+    vanished.0.retain(|(_, at, _)| tick.0.wrapping_sub(*at) < VANISHED_TICKS);
 }
 
 impl Bodies<'_, '_> {
@@ -115,8 +154,21 @@ impl Bodies<'_, '_> {
         self.collider_of.get(collider).ok().map(|c| c.body)
     }
 
+    /// The last frame of a body that has just gone (see [`VanishedBodies`]),
+    /// if `body` is one.
+    pub fn vanished(&self, body: Entity) -> Option<BodyFrame> {
+        if self.bodies.contains(body) {
+            return None;
+        }
+        self.vanished.as_ref()?.0.iter().rev().find(|(e, ..)| *e == body).map(|(_, _, f)| *f)
+    }
+
+    /// Where a body is and how it moves; for one that has just gone, as it
+    /// went (so positions in its frame stay where they were).
     pub fn frame(&self, body: Entity) -> Option<BodyFrame> {
-        let (pos, rot, lin, ang, inertia, _) = self.bodies.get(body).ok()?;
+        let Ok((pos, rot, lin, ang, inertia, _)) = self.bodies.get(body) else {
+            return self.vanished(body);
+        };
         Some(BodyFrame {
             position: pos.0,
             rotation: rot.0,

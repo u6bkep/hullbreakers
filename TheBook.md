@@ -140,6 +140,26 @@ it.
   `a_death_where_you_stand_reaches_the_client`). Cost: an hour. Pattern to
   watch: any other authority-only event that changes nothing predicted
   would be lost the same way.
+  (Replaced the same day: authority-only events (`Died`, `Respawned`,
+  `Detached(Blasted)`, a ship's break-up snapping a rope) moved out of the
+  predicted `EventLog` into a replicated, unpredicted `AuthorityLog`, read
+  by count, so nothing depends on a rollback to deliver an event;
+  `died_unpredicted` is gone. Tests `a_death_where_you_stand_is_presented_*`
+  and `a_blast_at_250_ms_is_presented`. Cost: two hours.)
+
+## lightyear
+
+- 2026-10-12. At 250 ms of round trip an authority's shove (a blast off
+  the deck) never corrected the client: it kept standing while the server
+  had it floating, for seconds or for good. lightyear's
+  `RollbackPolicy::max_rollback_ticks` defaults to 20, and a confirmed
+  state is the client's lead plus the trip back old when it arrives (~22
+  ticks at 250 ms); older rollbacks are refused with a `warn!` that
+  headless tests don't show, so it read as "no divergence" (only jitter
+  occasionally let one through). Raised to 60 (`MAX_ROLLBACK_TICKS` in
+  `src/net/mod.rs`). Cost: an hour, found by a test asserting the
+  client's mode, not just its events. Watch: deeper rollbacks re-simulate
+  more ticks each (CPU at high lag).
 
 ## Bevy rendering
 
@@ -245,6 +265,13 @@ it.
   host's grapple. Fix: `swaymsg 'seat * cursor set X Y'` onto the client
   before clicking (`tools/coop-smoke`). Focus also wanders, so it's set
   again before each step. Cost: two smoke runs.
+- 2026-10-12. Clicking egui menus in the harness: `hl-input`'s pointer is
+  relative only, but `swaymsg 'seat * cursor set X Y'` places it
+  absolutely, which is enough to click buttons at positions read off a
+  screenshot (`tools/coop-smoke`, the armory and workbench). Scrolling
+  needed a `wheel` command in `hl-input` (`tools/hl wheel`). Cost: a few
+  calibration runs per menu; the positions break when the menus' layouts
+  change.
 
 ## Our ship designs (sim/design.rs, ship.rs)
 
@@ -342,3 +369,35 @@ it.
   it rocked at the wall's foot. Fix: when its goal is a ceiling perch it
   commits to a climb (`Crawling::climb`: the wall's direction in its body,
   held for a few seconds) instead of re-deciding. Cost: several test runs.
+
+## Lightyear and Replicon (net/)
+
+- 2026-10-12. Lightyear 0.30 replicates through Replicon, and has no
+  per-component, per-client target of its own (`Replicate`,
+  `PredictionTarget` are per entity). Keeping a profile to its owner took
+  Replicon's own visibility filter (`net::profiles::ProfileOwner`, scoped to
+  `(Profile, SavedProfile)`), so `bevy_replicon` is a direct dependency now
+  (the same version lightyear uses). The filter can only be registered
+  where Replicon's server is in: a pure client app has no `FilterRegistry`
+  and panics on `add_visibility_filter`, and in `build` the server plugin
+  may not be in yet; it's registered in `ProtocolPlugin::finish`, if the
+  registry exists. The filter's client entity is lightyear's link entity
+  (what `ControlledBy::owner` holds). An entity without the filter
+  component has the scoped components hidden from every client, which is
+  what the host's own player wants. Cost: an hour.
+
+## Build cache (cargo, rustc)
+
+- 2026-10-12. Several agents building in their own worktrees filled the
+  disk twice in one day. Every dependency built with full debug info made
+  each test binary 2.4 GB, and stale test binaries pile up in
+  `target/debug/deps` (cargo never removes an old hash). Measures taken:
+  line tables only for dependencies (8a88503); `split-debuginfo =
+  "unpacked"` for our own code, so debug info stays in the object files
+  instead of being copied into every linked binary (1.16 GB → 0.56 GB per
+  binary); and cargo's `no-embed-metadata`, which is nightly-only, so the
+  repo now pins a nightly in `rust-toolchain.toml`. A full `target/debug`
+  is about 20 GB, down from 38 GB. Cost: a nightly toolchain, two full
+  rebuilds, and a prune script run by hand (old binaries per test target,
+  keep the newest). Stale binaries still accumulate; a `cargo sweep` habit
+  or a tool of our own would close that.

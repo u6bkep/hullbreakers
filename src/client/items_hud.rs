@@ -246,7 +246,14 @@ pub fn pickup_card(
             rows.push(Row::Stat(label, value, delta));
         }
     }
-    if fits.iter().any(|f| !f) {
+    // A crewmate's death case: theirs alone to take.
+    let theirs = pickup.owner_only && pickup.owner != Some(own);
+    if theirs {
+        rows.push(Row::Rule);
+        let line = "A crewmate's kit: only they can take it".to_string();
+        rows.push(Row::Text(style::galley(&painter, line, style::ui(SMALL), WARNING, 0.0), WARNING, 18.0));
+    }
+    if !theirs && fits.iter().any(|f| !f) {
         rows.push(Row::Rule);
         let line = format!(
             "No room for some of it: drop something ({}) or sort your pack ({})",

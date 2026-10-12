@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::SimTick;
-use super::events::PlayerEvent;
+use super::events::{AuthorityLog, PlayerEvent};
 use super::bots::{self, Affixes, BodyTuning, Brain, Condition, Robot, tuning_of};
 use super::pickups::{Pickup, left_where};
 use super::combat::Beams;
@@ -47,7 +47,20 @@ pub struct Damage {
     /// Where it came from, in the world (a shot's muzzle, a beam's turret),
     /// for the victim's [`HurtLog`].
     pub from: Option<Vec3>,
+    /// From something that hurts every tick (a crew laser's beam): it's
+    /// applied every tick, but the logs (the shooter's hit markers and
+    /// sounds, the victim's damage arcs, and what they cost on the wire)
+    /// get one entry per [`STEADY_LOG_SECONDS`] of it, its damage summed.
+    pub steady: bool,
 }
+
+/// How often a steady source's hits on one target are logged (s).
+pub const STEADY_LOG_SECONDS: f32 = 0.15;
+
+/// Steady hits gathered since they were last logged, by source and target:
+/// when that was, and the damage since.
+#[derive(Resource, Default)]
+pub struct SteadyHits(std::collections::HashMap<(Option<Entity>, Entity), (f32, f32)>);
 
 /// What has recently hurt a player, and from where: their HUD's damage
 /// arcs. The authority writes it; a client can't know what hit it.
@@ -157,6 +170,7 @@ pub fn beam_burns(
                 source: None,
                 weak: false,
                 from,
+                steady: false,
             });
         }
     }
@@ -172,8 +186,12 @@ pub fn apply_damage(
     mut vitals: Query<(&mut Vitals, Has<Robot>, Has<Player>, Option<&BodyTuning>, Option<(&Affixes, &mut Brain, &mut Condition)>)>,
     mut logs: Query<&mut HitLog>,
     mut hurts: Query<&mut HurtLog>,
+    mut steady: ResMut<SteadyHits>,
 ) {
     let dt = time.delta_secs();
+    let now = time.elapsed_secs();
+    // A beam that's moved off (or stopped) starts afresh next time.
+    steady.0.retain(|_, (logged, _)| now - *logged < 2.0 * STEADY_LOG_SECONDS);
     // The crew's suits heal (to their own most: rank plates them); robots
     // and creatures don't.
     for (mut v, robot, player, own, _) in &mut vitals {
@@ -205,6 +223,21 @@ pub fn apply_damage(
         };
         v.health = (v.health - amount).max(0.0);
         v.since_hurt = 0.0;
+        let kill = v.health <= 0.0;
+        // A steady source logs a hit now and then, its damage summed (its
+        // first touch and a kill at once).
+        let amount = if hit.steady {
+            let entry = steady.0.entry((hit.source, hit.target)).or_insert((f32::MIN, 0.0));
+            entry.1 += amount;
+            if !kill && now - entry.0 < STEADY_LOG_SECONDS {
+                continue;
+            }
+            let sum = entry.1;
+            *entry = (now, 0.0);
+            sum
+        } else {
+            amount
+        };
         if let Ok(mut log) = hurts.get_mut(hit.target) {
             log.push(Hurt {
                 from: hit.from,
@@ -227,24 +260,34 @@ pub fn settle_deaths(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
     home: Option<Single<Entity, With<HomeShip>>>,
-    mut players: Query<(Entity, &mut Player, &mut Vitals, &DeckSlot, Option<&BodyTuning>)>,
+    mut players: Query<(Entity, &mut Player, &mut AuthorityLog, &mut Vitals, &DeckSlot, Option<&BodyTuning>)>,
     mut commands: Commands,
 ) {
     let Some(home) = home else {
         return;
     };
-    for (entity, mut player, mut vitals, slot, own) in &mut players {
+    for (entity, mut player, mut told, mut vitals, slot, own) in &mut players {
         if vitals.health > 0.0 {
             continue;
         }
         // What they carried stays where they fell: on the deck under them,
         // or adrift on their last velocity.
-        let items = player.loadout.inventory.empty_out();
+        // Their own gear is theirs to come back for; mission cargo is
+        // anyone's, in a case of its own.
+        let (cargo, items): (Vec<_>, Vec<_>) = player
+            .loadout
+            .inventory
+            .empty_out()
+            .into_iter()
+            .partition(|i| matches!(i, crate::sim::items::Item::Cargo(_)));
         if !items.is_empty() {
             commands.spawn((Name::new("Dropped kit"), Pickup::left_by(entity, left_where(&player.mode), tick.0, items)));
         }
-        player.events.push(PlayerEvent::Died);
-        player.respawn(*home, slot.0);
+        if !cargo.is_empty() {
+            commands.spawn((Name::new("Dropped cargo"), Pickup::dropped(left_where(&player.mode), tick.0, cargo)));
+        }
+        told.push(tick.0, PlayerEvent::Died);
+        player.respawn(*home, slot.0, &mut told, tick.0);
         *vitals = Vitals::full(tuning_of(&tuning, own));
     }
 }

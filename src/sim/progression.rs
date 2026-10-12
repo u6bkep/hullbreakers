@@ -47,6 +47,38 @@ pub struct Profile {
     /// slot; see [`items::SLOTS`]).
     #[serde(default)]
     pub parts: u32,
+    /// Who it is, for good: made at random with the profile, never shown.
+    /// What's kept of a player across sessions (a personal best) is kept
+    /// by this, not by a name or a slot. 0: none yet (a file from before;
+    /// the machine that owns it gives it one on loading).
+    #[serde(default)]
+    pub id: u64,
+    /// What the crew call them: chosen in the menu; a callsign made from
+    /// the id until then (see [`callsign`]).
+    #[serde(default)]
+    pub name: String,
+}
+
+/// The longest a player's name may be (characters).
+pub const NAME_MAX: usize = 20;
+
+/// A callsign for a new profile, from its id: "Kestrel 42".
+pub fn callsign(id: u64) -> String {
+    const WORDS: [&str; 32] = [
+        "Kestrel", "Osprey", "Talon", "Vesper", "Halcyon", "Rook", "Corsair", "Lantern", "Sable", "Quill", "Ember", "Tern",
+        "Bramble", "Cinder", "Drift", "Flint", "Gannet", "Harrow", "Ibis", "Jackdaw", "Kite", "Lark", "Merlin", "Nomad",
+        "Petrel", "Raven", "Skua", "Thistle", "Umber", "Vireo", "Wren", "Yarrow",
+    ];
+    let mixed = id.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    format!("{} {}", WORDS[(mixed >> 59) as usize % WORDS.len()], 10 + (mixed >> 20) % 90)
+}
+
+/// A name as a player typed it, made fit to show: trimmed, no control
+/// characters, at most [`NAME_MAX`] characters; `None` if nothing's left.
+pub fn clean_name(name: &str) -> Option<String> {
+    let name: String = name.chars().filter(|c| !c.is_control()).take(NAME_MAX).collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 impl Profile {
@@ -190,6 +222,8 @@ pub enum ProfileWire {
     Upload(ProfileFile),
     /// Something done at the armory or workbench.
     Op(ProfileOp),
+    /// A new name, chosen in the menu.
+    Rename(String),
 }
 
 /// Something asked of a profile.
@@ -200,9 +234,9 @@ pub enum ProfileOp {
     Take(Weapon),
     /// The armory: a standard-issue gun of a frame, free.
     TakeIssue(GunKind),
-    /// The armory: the gun at this place in the inventory into the stash
-    /// (standard issue just goes back on the rack).
-    Store(Place),
+    /// The armory: a carried gun into the stash (standard issue just goes
+    /// back on the rack).
+    Store(Holding),
     /// The workbench: a gun up a tier of rarity (see [`tune_cost`]).
     Tune(Holding),
     /// The workbench: one part slot (in [`items::SLOTS`] order) fitted with
@@ -216,24 +250,43 @@ pub enum ProfileOp {
     Scrap(Holding),
 }
 
-/// A gun a player has: carried (where), or in their stash (which: by what
-/// it is, not where, so a click on a stash that has just changed can't act
-/// on the gun beside it).
+/// A gun a player has: carried (where, and which gun was there: an order
+/// travels apart from the inventory moves sent with input, so by the time
+/// the host applies it another gun may be in that place, and then it's
+/// refused), or in their stash (by what it is, not where, so a click on a
+/// stash that has just changed can't act on the gun beside it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Holding {
-    Carried(Place),
+    Carried(Place, Weapon),
     Stash(Weapon),
 }
 
 impl Holding {
-    /// The gun it is, if it's one.
+    /// The gun it is, as it is now, if it's still there.
     pub fn weapon(self, inventory: &Inventory, profile: &Profile) -> Option<Weapon> {
         match self {
-            Holding::Carried(place) => match inventory.get(place) {
-                Some(Item::Weapon(w)) => Some(w),
+            Holding::Carried(place, was) => match inventory.get(place) {
+                Some(Item::Weapon(w)) if w.same_make(&was) => Some(w),
                 _ => None,
             },
             Holding::Stash(w) => profile.stash.contains(&w).then_some(w),
+        }
+    }
+
+    /// The gun carried at `place`, if there's one.
+    pub fn carried(inventory: &Inventory, place: Place) -> Option<Holding> {
+        match inventory.get(place) {
+            Some(Item::Weapon(w)) => Some(Holding::Carried(place, w)),
+            _ => None,
+        }
+    }
+
+    /// Whether two pick out the same gun (a carried one by its place and
+    /// make: the workbench changing it doesn't make it another).
+    pub fn same(self, other: Holding) -> bool {
+        match (self, other) {
+            (Holding::Carried(p, a), Holding::Carried(q, b)) => p == q && a.same_make(&b),
+            (a, b) => a == b,
         }
     }
 }
@@ -313,6 +366,7 @@ fn sanitized(mut file: ProfileFile) -> ProfileFile {
     }
     inv.all_weapons_mut().for_each(fix);
     inv.strip_cargo();
+    file.profile.name = clean_name(&file.profile.name).unwrap_or_else(|| callsign(file.profile.id));
     file.profile.salvage = file.profile.salvage.min(u32::MAX / 2);
     file.profile.xp = file.profile.xp.min(u32::MAX / 2);
     for kind in AmmoKind::ALL {
@@ -359,9 +413,17 @@ pub fn apply_profile_orders(
                 let before = player.loadout.held();
                 player.loadout.inventory = file.carried;
                 player.loadout.hands_changed(before);
-                commands.entity(entity).insert(file.profile);
+                // They're called what their profile calls them.
+                commands.entity(entity).insert((Name::new(file.profile.name.clone()), file.profile));
             }
             (ProfileWire::Upload(_), Some(_)) => {}
+            (ProfileWire::Rename(name), Some(mut profile)) => {
+                if let Some(name) = clean_name(&name) {
+                    profile.name = name.clone();
+                    commands.entity(entity).insert(Name::new(name));
+                }
+            }
+            (ProfileWire::Rename(_), None) => {}
             // The armory and workbench are aboard our ship.
             (ProfileWire::Op(op), Some(mut profile)) => {
                 if player.mode.body().is_some_and(|b| homes.contains(b)) {
@@ -387,9 +449,9 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
             _ => false,
         },
         ProfileOp::TakeIssue(frame) => frames(rank(profile.xp)).contains(&frame) && inv.take(Item::Weapon(Weapon::issue(frame))),
-        ProfileOp::Store(place) => match inv.get(place) {
-            Some(Item::Weapon(w)) if w.rarity == Rarity::Standard => inv.remove(place).is_some(),
-            Some(Item::Weapon(w)) if profile.stash.len() < STASH_CAP => {
+        ProfileOp::Store(h) => match (h, h.weapon(inv, profile)) {
+            (Holding::Carried(place, _), Some(w)) if w.rarity == Rarity::Standard => inv.remove(place).is_some(),
+            (Holding::Carried(place, _), Some(w)) if profile.stash.len() < STASH_CAP => {
                 inv.remove(place);
                 profile.stash.push(w);
                 true
@@ -440,7 +502,7 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
         ProfileOp::Scrap(h) => match h.weapon(inv, profile) {
             Some(w) => {
                 match h {
-                    Holding::Carried(place) => {
+                    Holding::Carried(place, _) => {
                         inv.remove(place);
                     }
                     Holding::Stash(w) => {
@@ -477,7 +539,7 @@ fn workbench(h: Holding, inv: &mut Inventory, profile: &mut Profile, change: imp
     }
     w.mag = w.mag.min(w.stats().mag);
     match h {
-        Holding::Carried(place) => {
+        Holding::Carried(place, _) => {
             inv.remove(place);
             if !inv.put_back(place, Item::Weapon(w)) {
                 profile.stash.push(w);
@@ -567,6 +629,22 @@ pub fn rank_tuning(base: &Tuning, rank: u8) -> Tuning {
     t
 }
 
+/// A player's rank, public: every peer tunes their body by it (see
+/// [`tune_to_rank`]). The rest of a profile goes only to its owner (see
+/// `net::profiles`).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rank(pub u8);
+
+/// Authority: a player's rank, published from their profile.
+pub fn publish_rank(players: Query<(Entity, &Profile, Option<&Rank>), Changed<Profile>>, mut commands: Commands) {
+    for (entity, profile, published) in &players {
+        let r = Rank(rank(profile.xp));
+        if published != Some(&r) {
+            commands.entity(entity).insert(r);
+        }
+    }
+}
+
 /// The rank a player's body was last tuned for.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TunedFor(pub u8);
@@ -576,11 +654,11 @@ pub struct TunedFor(pub u8);
 /// up with the crew's tuning and their rank.
 pub fn tune_to_rank(
     base: Res<Tuning>,
-    players: Query<(Entity, &Profile, Option<&TunedFor>), (With<Player>, Without<Robot>)>,
+    players: Query<(Entity, &Rank, Option<&TunedFor>), (With<Player>, Without<Robot>)>,
     mut commands: Commands,
 ) {
-    for (entity, profile, tuned) in &players {
-        let r = rank(profile.xp);
+    for (entity, rank, tuned) in &players {
+        let r = rank.0;
         if tuned != Some(&TunedFor(r)) || base.is_changed() {
             commands.entity(entity).insert((BodyTuning(rank_tuning(&base, r)), TunedFor(r)));
         }
@@ -605,6 +683,25 @@ pub fn settle_out(profile: &mut Profile) {
     let out = std::mem::take(&mut profile.out);
     if RECOVER_UNCLAIMED {
         profile.stash.extend(out);
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn names_are_cleaned_and_callsigns_are_stable() {
+        assert_eq!(clean_name("  Ripley \n"), Some("Ripley".into()));
+        assert_eq!(clean_name(" \t "), None);
+        assert_eq!(clean_name(&"x".repeat(50)).unwrap().chars().count(), NAME_MAX);
+        assert_eq!(callsign(7), callsign(7));
+        let calls: std::collections::HashSet<String> = (1..200u64).map(|i| callsign(i.wrapping_mul(0x1234_5678_9abc))).collect();
+        assert!(calls.len() > 150, "only {} callsigns", calls.len());
+        // An unnamed profile is called its callsign when it's made sound.
+        let mut file = ProfileFile::fresh();
+        file.profile.id = 99;
+        assert_eq!(sanitized(file).profile.name, callsign(99));
     }
 }
 

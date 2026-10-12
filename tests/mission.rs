@@ -55,6 +55,12 @@ fn player(app: &mut App) -> Player {
     world.query_filtered::<&Player, Without<Robot>>().single(world).unwrap().clone()
 }
 
+/// What the authority alone said happened to the player.
+fn told(app: &mut App) -> hullbreakers::sim::events::AuthorityLog {
+    let world = app.world_mut();
+    world.query_filtered::<&hullbreakers::sim::events::AuthorityLog, (With<Player>, Without<Robot>)>().single(world).unwrap().clone()
+}
+
 fn set_player(app: &mut App, f: impl FnOnce(&mut Player)) {
     let world = app.world_mut();
     f(&mut world.query_filtered::<&mut Player, Without<Robot>>().single_mut(world).unwrap());
@@ -149,7 +155,7 @@ fn the_mission_wall_starts_a_boarding_action() {
     assert!(ship_of(&mut app, "carrier").is_some());
     let p = player(&mut app);
     assert_eq!(p.mode.body(), Some(new_home), "not put back aboard");
-    assert!(p.events.iter().any(|(_, e)| e == PlayerEvent::Respawned));
+    assert!(told(&mut app).iter().any(|(_, e)| e == PlayerEvent::Respawned));
     // Both ships fly their duel, among rocks.
     let world = app.world_mut();
     assert_eq!(world.query::<&Flight>().iter(world).count(), 2);
@@ -215,11 +221,7 @@ fn dropping_the_shield_wins_and_blows_the_crew_clear() {
     assert_eq!(mission(&mut app).phase, Phase::Won);
     let p = player(&mut app);
     assert!(matches!(p.mode, Mode::Eva { .. }));
-    assert!(
-        p.events
-            .iter()
-            .any(|(_, e)| e == PlayerEvent::Detached(Detach::Blasted))
-    );
+    assert!(told(&mut app).iter().any(|(_, e)| e == PlayerEvent::Detached(Detach::Blasted)));
     let world = app.world_mut();
     assert!(world.query::<&Debris>().iter(world).count() > 10);
 }
@@ -309,7 +311,7 @@ fn beams_kill_and_the_dead_come_back_aboard() {
             });
         }
         ticks(&mut app, 1);
-        if player(&mut app).events.iter().any(|(_, e)| e == PlayerEvent::Died) {
+        if told(&mut app).iter().any(|(_, e)| e == PlayerEvent::Died) {
             died = true;
             break;
         }
@@ -766,6 +768,21 @@ fn the_grapple_run_is_won_through_every_gate_in_order() {
     fly_the_gates(&mut app, 0..10);
     let report = mission(&mut app).report;
     assert!(report[0].contains("personal best"), "{report:?}");
+    // Someone else in the same slot, by the same name: their own record,
+    // none yet (records go by the profile's id).
+    let me = {
+        let world = app.world_mut();
+        world.query_filtered::<Entity, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>().iter(world).next().unwrap()
+    };
+    app.world_mut().entity_mut(me).insert(hullbreakers::sim::progression::Profile {
+        id: 77,
+        ..Default::default()
+    });
+    start(&mut app, ScenarioKind::GrappleRun);
+    ticks(&mut app, 30);
+    fly_the_gates(&mut app, 0..10);
+    let report = mission(&mut app).report;
+    assert!(report[0].starts_with("Player 1: ") && !report[0].contains("best"), "{report:?}");
 }
 
 #[test]
@@ -1355,5 +1372,207 @@ fn gunners_cross_the_gangway_when_it_is_out() {
     eprintln!("the bow hall's Gunners got as far aft as z = {out:.1} with the gangway out, {in:.1} with it in", in = r#in);
     assert!(out > 2.0, "never crossed the gangway (got to z = {out:.1})");
     assert!(r#in < 0.0, "crossed with the gangway in (got to z = {:.1})", r#in);
+}
+
+// ---------------------------------------------------------------------------
+// Fixes at the seams
+
+/// Standing on a body that goes (a rock recycled, a grazer killed, a pod
+/// brought home): you float free where you were on it, moving as it was,
+/// not at its body-local feet read as a world position (by our ship).
+#[test]
+fn when_the_body_underfoot_goes_you_float_free_where_it_was() {
+    let mut app = app();
+    let at = Vec3::new(30.0, 10.0, -120.0);
+    let rock = app
+        .world_mut()
+        .spawn((
+            hullbreakers::sim::asteroids::Asteroid { radius: 3.0, seed: 7 },
+            RigidBody::Dynamic,
+            SleepingDisabled,
+            hullbreakers::sim::bodies::PreviousVelocity::default(),
+            Position(at),
+            Rotation::default(),
+            LinearVelocity(Vec3::new(0.0, 0.0, 3.0)),
+        ))
+        .id();
+    ticks(&mut app, 2);
+    let feet = Vec3::new(0.0, 3.0, 0.0);
+    set_player(&mut app, |p| {
+        p.mode = Mode::Booted {
+            body: rock,
+            feet,
+            up: Vec3::Y,
+            velocity: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        };
+    });
+    let rock_at = app.world().get::<Position>(rock).unwrap().0;
+    app.world_mut().despawn(rock);
+    ticks(&mut app, 1);
+    let Mode::Eva { position, velocity, .. } = player(&mut app).mode else {
+        panic!("still booted on nothing: {:?}", player(&mut app).mode)
+    };
+    assert!(position.distance(rock_at + feet) < 2.5, "floating at {position}, the rock was at {rock_at}");
+    assert!((velocity - Vec3::new(0.0, 0.0, 3.0)).length() < 0.5, "moving at {velocity}, the rock was moving at 3 m/s");
+}
+
+/// Mission cargo isn't a dead crew member's own: it drops in a case anyone
+/// can take, and leaving the game with it leaves it too.
+#[test]
+fn mission_cargo_is_anyones_when_its_carrier_dies_or_leaves() {
+    use hullbreakers::sim::scenarios::escort::CELL;
+    let mut app = app();
+    start(&mut app, ScenarioKind::Escort);
+    let freighter = ship_of(&mut app, "freighter").unwrap();
+    press_device(&mut app, freighter, "bay_key_hall");
+    let cell = cell_pickups(&mut app)[0].at;
+    let feet = Vec3::new(cell.x, 0.01, cell.z + 1.4);
+    stand(&mut app, freighter, feet, cell - (feet + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    assert!(carrying_cell(&mut app));
+    // Killed holding it.
+    {
+        let world = app.world_mut();
+        let mut v = world.query_filtered::<&mut Vitals, Without<Robot>>().single_mut(world).unwrap();
+        *v = Vitals { health: 0.0, since_hurt: 0.0 };
+    }
+    ticks(&mut app, 2);
+    let cells = cell_pickups(&mut app);
+    assert_eq!(cells.len(), 1, "the cell isn't anywhere");
+    assert!(!cells[0].owner_only && cells[0].owner.is_none(), "the cell went into the dead one's own case");
+    assert_eq!(cells[0].items, vec![CELL], "the cell shares a case: {:?}", cells[0].items);
+    // Taken again, then the carrier leaves the game with it.
+    stand(&mut app, freighter, feet, cells[0].at - (feet + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    assert!(carrying_cell(&mut app));
+    let me = {
+        let world = app.world_mut();
+        world.query_filtered::<Entity, (With<Player>, Without<Robot>)>().single(world).unwrap()
+    };
+    app.world_mut().despawn(me);
+    ticks(&mut app, 2);
+    assert_eq!(cell_pickups(&mut app).len(), 1, "the cell left with its carrier");
+}
+
+/// A power cell adrift past reach loses the escort.
+#[test]
+fn the_escort_is_lost_if_the_cell_drifts_away() {
+    use hullbreakers::sim::scenarios::escort::{ADRIFT_LOST, CELL};
+    let mut app = app();
+    start(&mut app, ScenarioKind::Escort);
+    let world = app.world_mut();
+    for mut p in world.query::<&mut hullbreakers::sim::pickups::Pickup>().iter_mut(world) {
+        if p.items.contains(&CELL) {
+            p.body = None;
+            p.at = Vec3::new(0.0, 0.0, ADRIFT_LOST + 50.0);
+            p.velocity = Vec3::Z;
+        }
+    }
+    ticks(&mut app, 2);
+    let m = mission(&mut app);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Lost, "CELL LOST"));
+}
+
+/// The gallery's robots are on show, not a free armory: killing one drops
+/// nothing.
+#[test]
+fn the_gallerys_robots_drop_no_loot() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Director>().robots = true;
+    start(&mut app, ScenarioKind::Gallery);
+    ticks(&mut app, 2);
+    let world = app.world_mut();
+    let mut killed = 0;
+    for mut v in world.query_filtered::<&mut Vitals, With<Robot>>().iter_mut(world) {
+        v.health = 0.0;
+        killed += 1;
+    }
+    assert!(killed > 0, "no robots in the gallery");
+    ticks(&mut app, 3);
+    let world = app.world_mut();
+    let left = world.query_filtered::<(), With<Robot>>().iter(world).count();
+    assert_eq!(left, 0, "{left} of the gallery's robots never died");
+    let loot = world.query::<(&Name, &hullbreakers::sim::pickups::Pickup)>().iter(world).filter(|(n, _)| n.as_str() == "Robot loot").count();
+    assert_eq!(loot, 0, "{loot} cases of loot from the gallery");
+}
+
+/// Damage not yet dealt when the scenario changes belongs to the old world.
+#[test]
+fn a_scenario_switch_drops_pending_damage() {
+    use hullbreakers::sim::vitals::Damage;
+    let mut app = app();
+    let nobody = app.world_mut().spawn_empty().id();
+    app.world_mut().write_message(Damage {
+        target: nobody,
+        amount: 1000.0,
+        source: None,
+        weak: false,
+        from: None,
+        steady: false,
+    });
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Field);
+    ticks(&mut app, 1);
+    assert!(app.world().resource::<Messages<Damage>>().is_empty(), "damage outlived the switch");
+}
+
+/// Tow mode is for things to tow, not for fauna: roped to a grazer moving
+/// off, letting go of the keys holds you still (it doesn't chase it).
+#[test]
+fn tow_mode_doesnt_chase_a_grazer() {
+    let mut app = app();
+    let ship = home(&mut app);
+    let at = Vec3::new(0.0, 0.0, 60.0);
+    {
+        let world = app.world_mut();
+        let mut commands = world.commands();
+        hullbreakers::sim::fauna::spawn_exhibit(&mut commands, at, Quat::IDENTITY);
+        world.flush();
+    }
+    ticks(&mut app, 2);
+    let grazer = {
+        let world = app.world_mut();
+        world.query_filtered::<Entity, With<hullbreakers::sim::fauna::Grazer>>().single(world).unwrap()
+    };
+    app.world_mut().get_mut::<LinearVelocity>(grazer).unwrap().0 = Vec3::new(3.0, 0.0, 0.0);
+    set_player(&mut app, |p| {
+        p.mode = Mode::Eva {
+            position: at + Vec3::new(0.0, 0.0, 15.0),
+            velocity: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        };
+        p.reference_body = Some(ship);
+        p.flight_assist = true;
+        // A long rope: slack, so only the assist moves us.
+        p.grapple = Some(hullbreakers::sim::player::Grapple {
+            target: grazer,
+            anchor: Vec3::ZERO,
+            length: 60.0,
+            tension: 0.0,
+        });
+    });
+    ticks(&mut app, 60);
+    let Mode::Eva { velocity, .. } = player(&mut app).mode else { panic!("not in EVA") };
+    assert!(velocity.x.abs() < 0.5, "the assist chased the grazer: moving at {velocity}");
+}
+
+/// Hands full of cargo work nothing: not the mission wall, not the locker,
+/// not a pickup.
+#[test]
+fn full_hands_work_nothing() {
+    let mut app = app();
+    set_player(&mut app, |p| p.loadout.inventory.carrying = Some(hullbreakers::sim::items::CargoKind::PowerCell));
+    let ship = home(&mut app);
+    let (_, button, _) = *design(HOME).controls.iter().find(|(a, ..)| *a == ControlAction::Scenario(ScenarioKind::Boarding)).unwrap();
+    let feet = Vec3::new(-2.0, 0.01, button.z);
+    stand(&mut app, ship, feet, button - (feet + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    assert_eq!(mission(&mut app).kind, ScenarioKind::Field, "pressed the mission wall with full hands");
+    assert!(!player(&mut app).events.iter().any(|(_, e)| matches!(e, PlayerEvent::Pressed { .. })));
 }
 

@@ -202,6 +202,10 @@ fn a_laser_burns_while_held_heats_and_pushes_nothing() {
     let per_tick = Weapon::issue(GunKind::Smg).with_family(Family::Laser).stats().damage;
     assert!(hurt > per_tick * 25.0, "only {hurt} from 30 ticks of {per_tick}");
     assert_eq!(velocity(&app, them), Vec3::ZERO);
+    // Hurt every tick, but logged a few times a second (markers, sounds
+    // and the wire see a hit per STEADY_LOG_SECONDS, not one a tick).
+    let hits = app.world().get::<hullbreakers::sim::vitals::HitLog>(me).unwrap().count;
+    assert!((3..=5).contains(&hits), "{hits} hits logged in half a second of beam");
     let gun = app.world().get::<Player>(me).unwrap().loadout.inventory.weapons[0].unwrap();
     assert!(gun.heat_fraction() > 0.05 && !gun.overheated, "{gun:?}");
     // The log keeps the burst's start and end, not a shot a tick.

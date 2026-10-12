@@ -31,6 +31,7 @@ pub fn reticle(
     spatial: SpatialQuery,
     controls: Query<(&Control, &Transform, &ChildOf)>,
     pickups: Query<&Pickup>,
+    names: Query<&Name>,
     tick: Res<SimTick>,
     captured: Res<MouseCaptured>,
 ) -> Result {
@@ -68,8 +69,15 @@ pub fn reticle(
     }
 
     // A button or a case under the crosshair wins over the grapple readout.
-    let prompt = control_prompt(player, own, &tuning, tick.0, &spatial, &bodies, &controls, &pickups);
-    if let Some(label) = prompt {
+    let prompt = control_prompt(player, own, &tuning, tick.0, &spatial, &bodies, &controls, &pickups, &names);
+    if let Some((label, false)) = &prompt {
+        // Something here that isn't ours to take: say so, without a key.
+        let at = c + vec2(26.0, 0.0);
+        let label_g = style::galley(&painter, label.clone(), style::ui(style::BODY), INK_DIM, 0.0);
+        let plate = Align2::LEFT_CENTER.anchor_size(at, label_g.size() + vec2(16.0, 10.0));
+        style::plate(&painter, plate, INK_DIM, 1.0);
+        painter.galley(plate.min + vec2(8.0, 5.0), label_g, INK_DIM);
+    } else if let Some((label, _)) = prompt {
         style::broken_ring(&painter, c, 15.0, SUIT);
         let at = c + vec2(26.0, 0.0);
         let label_g = style::galley(&painter, label, style::ui(style::BODY), INK, 0.0);
@@ -136,7 +144,8 @@ fn control_prompt(
     bodies: &Bodies,
     controls: &Query<(&Control, &Transform, &ChildOf)>,
     pickups: &Query<&Pickup>,
-) -> Option<String> {
+    names: &Query<&Name>,
+) -> Option<(String, bool)> {
     let frame = player.mode.body().and_then(|b| bodies.frame(b));
     let (eye, view) = player.mode.world_view(tuning, frame.as_ref());
     let dir = Dir3::new(view * Vec3::NEG_Z).ok()?;
@@ -156,14 +165,15 @@ fn control_prompt(
             frame.dir_to_local(*dir),
             control.half_size,
         )?;
-        (t <= CONTROL_REACH && t <= blocked).then(|| (t, control.label.to_string()))
+        (t <= CONTROL_REACH && t <= blocked).then(|| (t, (control.label.to_string(), true)))
     });
     // Pickups sit in the open, a little further than a wall behind them.
     let blocked = blocked + 0.1;
     let cases = pickups.iter().filter_map(|pickup| {
         let (at, turn) = pickup.sim_pose(bodies, tick)?;
         let t = crate::sim::player::ray_box(turn.inverse() * (eye - at), turn.inverse() * *dir, pickup.half())?;
-        (t <= CONTROL_REACH && t <= blocked).then(|| (t, view::pickup_label(pickup)))
+        let owner = pickup.owner.and_then(|o| names.get(o).ok()).map(|n| n.as_str());
+        (t <= CONTROL_REACH && t <= blocked).then(|| (t, view::pickup_label(pickup, own, owner)))
     });
     buttons
         .chain(cases)

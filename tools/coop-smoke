@@ -2,15 +2,24 @@
 # Live co-op smoke test, in the headless harness (tools/hl): a host (left
 # half, running the co-op tour: HULLBREAKERS_COOP_TOUR, see
 # src/client/coop_tour.rs) and a client (right half, with simulated lag).
-# The host puts the client through each scenario's set pieces; this drives
-# the client's own input at each (press, fire, reel) and screenshots the
-# client's view. Then check the logs it copies for errors and the client's
-# "prediction: N rollbacks/s" lines.
+# The host puts the client (and itself, where a step needs it) through
+# each scenario's set pieces; this drives the client's own input at each
+# (press, fire, reel, the armory and workbench) and screenshots the
+# client's view (and, where it matters, the host's: `host-*.png`). Then
+# check the logs it copies for errors, the client's "prediction: N
+# rollbacks/s" lines, and the host's "coop tour:" lines (the client's
+# profile as the host holds it, damage control's state). Both log each
+# event their presentation hands on ("presented Died", ...: sound, camera
+# and HUD act on these), unless $RUST_LOG says otherwise.
 #
 #   tools/coop-smoke <outdir> [lag ms (default 100)] [port (default 5986)]
 #
-# Harness state in target/hl-coop ($HL_STATE overrides it). Needs a built
-# target/debug/hullbreakers and python3 with PIL (for cropping).
+# COOP_ONLY=a,b,... runs only those steps (the names in coop_tour.rs).
+# The client starts from a seeded profile (salvage, xp just short of rank
+# 3, a stash gun, two carried guns); its file after the run is copied to
+# <outdir>/client-profile.ron. Harness state in target/hl-coop ($HL_STATE
+# overrides it). Needs a built target/debug/hullbreakers and python3 with
+# PIL (for cropping).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export HL_STATE="${HL_STATE:-$ROOT/target/hl-coop}"
@@ -18,11 +27,36 @@ H="$ROOT/tools/hl"
 OUT="$1"
 LAG="${2:-100}"
 PORT="${3:-5986}"
+ONLY="${COOP_ONLY:-}"
+export RUST_LOG="${RUST_LOG:-info,hullbreakers::client::events=debug,wgpu=error,naga=warn}"
 mkdir -p "$OUT"
 rm -f "$OUT/step" "$OUT/ack"
 "$H" stop >/dev/null 2>&1
 "$H" start 2560x720 >/dev/null
-HULLBREAKERS_COOP_TOUR="$OUT" "$H" game --port "$PORT" >/dev/null
+mkdir -p "$HL_STATE"
+rm -f "$HL_STATE"/profile-*.ron
+# The client's profile (tools/hl gives the second game profile-2.ron).
+cat > "$HL_STATE/profile-2.ron" <<'EOF'
+(
+    version: 1,
+    profile: (
+        stash: [(frame: Rifle, seed: 9, rarity: Rare, mag: 999)],
+        salvage: 1000,
+        xp: 1450,
+        out: [],
+        missions: 0,
+    ),
+    carried: (
+        weapons: (Some((frame: Smg, seed: 4, rarity: Common, mag: 999)), Some((frame: Rifle, seed: 0, rarity: Standard, mag: 999)), None, None),
+        pack: (Some(Weapon((frame: Smg, seed: 7, rarity: Uncommon, mag: 999))), None, None, None, None, None, None, None, None, None),
+        ammo: (400, 200),
+        carrying: None,
+        slots: (3, 6),
+    ),
+)
+EOF
+cp "$HL_STATE/profile-2.ron" "$OUT/client-profile-before.ron"
+HULLBREAKERS_COOP_ONLY="$ONLY" HULLBREAKERS_COOP_TOUR="$OUT" "$H" game --port "$PORT" >/dev/null
 sleep 6
 HULLBREAKERS_LAG="$LAG" "$H" game --connect "127.0.0.1:$PORT" >/dev/null
 sleep 3
@@ -30,18 +64,34 @@ sleep 3
 # shellcheck disable=SC1091
 source "$HL_STATE/env"
 
-N=0
+# Keys go to the focused window, clicks to the one under the pointer.
+client() {
+    "$H" focus "127.0.0.1" >/dev/null
+    swaymsg -s "$SWAYSOCK" 'seat * cursor set 1920 360' >/dev/null
+}
+host() {
+    "$H" focus '^Hullbreakers$' >/dev/null
+    swaymsg -s "$SWAYSOCK" 'seat * cursor set 640 360' >/dev/null
+}
+# Click at (x, y) in the client's window (its own coordinates).
+click_at() {
+    swaymsg -s "$SWAYSOCK" "seat * cursor set $((1280 + $1)) $2" >/dev/null
+    sleep 0.2
+    "$H" click left
+    sleep 0.5
+}
+
+LAST=""
 wait_step() {
+    if [[ -n "$ONLY" && ",$ONLY," != *",$1,"* ]]; then
+        return 1
+    fi
     # Done with the step before: let the host go on.
-    [[ $N -gt 0 ]] && echo $((N - 1)) > "$OUT/ack"
-    N=$((N + 1))
+    [[ -n "$LAST" ]] && echo "$LAST" > "$OUT/ack"
+    LAST="$1"
     for _ in $(seq 900); do
-        # Input goes to the client (focus can wander to the host).
         if grep -q " $1\$" "$OUT/step" 2>/dev/null; then
-            # Keys go to the focused window, clicks to the one under the
-            # pointer: both to the client (the right half).
-            "$H" focus "127.0.0.1" >/dev/null
-            swaymsg -s "$SWAYSOCK" 'seat * cursor set 1920 360' >/dev/null
+            client
             return 0
         fi
         sleep 0.2
@@ -53,11 +103,59 @@ shot() { "$H" shot "$OUT/full-$1.png"; python3 -I -c "
 import sys
 from PIL import Image
 Image.open(sys.argv[1]).crop((1280, 0, 2560, 720)).save(sys.argv[2])" "$OUT/full-$1.png" "$OUT/$1.png"; }
+hostshot() { "$H" shot "$OUT/full-host-$1.png"; python3 -I -c "
+import sys
+from PIL import Image
+Image.open(sys.argv[1]).crop((0, 0, 1280, 720)).save(sys.argv[2])" "$OUT/full-host-$1.png" "$OUT/host-$1.png"; }
 
-wait_step field_idle && sleep 2 && shot field_1 && "$H" down w && sleep 1 && "$H" up w && sleep 2 && shot field_2
-wait_step boarding_locker && sleep 1.5 && shot locker_1 && "$H" key f && sleep 1.5 && shot locker_2
+wait_step field_profile && sleep 2 && shot profile
+if wait_step field_locker; then
+    sleep 1.5; "$H" key f; sleep 1.5; shot armory_1
+    # A carried gun (slot 1), stored; then the stash's first gun, taken.
+    click_at ${ARMORY_SLOT1:-400 185}; shot armory_2
+    click_at ${ARMORY_STORE:-780 444}; sleep 1; shot armory_3
+    click_at ${ARMORY_STASH1:-400 325}; shot armory_4
+    click_at ${ARMORY_TAKE:-747 474}; sleep 1; shot armory_5
+    "$H" key esc
+fi
+if wait_step field_workbench; then
+    # The rifle taken from the stash (slot 1) in hand, as it was.
+    sleep 1; "$H" key 1; sleep 1.5; shot gun_before; hostshot gun_before
+    "$H" key f; sleep 1.5; shot bench_1
+    # Tune it up a tier.
+    click_at ${BENCH_SLOT1:-400 165}; shot bench_2
+    click_at ${BENCH_TUNE:-805 300}; sleep 1.5; shot bench_3
+    # Scrap the pack's SMG (it unlocks its parts for refits).
+    click_at ${BENCH_PACK1:-400 206}
+    swaymsg -s "$SWAYSOCK" "seat * cursor set $((1280 + 830)) 400" >/dev/null; "$H" wheel 10; sleep 0.5; shot bench_4
+    click_at ${BENCH_SCRAP:-786 458}; click_at ${BENCH_SCRAP:-786 458}; sleep 1.5; shot bench_5
+    # Back to the rifle: refit its magazine (the scrapped gun's, now
+    # unlocked), then repaint it.
+    click_at ${BENCH_SLOT1:-400 165}
+    swaymsg -s "$SWAYSOCK" "seat * cursor set $((1280 + 830)) 400" >/dev/null; "$H" wheel 10; sleep 0.5; shot bench_6
+    click_at ${BENCH_MAG:-835 341}; shot bench_7
+    click_at ${BENCH_MAG_PICK:-835 382}; sleep 1.5; shot bench_8
+    click_at ${BENCH_PAINT:-885 434}; shot bench_9
+    click_at ${BENCH_PAINT_PICK:-885 475}; sleep 1.5; shot bench_10
+    "$H" key esc; sleep 1.5; shot gun_after; hostshot gun_after
+    sleep 3; shot gun_after_2; sleep 4; shot gun_after_3
+fi
+wait_step boarding_arrive && sleep 2 && shot arrive
+if wait_step boarding_faults; then
+    for i in 1 2 3; do sleep 3; shot faults_$i; done
+fi
+wait_step dc_board && sleep 1.5 && shot dc_board
+for n in dc_fix dc_fix_2; do
+    if wait_step $n; then
+        sleep 1.2; shot ${n}_1; "$H" key f; sleep 0.15; shot ${n}_2; sleep 1.5; shot ${n}_3
+    fi
+done
+wait_step dc_board_after && sleep 1.5 && shot dc_board_after
 if wait_step boarding_die; then
-    sleep 0.4; shot die_1; sleep 1; shot die_2; sleep 1.5; shot die_3
+    sleep 0.4; shot die_1; sleep 1.5; shot die_2
+fi
+if wait_step boarding_host_tries; then
+    sleep 1.5; host; "$H" key f; sleep 1.5; hostshot tries; client
 fi
 wait_step boarding_kit && sleep 1.5 && shot kit_1 && "$H" key f && sleep 1.5 && shot kit_2
 wait_step boarding_crate && sleep 1.5 && shot crate_1 && "$H" key f && sleep 1.5 && shot crate_2
@@ -65,11 +163,27 @@ if wait_step boarding_fight; then
     sleep 1; "$H" press left
     for i in 1 2 3; do sleep 0.8; shot fight_$i; done
     "$H" release left
-    for i in 4 5 6 7; do sleep 1.2; shot fight_$i; done
+    for i in 4 5 6; do sleep 1.2; shot fight_$i; done
+fi
+if wait_step boarding_crawler; then
+    for i in 1 2 3; do sleep 2; shot crawler_$i; done
 fi
 if wait_step boarding_console; then
     sleep 1.5; shot console_1; "$H" key f
     for i in 2 3 4 5 6 7; do sleep 3; shot console_$i; done
+fi
+wait_step boarding_wall && sleep 1.5 && shot wall_1 && "$H" key f && sleep 2 && shot wall_2
+if wait_step field_debrief; then
+    for i in 1 2 3; do sleep 2; shot debrief_$i; done
+fi
+wait_step escort_key && sleep 1.5 && shot key_1 && "$H" key f && sleep 1 && shot key_2
+wait_step escort_gangway && sleep 1.5 && shot gangway_1 && "$H" key f && sleep 1.5 && shot gangway_2
+if wait_step escort_cell; then
+    sleep 1.5; shot cell_1; "$H" key f; sleep 1.5; shot cell_2
+    "$H" key g; sleep 1.5; shot cell_3; "$H" key f; sleep 1.5; shot cell_4
+fi
+if wait_step escort_home; then
+    for i in 1 2 3; do sleep 2; shot home_$i; done
 fi
 wait_step derelict_reactor && sleep 1.5 && shot reactor_1 && "$H" key f && sleep 2 && shot reactor_2
 wait_step derelict_junction && sleep 1.5 && shot junction_1 && "$H" key f && sleep 2 && shot junction_2
@@ -81,11 +195,6 @@ if wait_step recovery_tow; then
     for i in 1 2 3; do sleep 1.5; shot tow_$i; done
     "$H" release left; "$H" up ctrl; sleep 2; shot tow_4
 fi
-if wait_step gallery_zoo; then
-    sleep 1.5; shot zoo_1; "$H" press left
-    for i in 2 3 4; do sleep 1; shot zoo_$i; done
-    "$H" release left; sleep 1.5; shot zoo_5
-fi
 for what in shielded armoured volatile; do
     if wait_step gallery_$what; then
         sleep 1.2; shot ${what}_1; "$H" press left
@@ -93,10 +202,19 @@ for what in shielded armoured volatile; do
         "$H" release left; sleep 1; shot ${what}_5
     fi
 done
-wait_step done
-sleep 1
+# Authority-only events on both: the death's banner and fade, then the
+# blast's caption (and, in the logs, what each one presented).
+for what in die blast; do
+    if wait_step field_$what; then
+        sleep 0.5; shot ${what}_1; hostshot ${what}_1; sleep 1.2; shot ${what}_2; hostshot ${what}_2
+    fi
+done
+[[ -n "$LAST" ]] && echo "$LAST" > "$OUT/ack"
+for _ in $(seq 300); do grep -q " done$" "$OUT/step" 2>/dev/null && break; sleep 0.2; done
+sleep 3
 cp "$HL_STATE/game.log" "$OUT/host.log"
 cp "$HL_STATE/game-2.log" "$OUT/client.log"
+cp "$HL_STATE/profile-2.ron" "$OUT/client-profile.ron" 2>/dev/null
 "$H" stop >/dev/null
 rm -f "$OUT"/full-*.png
 ls "$OUT"
