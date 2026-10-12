@@ -25,7 +25,7 @@ use crate::sim::bodies::{Bodies, PreviousVelocity, dynamic_mass};
 use crate::sim::bots::Robot;
 use crate::sim::mission::{CrewTally, Debris, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, countdown};
 use crate::sim::player::Player;
-use crate::sim::ship::{self, HomeShip};
+use crate::sim::ship::{self, HomeShip, in_hold};
 use crate::sim::{SimMaterial, SimTick, TICK_HZ, asteroids};
 
 pub static SCENARIO: Scenario = Scenario {
@@ -141,15 +141,6 @@ const ADRIFT: [(PodKind, Vec3, f32); 5] = [
     (PodKind::Survivor, Vec3::new(-140.0, 10.0, -40.0), 220.0),
     (PodKind::Lifeboat, Vec3::new(10.0, -45.0, -160.0), 300.0),
 ];
-
-/// Where a pod is home: our ship's hold, and the open cargo door behind it
-/// (ship coordinates).
-const HOLD_LO: Vec3 = Vec3::new(-3.7, -0.5, 0.2);
-const HOLD_HI: Vec3 = Vec3::new(3.7, 3.2, 17.0);
-
-pub fn in_hold(local: Vec3) -> bool {
-    local.cmpge(HOLD_LO).all() && local.cmple(HOLD_HI).all()
-}
 
 fn build(stage: &mut Stage) -> Entity {
     let commands = &mut *stage.commands;

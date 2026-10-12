@@ -116,6 +116,8 @@ tuning! {
         }
         "Mission" {
             home_survival_seconds: 210.0, 20.0, 1200.0;
+            home_exposed_seconds: 120.0, 10.0, 1200.0;
+            hit_fault_chance: 0.012, 0.0, 1.0;
             enemy_shielded_seconds: 900.0, 20.0, 3600.0;
             enemy_exposed_seconds: 12.0, 2.0, 120.0;
             wreck_return_seconds: 6.0, 1.0, 60.0;

@@ -9,7 +9,6 @@ use bevy::prelude::*;
 use hullbreakers::sim::bots::Gait;
 use hullbreakers::sim::devices::DeviceKind;
 use hullbreakers::sim::design::{ShipDesign, check, design, designs};
-use hullbreakers::sim::nav::NavGrid;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -23,7 +22,7 @@ fn main() {
 
 /// Prints one design's report; whether it fell short.
 fn report(ship: &ShipDesign) -> bool {
-    let grid = NavGrid::for_design(ship);
+    let grid = hullbreakers::sim::design::walk_grid(ship);
     println!("== {} ({}) ==", ship.id, ship.name);
     let (lo, hi) = ship.boxes.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), b| {
         let reach = Mat3::from_quat(b.rotation).abs() * (b.size / 2.0);

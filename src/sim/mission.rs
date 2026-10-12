@@ -50,18 +50,21 @@ pub enum ScenarioKind {
     DeadShip,
     /// A wreck's crew adrift on the clock: find them by beacon, tow them home.
     Recovery,
+    /// A power cell from a robot-held freighter, carried home under escort.
+    Escort,
     /// Every model in the game set out behind our ship, for review.
     Gallery,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 6] = [
+    pub const ALL: [ScenarioKind; 7] = [
         ScenarioKind::Field,
         ScenarioKind::Boarding,
         ScenarioKind::GrappleRun,
         ScenarioKind::DeadShip,
         ScenarioKind::Recovery,
+        ScenarioKind::Escort,
         ScenarioKind::Gallery,
     ];
 

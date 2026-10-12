@@ -27,7 +27,7 @@ use rand_chacha::ChaCha8Rng;
 
 use super::{Affix, Affixes, Brain, Gait, Robot, new_robot};
 use crate::sim::design::{Post, ShipDesign};
-use crate::sim::flight::Flight;
+use crate::sim::frame::BodyFrame;
 use crate::sim::player::Mode;
 use crate::sim::tuning::Tuning;
 
@@ -107,11 +107,10 @@ pub fn compose_crew(design: &ShipDesign, threat: Threat, seed: u64) -> Vec<Posti
     crew
 }
 
-/// Puts a crew for `threat` at the posts of `design` aboard `ship` (flying
-/// `flight`, at `tick`, which also seeds the roll): walkers standing on its
+/// Puts a crew for `threat` at the posts of `design` aboard `ship` (posed
+/// at `frame`, at `tick`, which also seeds the roll): walkers standing on its
 /// decks, flyers holding station about it, turrets on its hull.
-pub fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, flight: &Flight, tick: u32, threat: Threat) {
-    let frame = flight.frame(tick, Vec3::ZERO);
+pub fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, frame: &BodyFrame, tick: u32, threat: Threat) {
     for (i, posting) in compose_crew(design, threat, tick as u64).into_iter().enumerate() {
         let post = posting.post;
         let (mode, home_post) = match posting.robot.gait() {
