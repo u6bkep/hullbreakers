@@ -217,6 +217,60 @@ fn the_armory_moves_guns_between_the_stash_and_your_hands() {
 }
 
 #[test]
+fn the_workbench_tunes_refits_repaints_and_scraps() {
+    use hullbreakers::sim::items::{PAINTS, SLOTS};
+    use hullbreakers::sim::progression::{Holding, REFIT_COST, part_bit, scrap_value, tune_cost, xp_for};
+    let mut app = app();
+    let me = armed(&mut app);
+    stand_looking_at(&mut app, me, DECK, DECK + Vec3::new(0.0, 0.0, -2.0));
+    let held = Holding::Carried(Place::Weapon(0));
+    let gun = || rare();
+    // Broke: nothing happens.
+    ask(&mut app, me, ProfileOp::Tune(held));
+    assert_eq!(player(&app, me).loadout.inventory.weapons[0], Some(gun()));
+    // Tuned up a tier: its parts are as they were, it's exotic.
+    app.world_mut().get_mut::<Profile>(me).unwrap().salvage = 2000;
+    ask(&mut app, me, ProfileOp::Tune(held));
+    let tuned = player(&app, me).loadout.inventory.weapons[0].unwrap();
+    assert_eq!(tuned.rarity, Rarity::Exotic);
+    assert_eq!(tuned.build().parts, gun().build().parts, "tuning changed its parts");
+    assert_eq!(tuned.build().perks[0], gun().build().perks[0], "tuning changed its first perk");
+    assert!(tuned.build().perks[1].is_some(), "no second perk at exotic");
+    assert_eq!(profile(&app, me).salvage, 2000 - tune_cost(Rarity::Exotic));
+    // A refit needs the part unlocked: scrapping a gun with a drum unlocks one.
+    let drum = (0..5000u32)
+        .map(|s| Weapon::new(GunKind::Smg, s, Rarity::Common))
+        .find(|w| w.build().parts.magazine == hullbreakers::sim::items::Magazine::Drum)
+        .unwrap();
+    let drum_v = SLOTS[1].iter().position(|p| *p == hullbreakers::sim::items::PartVariant::Magazine(hullbreakers::sim::items::Magazine::Drum)).unwrap() as u8;
+    let salvage = profile(&app, me).salvage;
+    ask(&mut app, me, ProfileOp::Refit(held, 1, Some(drum_v)));
+    assert_eq!(profile(&app, me).salvage, salvage, "fitted a part not unlocked");
+    app.world_mut().get_mut::<Profile>(me).unwrap().stash.push(drum);
+    ask(&mut app, me, ProfileOp::Scrap(Holding::Stash(0)));
+    let p = profile(&app, me);
+    assert!(p.stash.is_empty());
+    assert_eq!(p.salvage, salvage + scrap_value(&drum));
+    assert_ne!(p.parts & part_bit(1, drum_v as usize), 0, "the drum isn't unlocked");
+    ask(&mut app, me, ProfileOp::Refit(held, 1, Some(drum_v)));
+    let refit = player(&app, me).loadout.inventory.weapons[0].unwrap();
+    assert_eq!(refit.build().parts.magazine, hullbreakers::sim::items::Magazine::Drum);
+    assert_eq!(profile(&app, me).salvage, salvage + scrap_value(&drum) - REFIT_COST);
+    // Paint comes with rank.
+    ask(&mut app, me, ProfileOp::Repaint(held, Some(0)));
+    assert_eq!(player(&app, me).loadout.inventory.weapons[0].unwrap().refit.paint, 0, "painted at rank 1");
+    app.world_mut().get_mut::<Profile>(me).unwrap().xp = xp_for(PAINTS[0].3);
+    ask(&mut app, me, ProfileOp::Repaint(held, Some(0)));
+    let painted = player(&app, me).loadout.inventory.weapons[0].unwrap();
+    assert_eq!(painted.look().paint.body, PAINTS[0].1);
+    // Standard issue can't be worked on.
+    ask(&mut app, me, ProfileOp::TakeIssue(GunKind::Smg));
+    let issue = Holding::Carried(Place::Weapon(1));
+    ask(&mut app, me, ProfileOp::Tune(issue));
+    assert_eq!(player(&app, me).loadout.inventory.weapons[1], Some(Weapon::issue(GunKind::Smg)));
+}
+
+#[test]
 fn a_mission_pays_its_crew_when_it_ends() {
     use hullbreakers::sim::mission::{Mission, Phase};
     let mut app = app();

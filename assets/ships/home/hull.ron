@@ -38,6 +38,9 @@ Module(
         Box(center: (-3.65, 1.5, -7.0), size: (0.1, 1.4, 4.4), material: Trim),
         // The weapons locker's door, on the starboard wall of the hold.
         Box(center: (3.65, 1.4, 9.0), size: (0.1, 2.0, 1.4), material: Trim),
+        // The workbench, aft of it: a bench along the wall.
+        Box(center: (3.35, 0.9, 11.6), size: (0.7, 0.1, 1.6), material: Trim),
+        Box(center: (3.35, 0.45, 11.6), size: (0.5, 0.9, 1.4), material: Trim),
     ],
     controls: [
         // Buttons on the mission wall, sticking out of the panel: one per
@@ -51,6 +54,8 @@ Module(
         (action: Lurch, center: (-3.54, 1.05, -5.4), half_size: (0.06, 0.18, 0.25)),
         // The weapons locker.
         (action: Armory, center: (3.54, 1.5, 9.0), half_size: (0.06, 0.45, 0.5)),
+        // The workbench's panel, on the wall over the bench.
+        (action: Workbench, center: (3.54, 1.45, 11.6), half_size: (0.06, 0.3, 0.6)),
     ],
     cabins: [(center: (0.0, 1.5, 0.0), size: (7.8, 3.3, 29.8))],
     lights: [(0.0, 2.7, -10.0), (0.0, 2.7, -4.0), (0.0, 2.7, 5.0), (0.0, 2.7, 11.0)],

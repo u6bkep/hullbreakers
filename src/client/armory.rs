@@ -16,44 +16,25 @@ use crate::net::ProfileRequests;
 use crate::sim::events::PlayerEvent;
 use crate::sim::items::{Item, Place, Weapon};
 use crate::sim::player::Player;
-use crate::sim::progression::{Profile, ProfileOp, STASH_CAP};
+use crate::sim::progression::{Holding, Profile, ProfileOp, STASH_CAP};
 use crate::sim::ship::ControlAction;
 use crate::sim::weapons::GunKind;
-
-/// What's chosen at the armory or the workbench: something carried, or a
-/// gun in the stash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Chosen {
-    Carried(Place),
-    Stash(u16),
-}
-
-impl Chosen {
-    /// The gun it is, if it's one.
-    pub fn weapon(self, player: &Player, profile: &Profile) -> Option<Weapon> {
-        match self {
-            Chosen::Carried(place) => match player.loadout.inventory.get(place) {
-                Some(Item::Weapon(w)) => Some(w),
-                _ => None,
-            },
-            Chosen::Stash(i) => profile.stash.get(i as usize).copied(),
-        }
-    }
-}
 
 /// Pressing the weapons locker opens the armory (and the workbench its tab).
 pub fn open_on_press(mut presented: MessageReader<Presented>, mut menu: ResMut<Menu>) {
     for Presented(event) in presented.read() {
         if let PlayerEvent::Pressed { action, .. } = event {
-            if *action == ControlAction::Armory {
-                menu.open_on(Tab::Armory);
+            match action {
+                ControlAction::Armory => menu.open_on(Tab::Armory),
+                ControlAction::Workbench => menu.open_on(Tab::Workbench),
+                _ => {}
             }
         }
     }
 }
 
 /// The stash, three cards to a row, with what's chosen lit.
-pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Chosen>, height: f32) {
+pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Holding>, height: f32) {
     ui.label(egui::RichText::new(format!("Stash  {} / {STASH_CAP}", profile.stash.len())).strong());
     egui::ScrollArea::vertical()
         .id_salt("stash")
@@ -67,7 +48,7 @@ pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Chos
                     ui.label(egui::RichText::new("Empty. What you find is yours: store it here.").small().color(DIM));
                 }
                 for (i, w) in profile.stash.iter().enumerate() {
-                    let here = Chosen::Stash(i as u16);
+                    let here = Holding::Stash(i as u16);
                     let r = cell(ui, CELL, "STASH", Some(Item::Weapon(*w)), *chosen == Some(here), false);
                     if r.clicked() {
                         *chosen = if *chosen == Some(here) { None } else { Some(here) };
@@ -78,7 +59,7 @@ pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Chos
 }
 
 /// What you carry, as cards: weapon slots, then the pack.
-pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Chosen>) {
+pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Holding>) {
     let inv = &player.loadout.inventory;
     ui.label(egui::RichText::new("Carried").strong());
     ui.horizontal_wrapped(|ui| {
@@ -86,7 +67,7 @@ pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Chos
         let places = (0..inv.weapon_slots()).map(|i| (Place::Weapon(i as u8), format!("SLOT {}", i + 1)));
         let pack = (0..inv.pack_slots()).map(|i| (Place::Pack(i as u8), "PACK".to_string()));
         for (place, tag) in places.chain(pack) {
-            let here = Chosen::Carried(place);
+            let here = Holding::Carried(place);
             let r = cell(ui, CELL, &tag, inv.get(place), *chosen == Some(here), false);
             if r.clicked() && inv.get(place).is_some() {
                 *chosen = if *chosen == Some(here) { None } else { Some(here) };
@@ -117,14 +98,14 @@ pub fn armory_tab(
     ui: &mut egui::Ui,
     player: Option<&Player>,
     profile: Option<&Profile>,
-    chosen: &mut Option<Chosen>,
+    chosen: &mut Option<Holding>,
     requests: Option<&mut ProfileRequests>,
 ) {
     let (Some(player), Some(profile), Some(requests)) = (player, profile, requests) else {
         ui.label(egui::RichText::new("Your profile hasn't reached the host yet.").color(DIM));
         return;
     };
-    if chosen.is_some_and(|c| c.weapon(player, profile).is_none()) {
+    if chosen.is_some_and(|c| c.weapon(&player.loadout.inventory, profile).is_none()) {
         *chosen = None;
     }
     let mut ask = |op| requests.0.push(op);
@@ -159,11 +140,11 @@ pub fn armory_tab(
                 );
                 return;
             };
-            let Some(weapon) = c.weapon(player, profile) else { return };
+            let Some(weapon) = c.weapon(&player.loadout.inventory, profile) else { return };
             weapon_details(ui, player, &weapon);
             ui.add_space(4.0);
             match c {
-                Chosen::Carried(place) => {
+                Holding::Carried(place) => {
                     let issue = weapon.rarity == crate::sim::items::Rarity::Standard;
                     let full = profile.stash.len() >= STASH_CAP && !issue;
                     let label = if issue { "Put back on the rack" } else { "Store in the stash" };
@@ -175,7 +156,7 @@ pub fn armory_tab(
                         ui.label(egui::RichText::new("The stash is full: scrap something at the workbench.").small().color(DIM));
                     }
                 }
-                Chosen::Stash(i) => {
+                Holding::Stash(i) => {
                     if ui.button("Take").clicked() {
                         ask(ProfileOp::Take(i));
                         *chosen = None;

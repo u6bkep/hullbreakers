@@ -36,6 +36,8 @@ pub enum Tab {
     Inventory,
     /// The stash, at the weapons locker (aboard our ship).
     Armory,
+    /// Tuning, refitting, repainting and scrapping, at the workbench.
+    Workbench,
     Controls,
 }
 
@@ -53,7 +55,7 @@ pub struct Menu {
     /// The inventory item chosen, to move or look at.
     chosen: Option<Place>,
     /// What's chosen at the armory.
-    pub armory: Option<super::armory::Chosen>,
+    pub armory: Option<crate::sim::progression::Holding>,
 }
 
 /// Inventory changes asked for in the menu, waiting to go to the
@@ -222,7 +224,7 @@ pub fn menu(
     };
     // The armory is aboard our ship.
     let aboard = player.is_some_and(|p| p.mode.body().is_some_and(|b| homes.contains(b)));
-    if menu.tab == Tab::Armory && !aboard {
+    if matches!(menu.tab, Tab::Armory | Tab::Workbench) && !aboard {
         menu.tab = Tab::Inventory;
     }
     egui::Window::new("Hullbreakers")
@@ -237,6 +239,7 @@ pub fn menu(
                 ui.selectable_value(&mut menu.tab, Tab::Inventory, egui::RichText::new("Inventory").size(16.0));
                 if aboard {
                     ui.selectable_value(&mut menu.tab, Tab::Armory, egui::RichText::new("Armory").size(16.0));
+                    ui.selectable_value(&mut menu.tab, Tab::Workbench, egui::RichText::new("Workbench").size(16.0));
                 }
                 ui.selectable_value(&mut menu.tab, Tab::Controls, egui::RichText::new("Controls").size(16.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -260,6 +263,7 @@ pub fn menu(
                     &mut ops,
                 ),
                 Tab::Armory => super::armory::armory_tab(ui, player, profile, &mut menu.armory, requests.as_deref_mut()),
+                Tab::Workbench => super::workbench::workbench_tab(ui, player, profile, &mut menu.armory, requests.as_deref_mut()),
                 Tab::Controls => controls_tab(ui, menu, &mut bindings, list_height),
             }
             if !menu.status.is_empty() {

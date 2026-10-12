@@ -357,7 +357,7 @@ pub fn handle_presses(
             }
             // The player's own simulation armed them already; the rest are
             // the scenario's and the devices'.
-            ControlAction::Armory | ControlAction::DisableShields | ControlAction::Device(_) => {}
+            ControlAction::Armory | ControlAction::Workbench | ControlAction::DisableShields | ControlAction::Device(_) => {}
         }
     }
 }

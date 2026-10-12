@@ -25,6 +25,7 @@ pub mod sky;
 pub mod stress;
 pub mod viewmodel;
 pub mod weapons_fx;
+pub mod workbench;
 
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;

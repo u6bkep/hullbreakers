@@ -17,7 +17,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::items::{AmmoKind, Inventory, Item, Place, Rarity, Weapon};
+use super::items::{self, AmmoKind, Inventory, Item, Place, Rarity, Weapon};
 use super::bots::Robot;
 use super::mission::{CrewTally, Director, Mission, Phase, ScenarioKind};
 use super::scenarios;
@@ -40,6 +40,11 @@ pub struct Profile {
     pub out: Vec<Weapon>,
     /// Missions finished.
     pub missions: u32,
+    /// Part variants unlocked for refits, by scrapping guns that had them
+    /// (a bit per variant: its slot times four, plus its index in the
+    /// slot; see [`items::SLOTS`]).
+    #[serde(default)]
+    pub parts: u32,
 }
 
 impl Profile {
@@ -110,6 +115,83 @@ pub enum ProfileOp {
     /// The armory: the gun at this place in the inventory into the stash
     /// (standard issue just goes back on the rack).
     Store(Place),
+    /// The workbench: a gun up a tier of rarity (see [`tune_cost`]).
+    Tune(Holding),
+    /// The workbench: one part slot (in [`items::SLOTS`] order) fitted with
+    /// a variant (its index in the slot; 0 is the stock part) the profile
+    /// has unlocked, or back to what it was made with (`None`).
+    Refit(Holding, u8, Option<u8>),
+    /// The workbench: one of the crew's paints ([`items::PAINTS`]), or its
+    /// maker's (`None`).
+    Repaint(Holding, Option<u8>),
+    /// The workbench: a gun broken down for salvage, unlocking its parts.
+    Scrap(Holding),
+}
+
+/// A gun a player has: carried, or in their stash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Holding {
+    Carried(Place),
+    Stash(u16),
+}
+
+impl Holding {
+    /// The gun it is, if it's one.
+    pub fn weapon(self, inventory: &Inventory, profile: &Profile) -> Option<Weapon> {
+        match self {
+            Holding::Carried(place) => match inventory.get(place) {
+                Some(Item::Weapon(w)) => Some(w),
+                _ => None,
+            },
+            Holding::Stash(i) => profile.stash.get(i as usize).copied(),
+        }
+    }
+}
+
+/// What tuning a gun up to `to` costs (salvage).
+pub fn tune_cost(to: Rarity) -> u32 {
+    match to {
+        Rarity::Uncommon => 120,
+        Rarity::Rare => 350,
+        Rarity::Exotic => 900,
+        Rarity::Standard | Rarity::Common => 0,
+    }
+}
+
+/// What a refit of one part costs, and a new paint job.
+pub const REFIT_COST: u32 = 60;
+pub const REPAINT_COST: u32 = 20;
+
+/// What scrapping a gun gives (salvage). Standard issue is worth nothing.
+pub fn scrap_value(w: &Weapon) -> u32 {
+    match w.rarity {
+        Rarity::Standard => 0,
+        Rarity::Common => 15,
+        Rarity::Uncommon => 40,
+        Rarity::Rare => 100,
+        Rarity::Exotic => 250,
+    }
+}
+
+/// The bit for a part variant in [`Profile::parts`].
+pub fn part_bit(slot: usize, variant: usize) -> u32 {
+    1 << (slot * 4 + variant)
+}
+
+impl Profile {
+    /// Whether a refit can fit this variant: stock parts always can.
+    pub fn has_part(&self, slot: usize, variant: usize) -> bool {
+        variant == 0 || self.parts & part_bit(slot, variant) != 0
+    }
+
+    /// Spends `cost` salvage, if there's that much.
+    fn spend(&mut self, cost: u32) -> bool {
+        let ok = self.salvage >= cost;
+        if ok {
+            self.salvage -= cost;
+        }
+        ok
+    }
 }
 
 /// The most guns a stash holds (past it, scrap some at the workbench).
@@ -208,10 +290,103 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
             }
             _ => false,
         },
+        ProfileOp::Tune(h) => workbench(h, inv, profile, |w, profile| {
+            let Some(next) = w.rarity.next() else { return false };
+            if !profile.spend(tune_cost(next)) {
+                return false;
+            }
+            w.rarity = next;
+            w.tune += 1;
+            true
+        }),
+        ProfileOp::Refit(h, slot, variant) => workbench(h, inv, profile, |w, profile| {
+            let slot = slot as usize;
+            let Some(options) = items::SLOTS.get(slot) else { return false };
+            let fit = match variant {
+                Some(v) if (v as usize) < options.len() && profile.has_part(slot, v as usize) => v + 1,
+                Some(_) => return false,
+                None => 0,
+            };
+            if w.refit.parts[slot] == fit || !profile.spend(REFIT_COST) {
+                return false;
+            }
+            w.refit.parts[slot] = fit;
+            true
+        }),
+        ProfileOp::Repaint(h, paint) => workbench(h, inv, profile, |w, profile| {
+            let fit = match paint {
+                Some(i) if items::PAINTS.get(i as usize).is_some_and(|p| rank(profile.xp) >= p.3) => i + 1,
+                Some(_) => return false,
+                None => 0,
+            };
+            if w.refit.paint == fit || !profile.spend(REPAINT_COST) {
+                return false;
+            }
+            w.refit.paint = fit;
+            true
+        }),
+        ProfileOp::Scrap(h) => match h.weapon(inv, profile) {
+            Some(w) => {
+                match h {
+                    Holding::Carried(place) => {
+                        inv.remove(place);
+                    }
+                    Holding::Stash(i) => {
+                        profile.stash.remove(i as usize);
+                    }
+                }
+                profile.salvage += scrap_value(&w);
+                if w.rarity != Rarity::Standard {
+                    for part in w.build().parts.slots() {
+                        let (slot, variant) = part.place();
+                        if variant != 0 {
+                            profile.parts |= part_bit(slot, variant);
+                        }
+                    }
+                }
+                true
+            }
+            None => false,
+        },
     };
     player.loadout.hands_changed(before);
     done
 }
+
+/// Changes a gun at the workbench by `change`, if it's a gun that can be
+/// changed (standard issue can't) and `change` says it was done; its mag
+/// then holds no more than it can.
+fn workbench(h: Holding, inv: &mut Inventory, profile: &mut Profile, change: impl FnOnce(&mut Weapon, &mut Profile) -> bool) -> bool {
+    let Some(mut w) = h.weapon(inv, profile) else { return false };
+    if w.rarity == Rarity::Standard || !change(&mut w, profile) {
+        return false;
+    }
+    w.mag = w.mag.min(w.stats().mag);
+    match h {
+        Holding::Carried(place) => {
+            inv.remove(place);
+            inv.put_back(place, Item::Weapon(w));
+        }
+        Holding::Stash(i) => profile.stash[i as usize] = w,
+    }
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Rank.
+
+/// Experience to reach each rank from the one before (rank 1 is where
+/// everyone starts): 500, 1000, 1500, ...
+pub fn xp_for(rank: u8) -> u32 {
+    (1..rank as u32).map(|r| 500 * r).sum()
+}
+
+/// The rank `xp` makes.
+pub fn rank(xp: u32) -> u8 {
+    (1..=MAX_RANK).rev().find(|r| xp >= xp_for(*r)).unwrap_or(1)
+}
+
+pub const MAX_RANK: u8 = 10;
 
 /// Authority: at the end of each scenario (when the world it was in goes),
 /// guns of a player's still out in it go back to their stash (or are lost:

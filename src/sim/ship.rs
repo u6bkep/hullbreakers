@@ -55,8 +55,10 @@ pub enum ControlAction {
     Lurch,
     /// Drop this ship's shield.
     DisableShields,
-    /// Take a full set of guns and ammo.
+    /// The weapons locker: ammo, and the armory (the stash).
     Armory,
+    /// The workbench: tune, refit, repaint and scrap guns.
+    Workbench,
     /// Work one of the ship's devices (an index into its design's; see
     /// [`super::devices`]).
     Device(u16),
@@ -70,6 +72,7 @@ impl ControlAction {
             ControlAction::Lurch => "Lurch (DO NOT PRESS)",
             ControlAction::DisableShields => "Disable shields",
             ControlAction::Armory => "Weapons locker",
+            ControlAction::Workbench => "Workbench",
             ControlAction::Device(_) => "Device",
         }
     }
