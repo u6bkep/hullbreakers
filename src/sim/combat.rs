@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::bodies::Bodies;
+use super::devices::Devices;
 use super::ship::{ShipHull, Turret};
 use super::{SimTick, TICK_HZ};
 
@@ -108,12 +109,18 @@ pub fn update_beams(
     bodies: Bodies,
     ships: Query<(&Combatant, &Collider, &ShipHull)>,
     turrets: Query<(&Turret, &Transform, &ChildOf)>,
+    power: Query<&Devices>,
     mut beams: ResMut<Beams>,
 ) {
     beams.0.clear();
     for (turret, mount, ship) in &turrets {
         let shooter = ship.parent();
         if !beam_on(turret.index, tick.0) {
+            continue;
+        }
+        if let Ok((_, _, hull)) = ships.get(shooter)
+            && !turret_powered(hull, power.get(shooter).ok(), turret.index)
+        {
             continue;
         }
         let Ok((combatant, ..)) = ships.get(shooter) else {
@@ -154,6 +161,17 @@ pub fn update_beams(
             to: from + *dir * distance,
             shielded,
         });
+    }
+}
+
+/// Whether a ship's turret `index` has power: if its design has a device
+/// `turret_<index>`, only while that's live (see `assets/ships/home`); a
+/// design without one is always powered.
+pub fn turret_powered(hull: &ShipHull, devices: Option<&Devices>, index: u8) -> bool {
+    let design = hull.design();
+    match design.device_index(&format!("turret_{index}")) {
+        Some(i) => devices.and_then(|d| d.0.get(i)).is_some_and(|s| s.live),
+        None => true,
     }
 }
 

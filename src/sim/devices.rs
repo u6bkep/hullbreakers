@@ -15,11 +15,14 @@
 //! | `Key` | turns it | on for `hold` seconds (`solo` seconds for a crew of one) |
 //! | `Junction` | turns it to its next way | powered; way *k* is live when it's set to *k* |
 //! | `Door` | (not pressable) | open; a `latch` door stays open once opened |
+//! | `Bridge` | (not pressable) | extended: a floor panel (a gangway) that's solid only then |
+//! | `Sensor` | (not pressable) | on while a player stands in its box (so a door can stay open over a doorway) |
 //! | `Lamp`, `Board`, `Lights`, `Conduit`, `Gate` | (not pressable) | lit |
 //!
 //! A press works whether or not the device has power: a lever thrown, a
 //! junction turned or a key turned while dead takes effect when the power
-//! comes (a key only while its time lasts).
+//! comes (a key only while its time lasts). It doesn't work with full
+//! hands: someone carrying bulky cargo can't work a switch.
 //!
 //! The authority keeps the state of a ship's devices in its [`Devices`]
 //! (replicated): it applies presses (the players' `Pressed` events, through
@@ -64,6 +67,11 @@ pub struct DeviceFile {
     /// How it starts: a lever 1 (thrown) or 0, a junction on this way.
     #[serde(default)]
     pub start: u8,
+    /// A hit on the ship near it can knock it out of its setting (a lever
+    /// thrown back, a junction turned to another way); see
+    /// [`Device::knock`].
+    #[serde(default)]
+    pub fault: bool,
 }
 
 fn up() -> Vec3 {
@@ -87,6 +95,12 @@ pub enum KindFile {
         size: Vec3,
         #[serde(default)]
         latch: bool,
+    },
+    Bridge {
+        size: Vec3,
+    },
+    Sensor {
+        size: Vec3,
     },
     Lamp,
     Board {
@@ -178,6 +192,12 @@ pub enum DeviceKind {
     /// A door filling the box `size` (full size, axis-aligned in the ship)
     /// round the device's `at`.
     Door { size: Vec3, latch: bool },
+    /// A floor panel filling the box `size` (as a door's) while it's live:
+    /// a gangway, extended.
+    Bridge { size: Vec3 },
+    /// The box `size` round `at` (as a door's): live while a player (not a
+    /// robot) is in it, and powered.
+    Sensor { size: Vec3 },
     Lamp,
     Board { size: Vec2, rows: Vec<(String, Logic)> },
     /// Room lights at these points; an alarm flashes.
@@ -199,12 +219,56 @@ pub struct Device {
     pub face: Vec3,
     pub power: Logic,
     pub start: u8,
+    /// Whether hits can knock it (see [`Device::knock`]).
+    pub fault: bool,
 }
 
 /// How thick a gate's frame is (m), and how deep.
 pub const GATE_FRAME: f32 = 0.5;
 
 impl Device {
+    /// Whether it's out of the setting it starts in (knocked, or worked).
+    pub fn displaced(&self, state: &DeviceState) -> bool {
+        state.set != self.start
+    }
+
+    /// A hit knocks it out of its starting setting: a lever is thrown the
+    /// other way, a junction turned to another of its ways (`roll` picks
+    /// which). Whether it moved.
+    pub fn knock(&self, state: &mut DeviceState, roll: u32) -> bool {
+        match self.kind {
+            DeviceKind::Lever if state.set == self.start => {
+                state.set ^= 1;
+                true
+            }
+            DeviceKind::Junction { ways } if ways > 1 && state.set == self.start => {
+                state.set = (self.start + 1 + (roll % (ways as u32 - 1)) as u8) % ways;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The box (full size, axis-aligned in the ship, round `at`) it fills
+    /// in the ship's collider while `state` holds it there: a shut door, an
+    /// extended bridge.
+    pub fn solid(&self, state: Option<&DeviceState>) -> Option<Vec3> {
+        let live = state.is_some_and(|s| s.live);
+        match self.kind {
+            DeviceKind::Door { size, .. } if !live => Some(size),
+            DeviceKind::Bridge { size } if live => Some(size),
+            _ => None,
+        }
+    }
+
+    /// Whether `p` (ship coordinates) is in a sensor's box.
+    pub fn senses(&self, p: Vec3) -> bool {
+        match self.kind {
+            DeviceKind::Sensor { size } => (p - self.at).abs().cmple(size / 2.0).all(),
+            _ => false,
+        }
+    }
+
     /// Whether a player presses it.
     pub fn pressable(&self) -> bool {
         matches!(
@@ -295,6 +359,12 @@ pub fn place(
             size: extent(*size / 2.0) * 2.0,
             latch: *latch,
         },
+        KindFile::Bridge { size } => DeviceKind::Bridge {
+            size: extent(*size / 2.0) * 2.0,
+        },
+        KindFile::Sensor { size } => DeviceKind::Sensor {
+            size: extent(*size / 2.0) * 2.0,
+        },
         KindFile::Lamp => DeviceKind::Lamp,
         KindFile::Board { size, rows: r } => {
             rows = r.clone();
@@ -321,6 +391,7 @@ pub fn place(
         face: (turn * file.face).normalize_or(Vec3::Y),
         power: Logic::Never,
         start: file.start,
+        fault: file.fault,
     };
     (device, rows)
 }
@@ -453,6 +524,7 @@ pub fn step(design: &super::design::ShipDesign, states: &mut [DeviceState], tick
         s.live = match device.kind {
             DeviceKind::Lever | DeviceKind::Pull => powered && s.set == 1,
             DeviceKind::Key { .. } => powered && tick < s.until,
+            DeviceKind::Sensor { .. } => powered && s.set == 1,
             DeviceKind::Door { latch: true, .. } => s.live || powered,
             _ => powered,
         };
@@ -478,6 +550,8 @@ pub fn press(device: &Device, state: &mut DeviceState, tick: u32, crew: usize) {
 /// replicated only then.
 pub fn run_devices(
     tick: Res<SimTick>,
+    tuning: Res<super::tuning::Tuning>,
+    bodies: super::bodies::Bodies,
     players: Query<(&Player, Has<Robot>)>,
     mut ships: Query<(Entity, &ShipHull, &mut Devices)>,
 ) {
@@ -485,7 +559,29 @@ pub fn run_devices(
     for (ship, hull, mut devices) in &mut ships {
         let design = hull.design();
         let mut states = devices.0.clone();
+        // Sensors: whether a crew member's middle is in each one.
+        if design.devices.iter().any(|d| matches!(d.kind, DeviceKind::Sensor { .. }))
+            && let Some(frame) = bodies.frame(ship)
+        {
+            let inside: Vec<Vec3> = players
+                .iter()
+                .filter(|(_, robot)| !robot)
+                .map(|(p, _)| {
+                    let own = p.mode.body().and_then(|b| bodies.frame(b));
+                    frame.point_to_local(p.mode.world_kinematics(&tuning, own.as_ref()).0)
+                })
+                .collect();
+            for (i, d) in design.devices.iter().enumerate() {
+                if matches!(d.kind, DeviceKind::Sensor { .. }) {
+                    states[i].set = inside.iter().any(|&p| d.senses(p)) as u8;
+                }
+            }
+        }
         for (player, _) in &players {
+            // Full hands can't work a switch.
+            if player.loadout.hands_full() {
+                continue;
+            }
             for (at, event) in player.events.iter() {
                 if let PlayerEvent::Pressed {
                     body,
@@ -525,14 +621,15 @@ pub fn fit_doors(
     }
 }
 
-/// For each device, whether it's a door that's shut (all doors are, until
-/// the state is known).
+/// For each device, whether it's in the ship's collider just now (a shut
+/// door, an extended bridge; until the state is known, doors are shut and
+/// bridges run in).
 pub fn closed_doors(design: &super::design::ShipDesign, devices: Option<&Devices>) -> Vec<bool> {
     design
         .devices
         .iter()
         .enumerate()
-        .map(|(i, d)| matches!(d.kind, DeviceKind::Door { .. }) && !devices.is_some_and(|s| s.0.get(i).is_some_and(|s| s.live)))
+        .map(|(i, d)| d.solid(devices.and_then(|s| s.0.get(i))).is_some())
         .collect()
 }
 

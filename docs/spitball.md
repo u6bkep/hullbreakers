@@ -104,7 +104,9 @@ live (decided 2026-10-10).
   - On a boarding action, the enemy's panel is the lock: re-route their power
     to drop the shield rather than pressing one button.
   - On our own ship, a hit knocks pieces loose and someone has to fix it mid
-    fight.
+    fight. *(Taken: damage control in the boarding action; breakers and a
+    junction, read off the bridge board. Still open: pieces knocked
+    physically loose, to carry back.)*
 
 ### Enemies
 

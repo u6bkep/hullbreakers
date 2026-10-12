@@ -79,6 +79,8 @@ fn tour() -> &'static str {
         Ok("derelict") => DERELICT,
         Ok("course") => "course",
         Ok("recovery") => "recovery",
+        Ok("freighter") => "freighter",
+        Ok("power") => "power",
         Ok("hud") => "hud",
         _ => HOME,
     }
@@ -90,6 +92,8 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
         DERELICT => return derelict_vantages(),
         "course" => return course_vantages(),
         "recovery" => return recovery_vantages(),
+        "freighter" => return freighter_vantages(),
+        "power" => return power_vantages(),
         "hud" => return hud_vantages(),
         _ => {}
     }
@@ -386,6 +390,45 @@ fn hud_state(name: &str, player: &mut Player, vitals: Option<&mut Vitals>) {
     }
 }
 
+/// The escort's freighter (start in the escort).
+fn freighter_vantages() -> Vec<(&'static str, Vantage)> {
+    let booted = |feet: Vec3, forward: Vec3, pitch: f32| Vantage::Booted {
+        feet,
+        up: Vec3::Y,
+        forward,
+        pitch,
+    };
+    vec![
+        (
+            "freighter_outside",
+            Vantage::Eva {
+                offset: Vec3::new(16.0, 8.0, 34.0),
+                look_at: Vec3::new(0.0, 1.5, -2.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        ("freighter_breach", booted(Vec3::new(0.5, 0.01, 4.0), Vec3::NEG_Z, -0.15)),
+        ("freighter_gangway_lever", booted(Vec3::new(1.0, 0.01, -8.0), Vec3::new(0.6, 0.0, 1.0), 0.0)),
+        ("freighter_bay_door", booted(Vec3::new(-1.0, 0.01, -9.0), Vec3::new(0.15, 0.0, -1.0), 0.0)),
+        ("freighter_bay", booted(Vec3::new(0.0, 0.01, -14.8), Vec3::NEG_Z, -0.3)),
+    ]
+}
+
+/// Our ship's power network (start in the boarding action): the board on
+/// the bridge, and the junction and breakers in the hold.
+fn power_vantages() -> Vec<(&'static str, Vantage)> {
+    let booted = |feet: Vec3, forward: Vec3, pitch: f32| Vantage::Booted {
+        feet,
+        up: Vec3::Y,
+        forward,
+        pitch,
+    };
+    vec![
+        ("power_board", booted(Vec3::new(1.4, 0.01, -9.0), Vec3::X, 0.0)),
+        ("power_hold", booted(Vec3::new(-1.0, 0.01, 1.5), Vec3::new(-1.0, 0.0, 0.7), -0.05)),
+    ]
+}
+
 /// Debug: routes the derelict's power to its vault, as a crew would have,
 /// straight into the authority's state (the shots run on a host).
 fn power_up(hull: &ShipHull, devices: &mut Devices) {
@@ -416,7 +459,7 @@ pub fn run_shot_script(
 ) {
     let shots = vantages();
     let want = match tour() {
-        "course" | "recovery" => HOME,
+        "course" | "recovery" | "power" => HOME,
         // The HUD tour's `hud_carrier_*` shots are on the carrier.
         "hud" => match shots.get(script.next) {
             Some((name, _)) if name.starts_with("hud_carrier") => CARRIER,

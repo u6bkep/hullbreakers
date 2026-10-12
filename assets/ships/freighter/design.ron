@@ -1,0 +1,11 @@
+// The freighter: a disabled cargo ship holding a power cell, crewed by
+// robots (the "Escort" scenario). Ship coordinates, metres: +Y up, bow
+// toward -Z. See docs/ships.md.
+Design(
+    name: "FREIGHTER",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 1.5, -3.0), radii: (7.0, 5.0, 23.0)),
+    turrets: [],
+    modules: [(module: "freighter/hull")],
+)

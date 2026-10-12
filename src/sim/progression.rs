@@ -713,7 +713,13 @@ pub fn pay_for(kind: ScenarioKind) -> Option<Pay> {
             won: (300, 400),
             lost: (60, 120),
             par: 300.0,
-            per: &[("shield_dropped", (50, 60), "Shield dropped")],
+            per: &[("shield_dropped", (50, 60), "Shield dropped"), ("repairs", (20, 30), "Repairs at home")],
+        },
+        ScenarioKind::Escort => Pay {
+            won: (300, 350),
+            lost: (50, 100),
+            par: 480.0,
+            per: &[("cell_home", (100, 100), "Power cell home")],
         },
         ScenarioKind::GrappleRun => Pay {
             won: (150, 200),
