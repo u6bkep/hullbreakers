@@ -48,17 +48,20 @@ pub enum ScenarioKind {
     GrappleRun,
     /// A dark derelict: bring its power back, open its vault, get out.
     DeadShip,
+    /// A wreck's crew adrift on the clock: find them by beacon, tow them home.
+    Recovery,
     /// Every model in the game set out behind our ship, for review.
     Gallery,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 5] = [
+    pub const ALL: [ScenarioKind; 6] = [
         ScenarioKind::Field,
         ScenarioKind::Boarding,
         ScenarioKind::GrappleRun,
         ScenarioKind::DeadShip,
+        ScenarioKind::Recovery,
         ScenarioKind::Gallery,
     ];
 

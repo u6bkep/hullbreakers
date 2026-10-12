@@ -157,6 +157,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_body::<Asteroid>)
             .add_observer(replicate_body::<Debris>)
             .add_observer(replicate_body::<Site>)
+            .add_observer(replicate_body::<crate::sim::scenarios::recovery::Pod>)
             .add_observer(replicate_flight)
             .add_observer(replicate_mission)
             .add_observer(replicate_gallery)
@@ -268,6 +269,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<HomeShip>().replicate_once();
         app.component::<Site>().replicate_once();
         app.component::<Devices>().replicate();
+        app.component::<crate::sim::scenarios::recovery::Pod>().replicate();
         app.component::<crate::sim::mission::BodyId>().replicate_once();
         app.component::<Asteroid>().replicate_once();
         app.component::<Debris>().replicate_once();

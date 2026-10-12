@@ -116,3 +116,16 @@ it.
   the ambient, was the light. Limit: it's lit as the eye is, so from outside
   you see a dark ship's insides at space's light (fine through one airlock).
 
+## Our player controller (flight assist)
+
+- 2026-10-12. Towing a survivor on a rope, letting go of the keys made
+  flight assist brake against the reference body, and the load ran into
+  the player at the tow's speed (measured 9.7 m/s). Assist already stood
+  aside while a rope was taut ("swinging"), but a coasting tow's rope has no
+  tension, so that lasted a tick. Added a tow mode: with a rope on a body
+  under 1 t and no input, assist keeps station with the load
+  (`sim/player.rs`, `TOW_MAX_MASS`; test `towing_a_survivor_is_steady`).
+  Cost: an hour with the measurement. Open: stopping a tow still means
+  braking with the load behind you (a rope can't push), which a player
+  learns to do slowly.
+

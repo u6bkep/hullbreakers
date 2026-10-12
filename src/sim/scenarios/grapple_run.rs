@@ -4,6 +4,9 @@
 //! keeps each runner's progress and time. It's won when the whole crew is
 //! through the last gate, lost if the clock runs out first. Best times are
 //! kept for as long as the host runs.
+//!
+//! Results: `finished` (runners through the last gate), and on a win
+//! `crew_seconds` (the last of them home).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -219,11 +222,14 @@ fn run_course(
             mission.report.push(line);
             records.crew = Some(records.crew.map_or(last_home, |b| b.min(last_home)));
         }
+        mission.result("finished", crew.len() as f32);
+        mission.result("crew_seconds", last_home);
         mission.decide(Phase::Won, tick.0, "COURSE CLEAR");
     } else if underway && mission.elapsed(tick.0) >= TIME_LIMIT {
         for r in crew.iter().filter(|r| r.finished.is_none()) {
             mission.report.push(format!("{}: out of time at gate {} of {}", r.name, r.next + 1, gates.len()));
         }
+        mission.result("finished", crew.iter().filter(|r| r.finished.is_some()).count() as f32);
         mission.decide(Phase::Lost, tick.0, "OUT OF TIME");
     }
     // The board: the finished by time, then everyone else by how far

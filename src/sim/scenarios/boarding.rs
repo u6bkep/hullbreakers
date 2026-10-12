@@ -182,6 +182,7 @@ fn drop_shields(
             ship.shield = false;
             let name = players.get(who).ok().and_then(|(_, _, n)| n).map_or("?".to_string(), |n| n.to_string());
             mission.report.push(format!("Shield dropped by {name}. Remember that name."));
+            mission.result("shield_dropped", 1.0);
             tally.credit(who, "dropped the carrier's shield");
         }
     }

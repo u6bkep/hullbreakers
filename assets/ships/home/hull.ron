@@ -48,6 +48,7 @@ Module(
         (action: Scenario(Gallery), center: (-3.54, 1.92, -6.2), half_size: (0.06, 0.22, 0.4)),
         (action: Scenario(GrappleRun), center: (-3.54, 1.4, -8.4), half_size: (0.06, 0.22, 0.4)),
         (action: Scenario(DeadShip), center: (-3.54, 1.4, -7.3), half_size: (0.06, 0.22, 0.4)),
+        (action: Scenario(Recovery), center: (-3.54, 1.4, -6.2), half_size: (0.06, 0.22, 0.4)),
         (action: Lurch, center: (-3.54, 1.05, -5.4), half_size: (0.06, 0.18, 0.25)),
         // The weapons locker.
         (action: Armory, center: (3.54, 1.5, 9.0), half_size: (0.06, 0.45, 0.5)),

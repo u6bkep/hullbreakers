@@ -9,6 +9,8 @@
 //! derelict`): its devices and how they're wired. This module only reads
 //! their state, to tell the crew what to do next and to decide the end.
 //!
+//! Results: `core_home` (1 or 0) and `seconds_to_spare` on the overload.
+//!
 //! Releasing the clamp puts the data core (cargo, not bulky: it goes in the
 //! pack) on its cradle; it's won when the crew is home with it (see
 //! [`core_secured`]).
@@ -237,6 +239,8 @@ fn salvage(
             for (who, turns) in &salvage.turns {
                 tally.credit(*who, format!("turned junctions {turns} times"));
             }
+            mission.result("core_home", if secured { 1.0 } else { 0.0 });
+            mission.result("seconds_to_spare", left.max(0.0));
             mission.decide(phase, tick.0, outcome);
             // Either way, it goes: the crew watches from home, or is thrown
             // off it.

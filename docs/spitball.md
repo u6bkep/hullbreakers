@@ -55,7 +55,9 @@ These are the hooks to keep leaning on.
 - **Drill site.** Plant a drill on a rock and defend it while it works (Deep
   Rock's Point Extraction).
 - **Recovery.** Crew drifting in a debris field with low oxygen. Find them by
-  beacon and reel them out.
+  beacon and reel them out. *Taken: the recovery scenario (four survivors
+  and a lifeboat, beacons that ping in turn, air clocks, towed into the
+  hold).*
 
 ## Systems
 
@@ -158,7 +160,13 @@ live (decided 2026-10-10).
   a rope quickly turns into an oscillation that's hard to damp by hand. It
   needs an assist mechanic, like flight assist but for the rope: for example,
   a winch that damps relative velocity along the cable, or a "tow mode" that
-  matches the load's velocity to yours.
+  matches the load's velocity to yours. *Measured for recovery (2026-10-12)
+  with person-mass loads: the rope is inelastic, so a tow doesn't bounce,
+  but letting go of the keys made flight assist brake you and the load ran
+  into you at the tow's speed (9.7 m/s). Taken: a tow mode. With a rope on
+  something under 1 t and no input, assist keeps station with the load
+  instead of braking (`TOW_MAX_MASS` in `sim/player.rs`); measured after:
+  no slack/taut changes, 0.0 m/s along the rope. Rocks are still anchors.*
 - **Networking note:** reeling a light rock already causes about 2.7
   rollbacks per second at 100 ms, because the client doesn't predict the
   rock's recoil. Wrangling as a main activity makes coupled-body prediction a

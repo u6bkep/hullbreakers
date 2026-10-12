@@ -20,6 +20,7 @@ use crate::sim::SimTick;
 use crate::sim::devices::{Device, DeviceKind, DeviceState, Devices, face_basis};
 use crate::sim::mission::{BodyId, Mission};
 use crate::sim::player::DeckSlot;
+use crate::sim::scenarios::recovery::Pod;
 use crate::sim::ship::ShipHull;
 use crate::sim::TICK_HZ;
 
@@ -41,6 +42,7 @@ pub struct DeviceLook {
     gate: Handle<StandardMaterial>,
     gate_next: Handle<StandardMaterial>,
     selected: Handle<StandardMaterial>,
+    alarm: Handle<StandardMaterial>,
 }
 
 pub fn setup_device_look(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
@@ -72,6 +74,7 @@ pub fn setup_device_look(mut commands: Commands, mut materials: ResMut<Assets<St
         gate: glow(&mut materials, WAITING, 2.0),
         gate_next: glow(&mut materials, POWER, 9.0),
         selected: glow(&mut materials, Color::srgb(0.85, 0.85, 0.8), 0.35),
+        alarm: glow(&mut materials, SHUT, 6.0),
     });
 }
 
@@ -433,6 +436,74 @@ pub fn show_devices(
         let intensity = if on { ROOM_LIGHT } else { 0.0 };
         if light.intensity != intensity {
             light.intensity = intensity;
+        }
+    }
+}
+
+/// A pod's beacon (see `sim::scenarios::recovery`): a lamp on top that
+/// flashes amber with each ping the HUD hears, red once its air is nearly
+/// gone, and goes dark when it's out.
+#[derive(Component)]
+pub struct Beacon {
+    pod: Entity,
+}
+
+/// Air left (s) below which a beacon flashes red.
+const LOW_AIR: f32 = 30.0;
+
+pub fn fit_beacons(
+    add: On<Add, Pod>,
+    pods: Query<&Pod>,
+    look: Res<DeviceLook>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+) {
+    let Ok(pod) = pods.get(add.entity) else { return };
+    let top = pod.kind.size().y / 2.0 + 0.08;
+    commands.entity(add.entity).insert(Visibility::default()).with_children(|b| {
+        b.spawn((
+            Beacon { pod: add.entity },
+            Mesh3d(cuboid(&mut meshes, Vec3::new(0.18, 0.16, 0.18))),
+            MeshMaterial3d(look.dark.clone()),
+            Transform::from_xyz(0.0, top, 0.0),
+        ));
+        b.spawn((
+            Beacon { pod: add.entity },
+            PointLight {
+                intensity: 0.0,
+                range: 25.0,
+                color: WAITING,
+                shadow_maps_enabled: false,
+                ..default()
+            },
+            Transform::from_xyz(0.0, top + 0.3, 0.0),
+        ));
+    });
+}
+
+pub fn flash_beacons(
+    tick: Res<SimTick>,
+    look: Res<DeviceLook>,
+    pods: Query<&Pod>,
+    mut lamps: Query<(&Beacon, Option<&mut MeshMaterial3d<StandardMaterial>>, Option<&mut PointLight>)>,
+) {
+    for (beacon, material, light) in &mut lamps {
+        let Ok(pod) = pods.get(beacon.pod) else { continue };
+        let on = pod.pinging(tick.0);
+        let low = (pod.oxygen_until.saturating_sub(tick.0) as f32 / TICK_HZ as f32) < LOW_AIR;
+        if let Some(mut material) = material {
+            let want = match (on, low) {
+                (false, _) => &look.dark,
+                (true, false) => &look.waiting,
+                (true, true) => &look.alarm,
+            };
+            if material.0 != *want {
+                material.0 = want.clone();
+            }
+        }
+        if let Some(mut light) = light {
+            light.intensity = if on { 120_000.0 } else { 0.0 };
+            light.color = if low { SHUT } else { WAITING };
         }
     }
 }
