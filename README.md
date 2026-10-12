@@ -326,8 +326,16 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     [docs/ships.md](docs/ships.md)) and wired by conditions over each other.
     They're pressed through the same interact path as buttons; the
     authority applies presses and settles every device once a tick, and the
-    state (`Devices`, on the ship) is replicated. Shut doors are part of
-    the ship's collider on every peer.
+    state (`Devices`, on the ship, stamped with the tick it last changed)
+    is replicated. Shut doors and extended bridges are part of the ship's
+    collider on every peer, from the authority's state. What players see
+    is `ShownDevices`: the authority's state with the presses of the
+    players simulated here (a client's own, predicted) stamped after it,
+    played over it, so a client's lever moves at once and goes back if the
+    authority's answer says otherwise (both read from the tick-stamped
+    event log, so rollbacks need no special case). Colliders aren't
+    predicted: a door opens under you when the authority says so. Robots
+    path on a grid baked per state of the ship's doors and bridges.
   - **Combat** (`sim/combat.rs`): which turrets fire is a function of the
     tick, and where a beam stops is a function of the ships' poses and the
     target's shield, so every peer traces the same `Beams` each tick and a

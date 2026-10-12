@@ -492,3 +492,94 @@ fn markers_find_their_bodies_on_clients() {
     let slot = world.query_filtered::<&DeckSlot, With<LocalPlayer>>().single(world).unwrap().0;
     assert_eq!(marker.player, Some(slot));
 }
+
+/// A client's own press of a device shows at once, a round trip before the
+/// authority's answer, and agrees with it once it's back.
+#[test]
+fn a_press_shows_before_the_round_trip() {
+    use hullbreakers::sim::devices::{Devices, ShownDevices};
+    let (_guard, mut s) = session(100);
+    s.step(60);
+    let main = hullbreakers::sim::design::design("home").device("main");
+    // In the hold, facing the main bus junction on the port wall, on both
+    // peers (the client's player is predicted).
+    let feet = Vec3::new(-2.62, 0.01, 3.0);
+    for world in [s.server.world_mut(), s.client.world_mut()] {
+        let ship = world.query_filtered::<Entity, With<HomeShip>>().single(world).unwrap();
+        for mut p in world.query::<&mut Player>().iter_mut(world) {
+            p.mode = Mode::Booted {
+                body: ship,
+                feet,
+                up: Vec3::Y,
+                velocity: Vec3::ZERO,
+                orientation: Transform::IDENTITY.looking_to(Vec3::NEG_X, Vec3::Y).rotation,
+                pitch: (1.4f32 - (0.01 + 1.62)).atan2(1.0),
+            };
+        }
+    }
+    s.step(30);
+    let way = |app: &mut App| {
+        let world = app.world_mut();
+        let (devices, shown) = world
+            .query_filtered::<(&Devices, Option<&ShownDevices>), With<HomeShip>>()
+            .single(world)
+            .unwrap();
+        (devices.0[main].set, shown.map(|s| s.0[main].set))
+    };
+    assert_eq!(way(&mut s.client), (0, Some(0)));
+    s.input().0.presses.interact.press();
+    let (mut shown_at, mut answered_at) = (None, None);
+    for frame in 0..60 {
+        s.step(1);
+        let (authority, shown) = way(&mut s.client);
+        if shown == Some(1) && shown_at.is_none() {
+            shown_at = Some(frame);
+        }
+        if authority == 1 && answered_at.is_none() {
+            answered_at = Some(frame);
+        }
+    }
+    eprintln!("press: shown at frame {shown_at:?}, the authority's answer at frame {answered_at:?}");
+    let (shown_at, answered_at) = (shown_at.expect("never shown"), answered_at.expect("never answered"));
+    assert!(shown_at + 6 <= answered_at, "shown at {shown_at}, answered at {answered_at}: not ahead of the round trip");
+    assert_eq!(way(&mut s.client), (1, Some(1)), "shown and answered disagree afterwards");
+    assert_eq!(way(&mut s.server).0, 1);
+}
+
+/// A press the authority doesn't make (here, the client's player is
+/// somewhere else on the authority, so the press misses) shows briefly,
+/// then the shown state goes back to the authority's.
+#[test]
+fn a_mispredicted_press_goes_back() {
+    use hullbreakers::sim::devices::{Devices, ShownDevices};
+    let (_guard, mut s) = session(100);
+    s.step(60);
+    let main = hullbreakers::sim::design::design("home").device("main");
+    let world = s.client.world_mut();
+    let ship = world.query_filtered::<Entity, With<HomeShip>>().single(world).unwrap();
+    // Only the client thinks its player faces the junction.
+    let mut predicted = world.query_filtered::<&mut Player, With<LocalPlayer>>().single_mut(world).unwrap();
+    predicted.mode = Mode::Booted {
+        body: ship,
+        feet: Vec3::new(-2.62, 0.01, 3.0),
+        up: Vec3::Y,
+        velocity: Vec3::ZERO,
+        orientation: Transform::IDENTITY.looking_to(Vec3::NEG_X, Vec3::Y).rotation,
+        pitch: (1.4f32 - (0.01 + 1.62)).atan2(1.0),
+    };
+    s.input().0.presses.interact.press();
+    let shown = |app: &mut App| {
+        let world = app.world_mut();
+        let (devices, shown) = world
+            .query_filtered::<(&Devices, Option<&ShownDevices>), With<HomeShip>>()
+            .single(world)
+            .unwrap();
+        (devices.0[main].set, shown.map(|s| s.0[main].set))
+    };
+    s.step(3);
+    let early = shown(&mut s.client);
+    s.step(150);
+    let late = shown(&mut s.client);
+    eprintln!("mispredicted press: {early:?} at first, {late:?} later");
+    assert_eq!(late, (0, Some(0)), "the shown state didn't go back to the authority's");
+}

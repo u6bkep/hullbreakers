@@ -1291,3 +1291,69 @@ fn the_escort_is_won_with_the_cell_in_our_hold() {
     assert!(m.report[0].contains("carried by Player 1"), "{:?}", m.report);
 }
 
+/// Robots path on the freighter as its doors and gangway are: across the
+/// breach only with the gangway out, into the bay only with its door open.
+#[test]
+fn robot_paths_follow_the_gangway_and_doors() {
+    use hullbreakers::sim::nav::NavGrids;
+    let ship = design("freighter");
+    let mut grids = NavGrids::default();
+    let hall = Vec3::new(0.0, 0.0, -9.0);
+    let aft = Vec3::new(0.0, 0.0, 8.0);
+    let bay = Vec3::new(0.0, 0.0, -18.0);
+    let reaches = |grids: &mut NavGrids, solid: &[bool], from: Vec3, to: Vec3| {
+        grids.get("freighter", Some(solid)).path(from, to).and_then(|p| p.last().copied()).is_some_and(|end| end.distance(to) < 1.0)
+    };
+    let mut solid = vec![false; ship.devices.len()];
+    let (gangway, door) = (ship.device("gangway"), ship.device("bay_door"));
+    // As it starts: gangway in, bay door shut.
+    solid[door] = true;
+    assert!(!reaches(&mut grids, &solid, hall, aft), "across the breach with the gangway in");
+    assert!(!reaches(&mut grids, &solid, hall, bay), "through the shut bay door");
+    solid[gangway] = true;
+    assert!(reaches(&mut grids, &solid, hall, aft), "not across the gangway");
+    solid[door] = false;
+    assert!(reaches(&mut grids, &solid, hall, bay), "not through the open bay door");
+}
+
+/// The escort's Gunners follow you over the gangway when it's out: one
+/// from the bow hall comes after a player on the aft deck.
+#[test]
+fn gunners_cross_the_gangway_when_it_is_out() {
+    let crossed = |gangway_out: bool| {
+        let mut app = app();
+        app.world_mut().resource_mut::<Director>().robots = true;
+        start(&mut app, ScenarioKind::Escort);
+        let freighter = ship_of(&mut app, "freighter").unwrap();
+        if gangway_out {
+            press_device(&mut app, freighter, "gangway_lever");
+            assert!(live(&mut app, freighter, "gangway"));
+        }
+        // On the aft deck, by the airlock, out of their sight lines; immortal.
+        stand(&mut app, freighter, Vec3::new(-3.0, 0.01, 10.5), Vec3::NEG_Z);
+        let mut furthest = f32::MIN;
+        for _ in 0..40 * 60 {
+            {
+                let world = app.world_mut();
+                let mut v = world.query_filtered::<&mut Vitals, Without<Robot>>().single_mut(world).unwrap();
+                v.health = 1000.0;
+            }
+            ticks(&mut app, 1);
+            let world = app.world_mut();
+            for (p, brain) in world.query::<(&Player, &hullbreakers::sim::bots::Brain)>().iter(world) {
+                if let Mode::Booted { body, feet, .. } = p.mode
+                    && body == freighter
+                    && brain.post.z < -6.0
+                {
+                    furthest = furthest.max(feet.z);
+                }
+            }
+        }
+        furthest
+    };
+    let (out, r#in) = (crossed(true), crossed(false));
+    eprintln!("the bow hall's Gunners got as far aft as z = {out:.1} with the gangway out, {in:.1} with it in", in = r#in);
+    assert!(out > 2.0, "never crossed the gangway (got to z = {out:.1})");
+    assert!(r#in < 0.0, "crossed with the gangway in (got to z = {:.1})", r#in);
+}
+
