@@ -183,6 +183,7 @@ fn dress_robots(
     robots: Query<(&Robot, Option<&Affixes>, Option<&BodyTuning>, Option<&Condition>)>,
     tree: (Query<&Children>, Query<&ChildOf>, Query<&Name>),
     lit: Query<(&GltfMaterialName, &MeshMaterial3d<StandardMaterial>)>,
+    gallery: Query<(), With<crate::sim::scenarios::gallery::GalleryAnchor>>,
     mut visibility: Query<&mut Visibility>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut shells: ResMut<Assets<ShieldMaterial>>,
@@ -304,10 +305,12 @@ fn dress_robots(
             commands.entity(socket).add_child(lamp);
             lamp
         });
-        // The turret's searchlight: a spotlight at its eye, and a faint shaft.
+        // The turret's searchlight: a spotlight at its eye, and a faint shaft
+        // (not in the gallery, where the shafts would cross its other areas).
         if kind == Robot::Turret
             && let Some(&eye) = sockets.get("eye")
         {
+            let shaft = gallery.is_empty();
             commands.entity(eye).with_children(|lamp| {
                 lamp.spawn((
                     SpotLight {
@@ -323,12 +326,14 @@ fn dress_robots(
                     Transform::default(),
                 ));
                 // The cone's tip at the lamp, opening forward (−Z).
-                lamp.spawn((
-                    Mesh3d(fx.beam_cone.clone()),
-                    MeshMaterial3d(fx.beam_glow.clone()),
-                    Transform::from_translation(Vec3::NEG_Z * BEAM_LENGTH / 2.0).with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
-                    NotShadowCaster,
-                ));
+                if shaft {
+                    lamp.spawn((
+                        Mesh3d(fx.beam_cone.clone()),
+                        MeshMaterial3d(fx.beam_glow.clone()),
+                        Transform::from_translation(Vec3::NEG_Z * BEAM_LENGTH / 2.0).with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
+                        NotShadowCaster,
+                    ));
+                }
             });
         }
         commands.entity(avatar).insert(RobotLook {
@@ -663,6 +668,7 @@ fn pieces(kind: Robot) -> &'static [&'static str] {
         Robot::Swarmer => &["thruster_fl", "thruster_fr", "thruster_rl", "thruster_rr", "gun", "body"],
         Robot::Grappler => &["head", "upper_arm_l", "upper_arm_r", "winch", "thigh_l", "thigh_r", "torso", "pelvis"],
         Robot::Turret => &["barrel", "head", "base"],
+        Robot::Crawler => &["leg_fl", "leg_ml", "leg_rl", "leg_fr", "leg_mr", "leg_rr", "head", "body"],
     }
 }
 
@@ -963,34 +969,41 @@ fn animate_blasts(
 // ---------------------------------------------------------------------------
 // The gallery's robots
 
-/// In the gallery, each robot's name ("Armoured Gunner") under it, so its
-/// variations can be told apart.
+/// In the gallery's table of robots, a label under each: its kind's name
+/// under the plain one that starts each row, its affix's under the others.
 fn label_zoo(
     mut contexts: bevy_egui::EguiContexts,
     gallery: Query<(), With<crate::sim::scenarios::gallery::GalleryAnchor>>,
-    camera: Single<(&Camera, &GlobalTransform), With<PlayerCamera>>,
+    camera: crate::client::hud::CameraView,
     looks: Query<(&RobotLook, &GlobalTransform)>,
-    names: Query<&Name>,
+    robots: Query<(&Robot, Option<&Affixes>)>,
 ) -> Result {
     if gallery.is_empty() {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let (camera, view) = *camera;
+    let (camera, eye) = *camera;
+    let view = crate::client::hud::Projector::new(camera, eye, ctx);
     let painter = ctx.layer_painter(bevy_egui::egui::LayerId::new(bevy_egui::egui::Order::Background, bevy_egui::egui::Id::new("zoo")));
     for (look, at) in &looks {
-        let Ok(name) = names.get(look.robot) else { continue };
+        let Ok((kind, affixes)) = robots.get(look.robot) else { continue };
+        let (label, size) = match affixes.and_then(|a| a.iter().next()) {
+            Some(affix) => (affix.name(), 14.0),
+            None => (kind.name(), 17.0),
+        };
         let below = at.translation() - Vec3::Y * 1.2;
-        let distance = view.translation().distance(below);
-        if (view.translation() - below).dot(view.forward().into()) > 0.0 || distance > 20.0 {
+        let distance = view.eye.translation.distance(below);
+        // Only while you face the table, so its labels stay out of the view
+        // of the gallery's other areas.
+        if Vec3::from(view.eye.forward()).angle_between(below - view.eye.translation) > super::gallery::FACING || distance > 30.0 {
             continue;
         }
-        let Ok(p) = camera.world_to_viewport(view, below) else { continue };
+        let Some(p) = view.to_screen(below) else { continue };
         painter.text(
-            bevy_egui::egui::pos2(p.x, p.y),
+            p,
             bevy_egui::egui::Align2::CENTER_TOP,
-            name.as_str(),
-            bevy_egui::egui::FontId::proportional(14.0),
+            label,
+            bevy_egui::egui::FontId::proportional(size),
             bevy_egui::egui::Color32::from_rgb(255, 214, 150),
         );
     }
@@ -1020,6 +1033,10 @@ pub struct RobotSounds {
     /// A robot coming apart; a volatile one going up.
     crash: Handle<AudioSource>,
     blast: Handle<AudioSource>,
+    /// A crawler's magnetic feet clacking down, one by one, and the clunk
+    /// of it taking a new surface.
+    clack: Handle<AudioSource>,
+    clamp: Handle<AudioSource>,
 }
 
 fn setup_robot_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
@@ -1048,10 +1065,17 @@ fn setup_robot_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSo
         vent: add(synth.thud(1.4, 2.2, 5000.0, 0.8)),
         crash: add(mix(synth.clank(0.7, 120.0, 6.0, 0.8), synth.thud(0.45, 9.0, 420.0, 1.0))),
         blast: add(synth.explosion(1.8, 2600.0, 1.3)),
+        clack: add(mix(synth.clank(0.05, 1650.0, 95.0, 0.6), synth.thud(0.04, 120.0, 2500.0, 0.4))),
+        clamp: add(mix(synth.clank(0.25, 330.0, 22.0, 0.8), synth.thud(0.2, 25.0, 700.0, 0.7))),
     });
 }
 
 fn play_at(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, speed: f32, position: Vec3) {
+    play_far(commands, sound, volume, speed, position, sfx::STRUCTURE_SCALE);
+}
+
+/// As [`play_at`], carrying as far as `scale` lets it (smaller: further).
+fn play_far(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, speed: f32, position: Vec3, scale: f32) {
     commands.spawn((
         AudioPlayer(sound.clone()),
         PlaybackSettings {
@@ -1059,7 +1083,7 @@ fn play_at(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, sp
             volume: Volume::Linear(volume),
             speed,
             spatial: true,
-            spatial_scale: Some(bevy::audio::SpatialScale::new(sfx::STRUCTURE_SCALE)),
+            spatial_scale: Some(bevy::audio::SpatialScale::new(scale)),
             ..default()
         },
         Transform::from_translation(position),
@@ -1071,11 +1095,19 @@ fn play_at(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, sp
 struct RobotHearing {
     events: EventCursor,
     last: Condition,
+    /// Distance walked since a crawler's last footfall (m).
+    stride: f32,
 }
+
+/// A crawler's footfalls come this often (m walked), and its clatter
+/// carries this much further through a hull than other sounds do.
+const CLACK_EVERY: f32 = 0.13;
+const CLATTER_REACH: f32 = 2.5;
 
 /// Robots' gunfire, and what their affixes and attacks sound like, heard
 /// where they are when they're on the body you're standing on.
 fn robot_sounds(
+    time: Res<Time>,
     sounds: Res<RobotSounds>,
     listener: Query<&Player, With<LocalPlayer>>,
     mut robots: Query<(Entity, &Robot, &Player, Option<&Condition>, Option<&Affixes>, Option<&mut RobotHearing>)>,
@@ -1100,7 +1132,7 @@ fn robot_sounds(
             continue;
         };
         let pitch = || 0.93 + 0.14 * rand::random::<f32>();
-        for event in events {
+        for &event in &events {
             match event {
                 PlayerEvent::Fired { gun, .. } => {
                     let (sound, volume) = match gun {
@@ -1133,6 +1165,21 @@ fn robot_sounds(
         }
         if c.venting && !last.venting {
             play_at(&mut commands, &sounds.vent, 0.9, pitch(), at);
+        }
+        // A crawler is heard well before it's seen: its feet clatter
+        // through the hull, and it clunks onto each new surface.
+        if *kind == Robot::Crawler
+            && let Mode::Booted { velocity, .. } = player.mode
+        {
+            let reach = sfx::STRUCTURE_SCALE / CLATTER_REACH;
+            hearing.stride += velocity.length() * time.delta_secs();
+            if hearing.stride > CLACK_EVERY {
+                hearing.stride = 0.0;
+                play_far(&mut commands, &sounds.clack, 0.55, pitch(), at, reach);
+            }
+            if events.iter().any(|e| matches!(e, PlayerEvent::SurfaceChanged { .. } | PlayerEvent::Landed { .. })) {
+                play_far(&mut commands, &sounds.clamp, 0.9, pitch(), at, reach);
+            }
         }
     }
 }
