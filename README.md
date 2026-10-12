@@ -53,8 +53,9 @@ Brakk (heavy, crude), Hoshi (fast and light), Corvid (deep mags, loose).
 Rarity runs Standard issue (grey), Common (white), Uncommon (green), Rare
 (blue, one perk) and Exotic (orange, two perks); perks are things like
 Recycler (every fourth shot is free) and Last word (the last round in the
-mag hits three times as hard). A gun's name says who made it and its most
-telling part: "Kessler Mk3 Longshot".
+mag hits three times as hard). A gun's name is its maker, the maker's model
+(rarer guns have higher marks) and a word for one of its parts or perks:
+"Kessler KG-3 Longshot", "Hoshi Type II Hornet", "Corvid Scrap #4 Miser".
 
 Robots drop things when destroyed (mostly ammo, sometimes a gun, better from
 tougher robots), and the enemy carrier has **loot crates** aboard, better

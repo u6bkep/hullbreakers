@@ -36,9 +36,11 @@ fn mix(mut x: u32) -> u32 {
     x
 }
 
-/// The `salt`th number drawn from `seed`.
+/// The `salt`th number drawn from `seed`. The seed is hashed before the
+/// salt goes in, so two seeds don't differ the same way in every draw (as
+/// `mix(seed ^ salt)` would have them: their names came out alike).
 pub fn draw(seed: u32, salt: u32) -> u32 {
-    mix(seed ^ mix(salt.wrapping_mul(0x9e37_79b9).wrapping_add(0x632b_e5ab)))
+    mix(mix(seed).wrapping_add(mix(salt.wrapping_mul(0x9e37_79b9).wrapping_add(0x632b_e5ab))))
 }
 
 /// One of `options` by weight, chosen by `r`.
@@ -221,6 +223,34 @@ impl Maker {
             Maker::Brakk => "Brakk",
             Maker::Hoshi => "Hoshi",
             Maker::Corvid => "Corvid",
+        }
+    }
+
+    /// What it calls its models: the word between its name and the
+    /// epithet, from a mark `n` (1–6).
+    fn model(self, frame: GunKind, n: u32) -> String {
+        let rifle = frame == GunKind::Rifle;
+        match self {
+            Maker::Issue => String::new(),
+            // Precise, numbered, German-sounding.
+            Maker::Kessler => format!("{}{n}", if rifle { "KG-" } else { "MP-" }),
+            // Industrial: a series number.
+            Maker::Brakk => format!("{}{}0", if rifle { "Ram " } else { "Grind " }, n + 1),
+            // Sleek: a type.
+            Maker::Hoshi => format!("Type {}", ["I", "II", "III", "IV", "V", "VI"][(n as usize - 1).min(5)]),
+            // Rebuilt: how many times.
+            Maker::Corvid => format!("Scrap #{n}"),
+        }
+    }
+
+    /// Words for its guns when no part or perk names them.
+    fn epithets(self) -> &'static [&'static str] {
+        match self {
+            Maker::Issue => &[""],
+            Maker::Kessler => &["Exacta", "Ordnung", "Gauge"],
+            Maker::Brakk => &["Workhorse", "Lump", "Slab"],
+            Maker::Hoshi => &["Breeze", "Petal", "Origami"],
+            Maker::Corvid => &["Scavenger", "Leftovers", "Mongrel"],
         }
     }
 
@@ -455,23 +485,31 @@ impl PartVariant {
         }
     }
 
-    /// The word a gun is named for when this is its most telling part.
-    fn epithet(self) -> Option<&'static str> {
-        Some(match self {
-            PartVariant::Barrel(Barrel::Long) => "Longshot",
-            PartVariant::Barrel(Barrel::Short) => "Snub",
-            PartVariant::Barrel(Barrel::Heavy) => "Hammer",
-            PartVariant::Magazine(Magazine::Extended) => "Feeder",
-            PartVariant::Magazine(Magazine::Drum) => "Drummer",
-            PartVariant::Magazine(Magazine::Quick) => "Snap",
-            PartVariant::Muzzle(Muzzle::Compensator) => "Steady",
-            PartVariant::Muzzle(Muzzle::Booster) => "Howler",
-            PartVariant::Stock(Stock::Light) => "Sprinter",
-            PartVariant::Stock(Stock::Heavy) => "Anchor",
-            PartVariant::Sight(Sight::Reflex) => "Glance",
-            PartVariant::Sight(Sight::Scope) => "Watcher",
-            _ => return None,
-        })
+    /// Words a gun may be named for when it has this part, by frame (an
+    /// SMG's long barrel is a lance, a rifle's a long shot). Empty for a
+    /// stock part.
+    fn epithets(self, frame: GunKind) -> &'static [&'static str] {
+        let rifle = frame == GunKind::Rifle;
+        match self {
+            PartVariant::Barrel(Barrel::Long) if rifle => &["Longshot", "Reach", "Lancer"],
+            PartVariant::Barrel(Barrel::Long) => &["Needle", "Pike", "Stretch"],
+            PartVariant::Barrel(Barrel::Short) if rifle => &["Snub", "Bulldog", "Brawler"],
+            PartVariant::Barrel(Barrel::Short) => &["Stub", "Hornet", "Pocket"],
+            PartVariant::Barrel(Barrel::Heavy) if rifle => &["Hammer", "Maul", "Sledge"],
+            PartVariant::Barrel(Barrel::Heavy) => &["Mallet", "Knuckle", "Brick"],
+            PartVariant::Magazine(Magazine::Extended) => &["Feeder", "Glutton", "Hoarder"],
+            PartVariant::Magazine(Magazine::Drum) if rifle => &["Drummer", "Cauldron", "Kettle"],
+            PartVariant::Magazine(Magazine::Drum) => &["Drum", "Hailstorm", "Downpour"],
+            PartVariant::Magazine(Magazine::Quick) => &["Snap", "Flicker", "Quickdraw"],
+            PartVariant::Muzzle(Muzzle::Compensator) => &["Steady", "Level", "Plumbline"],
+            PartVariant::Muzzle(Muzzle::Booster) => &["Howler", "Shrike", "Bellow"],
+            PartVariant::Stock(Stock::Light) => &["Sprinter", "Feather", "Skip"],
+            PartVariant::Stock(Stock::Heavy) => &["Anchor", "Bedrock", "Mule"],
+            PartVariant::Sight(Sight::Reflex) => &["Glance", "Blink", "Snapshot"],
+            PartVariant::Sight(Sight::Scope) if rifle => &["Watcher", "Overlook", "Hawkeye"],
+            PartVariant::Sight(Sight::Scope) => &["Spyglass", "Peeper", "Squint"],
+            _ => &[],
+        }
     }
 
     fn mods(self) -> Mods {
@@ -523,6 +561,20 @@ pub enum Perk {
 }
 
 impl Perk {
+    /// Words a gun with this perk may be named for.
+    fn epithets(self) -> &'static [&'static str] {
+        match self {
+            Perk::Overclocked => &["Overdrive", "Redline", "Frenzy"],
+            Perk::Hardened => &["Tungsten", "Ironclad", "Spike"],
+            Perk::Quickload => &["Juggler", "Slick", "Swift"],
+            Perk::Steady => &["Calm", "Surgeon", "Stillwater"],
+            Perk::DeepMag => &["Deepwell", "Bounty", "Abundance"],
+            Perk::HotLoads => &["Scorcher", "Ember", "Hotfoot"],
+            Perk::Recycler => &["Thrift", "Miser", "Scrounger"],
+            Perk::LastWord => &["Finale", "Epitaph", "Farewell"],
+        }
+    }
+
     const ALL: [Perk; 8] = [
         Perk::Overclocked,
         Perk::Hardened,
@@ -707,6 +759,7 @@ mod salt {
     pub const JITTER: u32 = 40;
     pub const PAINT: u32 = 50;
     pub const MARK: u32 = 60;
+    pub const NAME: u32 = 70;
 }
 
 impl Weapon {
@@ -836,23 +889,31 @@ impl Weapon {
         stats
     }
 
-    /// Its name: "Kessler Mk3 Longshot". Standard issue is "Issue SMG".
+    /// Its name: its maker, the maker's model (in the maker's style, its
+    /// mark higher the rarer it is), and an epithet for one of what makes
+    /// it itself: a part that isn't stock, or a perk (perks weigh double).
+    /// "Kessler KG-3 Longshot", "Hoshi Type II Hornet", "Corvid Scrap #4
+    /// Miser". Standard issue is "Issue SMG".
     pub fn name(&self) -> String {
         if self.rarity == Rarity::Standard {
             return format!("Issue {}", self.frame.name());
         }
         let build = self.build();
         let mark = 1 + draw(self.seed, salt::MARK) % 3 + self.rarity.tier().saturating_sub(1);
-        let epithet = build
-            .parts
-            .all()
-            .into_iter()
-            .find_map(PartVariant::epithet)
-            .unwrap_or(match self.frame {
-                GunKind::Rifle => "Ranger",
-                _ => "Buzzer",
-            });
-        format!("{} Mk{mark} {epithet}", build.maker.name())
+        let mut sources: [(&[&str], u32); 7] = [(&[], 0); 7];
+        for (source, part) in sources.iter_mut().zip(build.parts.all()) {
+            *source = (part.epithets(self.frame), 1);
+        }
+        for (source, perk) in sources[5..].iter_mut().zip(build.perks) {
+            *source = (perk.map_or(&[][..], Perk::epithets), 2);
+        }
+        let mut sources: Vec<(&[&str], u32)> = sources.into_iter().filter(|(words, _)| !words.is_empty()).collect();
+        if sources.is_empty() {
+            sources.push((build.maker.epithets(), 1));
+        }
+        let words = pick(draw(self.seed, salt::NAME), &sources);
+        let epithet = words[draw(self.seed, salt::NAME + 1) as usize % words.len()];
+        format!("{} {} {epithet}", build.maker.name(), build.maker.model(self.frame, mark))
     }
 
     /// How it looks.
@@ -1196,16 +1257,16 @@ mod tests {
 
     static PINNED: std::sync::LazyLock<(String, Maker, Parts, [Option<Perk>; 2])> = std::sync::LazyLock::new(|| {
         (
-            "Kessler Mk4 Feeder".to_string(),
-            Maker::Kessler,
+            "Corvid Scrap #5 Redline".to_string(),
+            Maker::Corvid,
             Parts {
-                barrel: Barrel::Standard,
-                magazine: Magazine::Extended,
-                stock: Stock::Heavy,
-                sight: Sight::Scope,
-                muzzle: Muzzle::Compensator,
+                barrel: Barrel::Short,
+                magazine: Magazine::Standard,
+                stock: Stock::Standard,
+                sight: Sight::Reflex,
+                muzzle: Muzzle::Booster,
             },
-            [Some(Perk::Steady), None],
+            [Some(Perk::Overclocked), None],
         )
     });
 
@@ -1274,7 +1335,7 @@ mod tests {
         for part in all {
             let b = benefits(&part.mods());
             assert!(b.iter().any(|x| *x > 0) && b.iter().any(|x| *x < 0), "{part:?} doesn't trade: {b:?}");
-            assert!(part.epithet().is_some(), "{part:?} has no name");
+            assert!(!part.epithets(GunKind::Smg).is_empty() && !part.epithets(GunKind::Rifle).is_empty(), "{part:?} has no name");
         }
         for maker in Maker::ROLLED {
             let b = benefits(&maker.lean());
@@ -1312,14 +1373,35 @@ mod tests {
     }
 
     #[test]
-    fn names_read_maker_mark_epithet() {
-        for s in 0..50 {
-            let w = Weapon::new(GunKind::Rifle, s, Rarity::Uncommon);
+    fn names_read_maker_model_epithet() {
+        for s in 0..200 {
+            let w = Weapon::roll(s, 50);
             let name = w.name();
-            let words: Vec<&str> = name.split(' ').collect();
-            assert_eq!(words.len(), 3, "{name}");
-            assert_eq!(words[0], w.build().maker.name());
-            assert!(words[1].starts_with("Mk"), "{name}");
+            assert!(name.starts_with(w.build().maker.name()), "{name}");
+            // Short enough for a hand card.
+            assert!(name.chars().count() <= 26, "{name}");
+        }
+    }
+
+    #[test]
+    fn names_vary() {
+        for frame in GunKind::CREW {
+            let rolls = 400;
+            let mut epithets = std::collections::HashMap::new();
+            let mut names = std::collections::HashSet::new();
+            for s in 0..rolls {
+                let w = Weapon::new(frame, draw(s, 5), Rarity::roll(draw(s, 6), 50));
+                let name = w.name();
+                let model = w.build().maker.model(frame, 1);
+                let epithet = name.rsplit(' ').next().unwrap().to_string();
+                assert!(!model.is_empty());
+                *epithets.entry(epithet).or_insert(0u32) += 1;
+                names.insert(name);
+            }
+            let (word, most) = epithets.iter().max_by_key(|(_, n)| **n).unwrap();
+            assert!(*most * 100 <= 15 * rolls, "{frame:?}: {word:?} in {most} of {rolls}");
+            assert!(epithets.len() >= 30, "{frame:?}: only {} epithets", epithets.len());
+            assert!(names.len() * 100 >= 70 * rolls as usize, "{frame:?}: only {} names", names.len());
         }
     }
 

@@ -23,6 +23,11 @@ use crate::sim::Layer;
 pub const INK: egui::Color32 = egui::Color32::from_rgb(200, 225, 235);
 pub const DIM: egui::Color32 = egui::Color32::from_rgb(120, 135, 145);
 pub const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 190, 70);
+/// Stat names in the tables.
+pub const LABEL: egui::Color32 = egui::Color32::from_rgb(150, 165, 175);
+/// The stat tables' label and value columns (px).
+const STAT_LABEL_WIDTH: f32 = 96.0;
+const STAT_VALUE_WIDTH: f32 = 84.0;
 pub const BETTER: egui::Color32 = egui::Color32::from_rgb(110, 220, 120);
 pub const WORSE: egui::Color32 = egui::Color32::from_rgb(255, 110, 90);
 /// Supplies (ammo) and cargo, which have no rarity.
@@ -77,10 +82,22 @@ pub fn stat_lines(s: &GunStats) -> Vec<StatLine> {
 /// A stats table: each stat, and how it differs from `against`'s.
 pub fn stats_table(ui: &mut egui::Ui, id: &str, stats: &GunStats, against: Option<&GunStats>) {
     let theirs = against.map(stat_lines);
-    egui::Grid::new(id).num_columns(3).spacing([12.0, 1.0]).show(ui, |ui| {
+    // Columns of a fixed width: a grid sizes its columns from the frame
+    // before, so a new table's first frames would draw labels under values.
+    let cell = |ui: &mut egui::Ui, width: f32, text: egui::RichText| {
+        ui.allocate_ui_with_layout(egui::vec2(width, 16.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_width(width);
+            ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend));
+        });
+    };
+    egui::Grid::new(id).num_columns(3).spacing([8.0, 1.0]).show(ui, |ui| {
         for (i, line) in stat_lines(stats).iter().enumerate() {
-            ui.label(egui::RichText::new(line.label).color(DIM).small());
-            ui.label(egui::RichText::new(format!("{:.*}{}", line.decimals, line.value, line.unit)).monospace().color(INK));
+            cell(ui, STAT_LABEL_WIDTH, egui::RichText::new(line.label).color(LABEL).small());
+            cell(
+                ui,
+                STAT_VALUE_WIDTH,
+                egui::RichText::new(format!("{:.*}{}", line.decimals, line.value, line.unit)).monospace().color(INK),
+            );
             match theirs.as_ref().map(|t| line.value - t[i].value) {
                 Some(d) if d.abs() > 0.5 * 10f32.powi(-(line.decimals as i32)) => {
                     let good = (d > 0.0) == line.more_is_better;
