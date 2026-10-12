@@ -200,3 +200,29 @@ fn a_clients_armory_works_through_the_host() {
     assert_eq!(load(&pb).profile.stash, vec![gun]);
     assert_eq!(load(&pa).carried.weapons[0], Some(a.profile.stash[0]));
 }
+
+/// A mission's end pays both crew members, and each file has its pay.
+#[test]
+fn a_missions_pay_is_saved_in_each_crew_members_file() {
+    use hullbreakers::sim::mission::{Director, Mission, Phase, ScenarioKind};
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (pa, pb, a, b) = two_profiles("pay");
+    let mut crew = Crew::start(vec![store_with(&pa, &a), store_with(&pb, &b)]);
+    crew.server.world_mut().resource_mut::<Director>().start(ScenarioKind::GrappleRun);
+    crew.step(60);
+    {
+        let world = crew.server.world_mut();
+        let mut mission = world.query::<&mut Mission>().single_mut(world).unwrap();
+        let tick = mission.started + 600;
+        mission.decide(Phase::Won, tick, "COURSE CLEAR");
+    }
+    crew.server.world_mut().resource_mut::<Director>().start(ScenarioKind::Field);
+    crew.step(60);
+    let (fa, fb) = (load(&pa), load(&pb));
+    assert_eq!((fa.profile.missions, fb.profile.missions), (1, 1), "not saved at the mission's end");
+    let pay = fa.profile.salvage - a.profile.salvage;
+    assert!(pay > 0);
+    assert_eq!(fb.profile.salvage - b.profile.salvage, pay, "paid differently");
+    assert_eq!(fa.profile.stash, a.profile.stash, "A's stash changed");
+    assert_eq!(fb.carried.weapons[0], b.carried.weapons[0], "B lost its gun");
+}

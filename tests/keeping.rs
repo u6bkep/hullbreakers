@@ -215,3 +215,34 @@ fn the_armory_moves_guns_between_the_stash_and_your_hands() {
     ask(&mut app, me, ProfileOp::Take(0));
     assert_eq!(profile(&app, me).stash, vec![rare()], "the armory worked from space");
 }
+
+#[test]
+fn a_mission_pays_its_crew_when_it_ends() {
+    use hullbreakers::sim::mission::{Mission, Phase};
+    let mut app = app();
+    let me = armed(&mut app);
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::GrappleRun);
+    ticks(&mut app, 3);
+    // Abandoning it pays nothing.
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Field);
+    ticks(&mut app, 3);
+    assert_eq!(profile(&app, me).salvage, 0);
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::GrappleRun);
+    ticks(&mut app, 3);
+    {
+        let world = app.world_mut();
+        let mut mission = world.query::<&mut Mission>().single_mut(world).unwrap();
+        let tick = mission.started + 60;
+        mission.decide(Phase::Won, tick, "COURSE CLEAR");
+    }
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Field);
+    ticks(&mut app, 3);
+    let p = profile(&app, me);
+    assert!(p.salvage >= 150 && p.xp >= 200, "{p:?}");
+    assert_eq!(p.missions, 1);
+    let world = app.world_mut();
+    let mission = world.query::<&Mission>().single(world).unwrap();
+    let rewards = &mission.debrief.as_ref().expect("no debrief").rewards;
+    assert_eq!(rewards.len(), 1);
+    assert_eq!(rewards[0].salvage, p.salvage);
+}

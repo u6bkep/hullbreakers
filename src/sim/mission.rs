@@ -118,6 +118,8 @@ pub struct Debrief {
     pub crew: Vec<CrewCard>,
     /// The best of the score cards ("Longest swing: Player 2, 84 m").
     pub awards: Vec<String>,
+    /// What it paid each crew member (see `sim::progression`).
+    pub rewards: Vec<super::progression::Reward>,
 }
 
 /// What a marker points at, for the HUD to style.
@@ -195,6 +197,8 @@ pub struct Mission {
     pub report: Vec<String>,
     /// The mission before this one, if it ended.
     pub debrief: Option<Debrief>,
+    /// What it paid, once it's over (for the debrief).
+    pub rewards: Vec<super::progression::Reward>,
 }
 
 impl MapEntities for Mission {
@@ -568,6 +572,7 @@ fn debrief(
         lines,
         crew: cards,
         awards,
+        rewards: mission.rewards.clone(),
     }
 }
 

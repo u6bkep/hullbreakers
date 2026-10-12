@@ -18,7 +18,9 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::items::{AmmoKind, Inventory, Item, Place, Rarity, Weapon};
-use super::mission::Director;
+use super::bots::Robot;
+use super::mission::{CrewTally, Director, Mission, Phase, ScenarioKind};
+use super::scenarios;
 use super::player::Player;
 use super::ship::HomeShip;
 use super::weapons::GunKind;
@@ -238,6 +240,22 @@ mod tests {
     }
 
     #[test]
+    fn a_mission_pays_for_how_it_ended_what_you_did_and_speed() {
+        let slow = reward(ScenarioKind::DeadShip, Phase::Won, 1000.0, &[], false, "A".into()).unwrap();
+        assert_eq!((slow.salvage, slow.xp), pay_for(ScenarioKind::DeadShip).unwrap().won);
+        let credits = ["restarted the reactor".to_string()];
+        let quick = reward(ScenarioKind::DeadShip, Phase::Won, 60.0, &credits, true, "A".into()).unwrap();
+        let (w, c, h) = (pay_for(ScenarioKind::DeadShip).unwrap().won, CREDIT_PAY, ALL_HOME_PAY);
+        let base = w.0 + c.0 + h.0;
+        assert_eq!(quick.salvage, base + base * QUICK_BONUS / 100, "{:#?}", quick.lines);
+        assert!(quick.lines.iter().any(|l| l.starts_with("Restarted the reactor")));
+        let lost = reward(ScenarioKind::Boarding, Phase::Lost, 10.0, &[], false, "A".into()).unwrap();
+        assert_eq!(lost.salvage, pay_for(ScenarioKind::Boarding).unwrap().lost.0, "a loss got the quick bonus");
+        assert!(reward(ScenarioKind::Field, Phase::Won, 1.0, &[], true, "A".into()).is_none());
+        assert!(reward(ScenarioKind::Boarding, Phase::Underway, 1.0, &[], true, "A".into()).is_none());
+    }
+
+    #[test]
     fn a_saved_profile_has_its_guns_out_in_the_world_back() {
         let mut p = Profile::default();
         let lost = Weapon::new(GunKind::Smg, 1, Rarity::Rare);
@@ -260,13 +278,111 @@ mod tests {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Mission pay.
+
+/// What a scenario pays each crew member: (salvage, experience) for a win
+/// and for a loss, and the time to beat (s) for a quick win's bonus.
+#[derive(Clone, Copy, Debug)]
+pub struct Pay {
+    pub won: (u32, u32),
+    pub lost: (u32, u32),
+    pub par: f32,
+}
+
+/// The pay table. A scenario that isn't a mission (the field, the gallery)
+/// pays nothing.
+pub fn pay_for(kind: ScenarioKind) -> Option<Pay> {
+    Some(match kind {
+        ScenarioKind::Boarding => Pay { won: (300, 400), lost: (60, 120), par: 300.0 },
+        ScenarioKind::GrappleRun => Pay { won: (150, 200), lost: (30, 60), par: 150.0 },
+        ScenarioKind::DeadShip => Pay { won: (250, 350), lost: (50, 100), par: 420.0 },
+        ScenarioKind::Field | ScenarioKind::Gallery => return None,
+    })
+}
+
+/// Each thing a crew member did that the scenario credited them with (an
+/// objective: dropped the shield, turned a key), paid on top.
+pub const CREDIT_PAY: (u32, u32) = (25, 40);
+/// A win inside the scenario's par time pays this much more (percent).
+pub const QUICK_BONUS: u32 = 25;
+/// A scenario where getting home is part of it, with everyone home at the
+/// end: this to each.
+pub const ALL_HOME_PAY: (u32, u32) = (40, 50);
+
+/// One crew member's pay for a mission, for the debrief.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Reward {
+    pub name: String,
+    pub salvage: u32,
+    pub xp: u32,
+    /// What it was for ("Win: 300", "Dropped the carrier's shield: 25").
+    pub lines: Vec<String>,
+}
+
+/// What a mission pays a crew member: the scenario's pay for how it
+/// ended, plus their credits, a quick win and everyone getting home.
+pub fn reward(kind: ScenarioKind, phase: Phase, seconds: f32, credits: &[String], all_home: bool, name: String) -> Option<Reward> {
+    let pay = pay_for(kind)?;
+    let mut items: Vec<((u32, u32), String)> = vec![match phase {
+        Phase::Won => (pay.won, "Won".into()),
+        Phase::Lost => (pay.lost, "Lost, but paid".into()),
+        Phase::Underway => return None,
+    }];
+    items.extend(credits.iter().map(|c| (CREDIT_PAY, capitalized(c))));
+    if all_home && scenarios::scenario(kind).homecoming {
+        items.push((ALL_HOME_PAY, "Everyone home".into()));
+    }
+    let sum = |items: &[((u32, u32), String)]| items.iter().fold((0, 0), |(s, x), ((a, b), _)| (s + a, x + b));
+    if phase == Phase::Won && seconds <= pay.par {
+        let (s, x) = sum(&items);
+        items.push(((s * QUICK_BONUS / 100, x * QUICK_BONUS / 100), format!("Inside {}", super::mission::clock(pay.par))));
+    }
+    let (salvage, xp) = sum(&items);
+    let lines = items.iter().map(|((s, x), why)| format!("{why}: {s} salvage, {x} xp")).collect();
+    Some(Reward { name, salvage, xp, lines })
+}
+
+fn capitalized(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+}
+
 /// Authority: when the world is about to change (a scenario's end, or a
-/// switch away from it), every profile's guns still out in it are settled.
-pub fn settle_missions(director: Res<Director>, mut profiles: Query<&mut Profile>) {
+/// switch away from it), every profile is settled: a decided mission pays
+/// its crew (written into the mission, for its debrief), and guns of theirs
+/// still out in the world go back to their stash.
+pub fn settle_missions(
+    director: Res<Director>,
+    tally: Res<CrewTally>,
+    mut mission: Single<&mut Mission>,
+    homes: Query<(), With<HomeShip>>,
+    mut crew: Query<(Entity, &Player, &mut Profile, Option<&Name>), Without<Robot>>,
+) {
     if director.switching().is_none() {
         return;
     }
-    for mut profile in &mut profiles {
+    let decided = mission.phase != Phase::Underway;
+    let seconds = mission.ended.unwrap_or(mission.started).wrapping_sub(mission.started) as f32 / super::TICK_HZ as f32;
+    let aboard = |p: &Player| p.mode.body().is_some_and(|b| homes.contains(b));
+    let all_home = crew.iter().all(|(_, p, ..)| aboard(p));
+    let mut rewards = Vec::new();
+    for (entity, _, mut profile, name) in &mut crew {
         settle_out(&mut profile);
+        if !decided {
+            continue;
+        }
+        let credits = tally.0.get(&entity).map_or(&[][..], |s| &s.credits[..]);
+        let name = name.map_or("?".to_string(), |n| n.to_string());
+        if let Some(r) = reward(mission.kind, mission.phase, seconds, credits, all_home, name) {
+            profile.salvage += r.salvage;
+            profile.xp += r.xp;
+            profile.missions += 1;
+            rewards.push(r);
+        }
+    }
+    rewards.sort_by(|a, b| a.name.cmp(&b.name));
+    if !rewards.is_empty() {
+        mission.rewards = rewards;
     }
 }
