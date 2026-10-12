@@ -268,6 +268,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<HomeShip>().replicate_once();
         app.component::<Site>().replicate_once();
         app.component::<Devices>().replicate();
+        app.component::<crate::sim::mission::BodyId>().replicate_once();
         app.component::<Asteroid>().replicate_once();
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();

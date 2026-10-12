@@ -18,7 +18,8 @@ use super::LocalPlayer;
 use super::combat_fx::{glyph, wrap};
 use crate::sim::SimTick;
 use crate::sim::devices::{Device, DeviceKind, DeviceState, Devices, face_basis};
-use crate::sim::mission::Mission;
+use crate::sim::mission::{BodyId, Mission};
+use crate::sim::player::DeckSlot;
 use crate::sim::ship::ShipHull;
 use crate::sim::TICK_HZ;
 
@@ -318,11 +319,11 @@ fn way_x(k: u8, ways: u8) -> f32 {
 }
 
 /// The local player's next gate on `ship`, if they have one there.
-fn next_gate(mission: Option<&Mission>, local: Option<Entity>, ship: Entity) -> Option<u16> {
+fn next_gate(mission: Option<&Mission>, local: Option<u32>, ship: Option<BodyId>) -> Option<u16> {
     mission?
         .markers
         .iter()
-        .find(|m| m.player.is_some() && m.player == local && m.body == Some(ship))
+        .find(|m| m.player.is_some() && m.player == local && ship.is_some() && m.body == ship)
         .and_then(|m| m.device)
 }
 
@@ -333,13 +334,14 @@ pub fn show_devices(
     tick: Res<SimTick>,
     look: Res<DeviceLook>,
     ships: Query<(&ShipHull, Option<&Devices>)>,
+    ids: Query<&BodyId>,
     mission: Option<Single<&Mission>>,
-    local: Option<Single<Entity, With<LocalPlayer>>>,
+    local: Option<Single<&DeckSlot, With<LocalPlayer>>>,
     mut parts: Query<(&Part, &OfDevice, &mut MeshMaterial3d<StandardMaterial>, &mut Transform, Option<&mut DoorEase>)>,
     mut lights: Query<(&OfDevice, &mut PointLight), With<RoomLight>>,
 ) {
     let mission = mission.as_deref().copied();
-    let local = local.map(|l| *l);
+    let local = local.map(|l| l.0);
     let dt = time.delta_secs();
     let flash = (time.elapsed_secs() * 2.4).fract() < 0.55;
     let state_of = |of: &OfDevice| -> Option<(&'static Device, DeviceState, &Devices)> {
@@ -419,7 +421,7 @@ pub fn show_devices(
                 set(&mut material, if on { &look.selected } else { &look.dark });
             }
             Part::GateStrip => {
-                let next = next_gate(mission, local, of.ship) == Some(of.index);
+                let next = next_gate(mission, local, ids.get(of.ship).ok().copied()) == Some(of.index);
                 set(&mut material, if next { &look.gate_next } else { &look.gate });
             }
         }

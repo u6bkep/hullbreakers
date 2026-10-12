@@ -172,6 +172,8 @@ impl Plugin for SimPlugin {
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
+            .init_resource::<mission::NextBodyId>()
+            .add_observer(mission::name_body::<ship::ShipHull>)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
             .add_systems(
