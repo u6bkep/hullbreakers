@@ -95,6 +95,12 @@ Module(
         (robot: Turret, at: (8.5, 4.5, 27.0), facing: 180.0),
         (robot: Turret, at: (-8.5, 4.5, 27.0), facing: 180.0),
         (robot: Turret, at: (0.0, -0.3, 22.0), facing: 180.0),
+        // Crawlers on the outer hull: the roof aft, each flank, the keel.
+        // (Out from threat 2, one more each level.)
+        (robot: Crawler, at: (-3.0, 6.6, 18.0), facing: 180.0),
+        (robot: Crawler, at: (6.3, 3.0, -6.0)),
+        (robot: Crawler, at: (-6.3, 3.0, 6.0)),
+        (robot: Crawler, at: (0.0, -0.3, -12.0)),
     ],
     markers: {
         // Where boarders come in: the middle of the hangar door's sill.

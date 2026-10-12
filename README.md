@@ -64,12 +64,15 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   nearly doubles the pull. Win with everyone accounted for and at least 4
   of the 8 home; alone you can't reach them all, so split up.
 
-- **Model gallery** (debug): every model under `assets/` in a row behind
-  our ship, turning slowly, labelled with its path and size, sockets drawn
-  as small axes (red +X, green +Y, blue forward), with every robot model's
-  affix parts showing at once. Below it, a labelled row of live robots: each
-  kind, and each with every affix it can have. They don't fight back. You
-  start floating in front of it.
+- **Model gallery** (debug): you start floating behind our ship, with an
+  area to see each way you turn. Ahead, every model under `assets/` in a
+  row, turning slowly, labelled with its path (and its size, for the one
+  under the crosshair), sockets drawn as small axes (red +X, green +Y, blue
+  forward), with every robot model's affix parts showing at once. To the
+  left, a table of live robots: a row per kind, the plain one and then one
+  with each affix it can have; they don't fight back. To the right, every
+  weapon part; behind, a dozen rolled guns. An area's labels show only
+  while you face it.
 
 You start (and respawn) with the base kit: your suit and its grapple. Guns
 are in the **weapons locker** on the starboard wall of our ship's aft hold
@@ -97,7 +100,7 @@ A gun looks like what it rolled: it's drawn from its frame's receiver with
 each of its parts on (a long barrel is long, a drum is a drum, a quick mag
 is two taped together, a compensator is ported, a scope has a big objective
 bell), in its maker's paint, in your hands, your crewmates' and on pickups.
-The model gallery has racks of every part and a row of rolled guns.
+The model gallery has a wall of every part and two rows of rolled guns.
 
 Robots drop things when destroyed (mostly ammo, sometimes a gun, better from
 tougher robots), and the enemy carrier has **loot crates** aboard, better
@@ -139,6 +142,13 @@ weak-spot hits (magenta) and kills (an X); robots don't heal. Four kinds:
   approach to the hangar: a searchlight sweeps for anyone crossing, and the
   slow shells lead you, so change your velocity. Weak spot: the coolant
   core at the back of the base.
+- **Hull crawlers**: six-legged things on magnetic feet that walk any
+  surface, inside or out, and take the ones you don't: over the outer hull
+  to come at you mid-crossing from the far side, up walls and across
+  ceilings to drop their spray on you from above. You hear them through the
+  hull (a clack of feet, a clamp as they take a new surface) before you see
+  them. Weak spot: the magenta core in the cowl on the back, best shot from
+  above.
 
 Robots can have **affixes**, each shown on the model: **Armoured** (dark
 slabs; body hits do 30%, the weak spot is soft), **Shielded** (a shell that
@@ -152,10 +162,11 @@ shot, its aim locking just before it fires: move then) and **Leader**
 (Gunners: an antenna mast and crest; robots near it aim and fire better, their
 lights pulsing gold with its beacon, until it dies). A ship is crewed for a
 **threat** level that sets how many affixes, and which kinds man which
-posts (`sim::bots::crew`); the boarding action's carrier is threat 3: two
-Grapplers, three turrets, a Leader on the bridge and six affixes. The model
-gallery has a row of every kind with each of its affixes, dormant but
-shootable.
+posts (`sim::bots::crew`); crawlers come from threat 2 (one fewer than the
+threat). The boarding action's carrier is threat 3: two Grapplers, three
+turrets, two crawlers on its hull, a Leader on the bridge and six affixes.
+The model gallery has a row of every kind with each of its affixes,
+dormant but shootable.
 
 The F1 panel can spawn a Gunner on our bridge or three Swarmers off our
 port side, for trying out a fight.

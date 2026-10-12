@@ -463,7 +463,7 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
                     problems.push(format!("post {i} ({:?} at {}): inside the hull", post.robot, post.at));
                 }
             }
-            Gait::Mount => {
+            Gait::Mount | Gait::Crawler => {
                 if bots::mount(ship, post.at).is_none() {
                     problems.push(format!("post {i} ({:?} at {}): not on an open hull surface", post.robot, post.at));
                 }

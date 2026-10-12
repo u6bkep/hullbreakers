@@ -41,14 +41,16 @@ fn build(stage: &mut Stage) -> Entity {
     ));
     let home = stage.commands.spawn(ship::drifting_home_ship()).id();
     if stage.robots {
-        crate::sim::bots::spawn_zoo(stage.commands, stage.tuning, home, GALLERY_AT + ZOO_OFFSET);
+        crate::sim::bots::spawn_zoo(stage.commands, stage.tuning, home, GALLERY_AT + ZOO_OFFSET, ZOO_TURN);
     }
     home
 }
 
-/// Where the gallery's robots float, from its row of models: below them,
-/// nearer the visitors.
-const ZOO_OFFSET: Vec3 = Vec3::new(0.0, -3.0, 3.0);
+/// Where the gallery's robots float, from its row of models: a table on a
+/// wall to the left of where visitors start (7 m in front of the row),
+/// facing them.
+const ZOO_OFFSET: Vec3 = Vec3::new(-13.0, 0.0, 7.0);
+const ZOO_TURN: Quat = Quat::from_xyzw(0.0, std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2);
 
 /// Puts a player in front of the gallery's row, facing it (−Z), floating
 /// beside the others.

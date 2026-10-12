@@ -11,6 +11,8 @@
 //! - From **threat 1** the mounts are manned (Turrets), and some walkers'
 //!   posts get a Grappler instead of a Gunner: one at threat 1–2, two at
 //!   3–4, three from 5.
+//! - From **threat 2** Crawlers come out on the hull: one at threat 2, and
+//!   one more each level up, as far as the design has crawlers' posts.
 //! - From **threat 2** a Leader stands at the walker's post deepest in the
 //!   ship (furthest from the boarders' entry): the one guarding the
 //!   objective.
@@ -49,10 +51,21 @@ pub struct Posting {
 pub fn compose_crew(design: &ShipDesign, threat: Threat, seed: u64) -> Vec<Posting> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let t = threat.0;
+    let crawlers = (t as usize).saturating_sub(1);
     let mut crew: Vec<Posting> = design
         .posts
         .iter()
         .filter(|post| post.robot.gait() != Gait::Mount || t >= 1)
+        .filter({
+            let mut seen = 0;
+            move |post| {
+                if post.robot.gait() != Gait::Crawler {
+                    return true;
+                }
+                seen += 1;
+                seen <= crawlers
+            }
+        })
         .map(|post| Posting {
             robot: post.robot,
             affixes: Affixes::NONE,
@@ -119,7 +132,7 @@ pub fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design:
                 let feet = post.at + Vec3::Y * 0.01;
                 (booted(ship, feet, Vec3::Y, post.rotation()), feet)
             }
-            Gait::Mount => {
+            Gait::Mount | Gait::Crawler => {
                 let Some(up) = mount(design, post.at) else {
                     warn!("{}: post {i} ({:?} at {}) is on no hull surface", design.id, post.robot, post.at);
                     continue;
@@ -188,43 +201,53 @@ pub fn mount(design: &ShipDesign, at: Vec3) -> Option<Vec3> {
     })
 }
 
-/// The gallery's robots, set out below its row of models (`at` is the
-/// row's middle, in `home`'s frame): every kind plain, then every affix it
-/// can have, one at a time. They're dormant: they hold still and don't
-/// fight back, but can be shot (and their affixes work: shells, armour,
-/// blasts).
-pub fn spawn_zoo(commands: &mut Commands, tuning: &Tuning, home: Entity, at: Vec3) {
-    let mut exhibits: Vec<(Robot, Affixes)> = Vec::new();
-    for kind in Robot::ALL {
-        exhibits.push((kind, Affixes::NONE));
-        for affix in Affix::ALL {
-            if affix.fits(kind) {
-                exhibits.push((kind, Affixes::of(&[affix])));
-            }
+/// The gallery's robots, as a table on a wall facing the visitors: a row
+/// per kind, its plain one first and then one with each affix it can have.
+/// `at` is the table's middle (in `home`'s frame), and `turn` takes its
+/// rows (along +X) and its face (+Z, toward the visitors) to where they
+/// go. They're dormant: they hold still and don't fight back, but can be
+/// shot (and their affixes work: shells, armour, blasts).
+pub fn spawn_zoo(commands: &mut Commands, tuning: &Tuning, home: Entity, at: Vec3, turn: Quat) {
+    let rows: Vec<Vec<Affixes>> = Robot::ALL
+        .iter()
+        .map(|kind| {
+            std::iter::once(Affixes::NONE)
+                .chain(Affix::ALL.into_iter().filter(|a| a.fits(*kind)).map(|a| Affixes::of(&[a])))
+                .collect()
+        })
+        .collect();
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(1);
+    let mut i = 0;
+    for (r, (kind, row)) in Robot::ALL.into_iter().zip(&rows).enumerate() {
+        for (c, affixes) in row.iter().copied().enumerate() {
+            i += 1;
+            let place = Vec3::new(
+                (c as f32 - (columns as f32 - 1.0) / 2.0) * ZOO_COLUMN,
+                ((rows.len() as f32 - 1.0) / 2.0 - r as f32) * ZOO_ROW,
+                0.0,
+            );
+            let post = at + turn * place;
+            // Facing the visitors, turned a little so they show a side.
+            let mode = Mode::Eva {
+                position: post,
+                velocity: Vec3::ZERO,
+                orientation: turn * Quat::from_rotation_y(PI * 0.85),
+                pitch: 0.0,
+            };
+            let mut robot = commands.spawn(new_robot(kind, affixes, mode, home, post, tuning, i as u32));
+            robot.insert(Name::new(affixes.describe(kind)));
+            robot.queue(|mut entity: EntityWorldMut| {
+                if let Some(mut brain) = entity.get_mut::<Brain>() {
+                    brain.dormant = true;
+                }
+            });
         }
-    }
-    let first = -(exhibits.len() as f32 - 1.0) * ZOO_SPACING / 2.0;
-    for (i, (kind, affixes)) in exhibits.into_iter().enumerate() {
-        let post = at + Vec3::new(first + i as f32 * ZOO_SPACING, 0.0, 0.0);
-        // Facing the visitors (+Z), a quarter turned so they show a side.
-        let mode = Mode::Eva {
-            position: post,
-            velocity: Vec3::ZERO,
-            orientation: Quat::from_rotation_y(PI * 0.8),
-            pitch: 0.0,
-        };
-        let mut robot = commands.spawn(new_robot(kind, affixes, mode, home, post, tuning, i as u32));
-        robot.insert(Name::new(affixes.describe(kind)));
-        robot.queue(|mut entity: EntityWorldMut| {
-            if let Some(mut brain) = entity.get_mut::<Brain>() {
-                brain.dormant = true;
-            }
-        });
     }
 }
 
-/// Room between the gallery's robots (m).
-const ZOO_SPACING: f32 = 2.6;
+/// The gallery's robot table: room per column and per row (m).
+const ZOO_COLUMN: f32 = 3.0;
+const ZOO_ROW: f32 = 2.8;
 
 #[cfg(test)]
 mod tests {
@@ -244,6 +267,7 @@ mod tests {
         let crew = compose_crew(carrier, Threat(0), 1);
         assert!(crew.iter().all(|p| p.affixes.is_empty() && p.robot == p.post.robot));
         assert!(crew.iter().all(|p| p.robot.gait() != Gait::Mount), "turrets at threat 0");
+        assert!(crew.iter().all(|p| p.robot != Robot::Crawler), "crawlers at threat 0");
     }
 
     #[test]
@@ -257,6 +281,8 @@ mod tests {
             assert!(crew.iter().all(|p| p.affixes.len() <= 1));
             assert!(crew.iter().all(|p| p.affixes.iter().all(|a| a.fits(p.robot))));
             assert_eq!(crew.iter().filter(|p| p.robot == Robot::Grappler).count(), 2);
+            // Two crawlers out on the hull at threat 3.
+            assert_eq!(crew.iter().filter(|p| p.robot == Robot::Crawler).count(), 2);
             assert!(crew.iter().any(|p| p.robot == Robot::Turret));
             let leaders: Vec<_> = crew.iter().filter(|p| p.affixes.has(Affix::Leader)).collect();
             assert_eq!(leaders.len(), 1);
