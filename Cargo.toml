@@ -34,6 +34,9 @@ profile-trace = ["bevy/trace_chrome"]
 
 [profile.dev]
 opt-level = 1
+# Debug info stays in the object files instead of being copied into every
+# linked binary (each test binary was ~1 GB, ~860 MB of it debug info).
+split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
 opt-level = 3

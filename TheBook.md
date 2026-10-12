@@ -365,3 +365,19 @@ it.
   (what `ControlledBy::owner` holds). An entity without the filter
   component has the scoped components hidden from every client, which is
   what the host's own player wants. Cost: an hour.
+
+## Build cache (cargo, rustc)
+
+- 2026-10-12. Several agents building in their own worktrees filled the
+  disk twice in one day. Every dependency built with full debug info made
+  each test binary 2.4 GB, and stale test binaries pile up in
+  `target/debug/deps` (cargo never removes an old hash). Measures taken:
+  line tables only for dependencies (8a88503); `split-debuginfo =
+  "unpacked"` for our own code, so debug info stays in the object files
+  instead of being copied into every linked binary (1.16 GB → 0.56 GB per
+  binary); and cargo's `no-embed-metadata`, which is nightly-only, so the
+  repo now pins a nightly in `rust-toolchain.toml`. A full `target/debug`
+  is about 20 GB, down from 38 GB. Cost: a nightly toolchain, two full
+  rebuilds, and a prune script run by hand (old binaries per test target,
+  keep the newest). Stale binaries still accumulate; a `cargo sweep` habit
+  or a tool of our own would close that.
