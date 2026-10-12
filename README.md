@@ -17,7 +17,7 @@ The crew's ship has a **mission wall** on the port side of the bridge: click
 a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
 **asteroid field**, and its button takes you back there.
-`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `gallery`) starts in
+`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `recovery`, `gallery`) starts in
 another. When a mission is decided a banner says how; back in the field, the
 **debrief** gives its report, every crew member's score card (time in vacuum,
 longest swing on one rope, presses, deaths, and what they did) and awards.
@@ -52,6 +52,17 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   (alone, key B holds 5 s: race to key A). Release the data core's clamp,
   take the core off its cradle (it goes in your pack), and get it and
   everyone back aboard in the 75 s before the tripped reactor goes.
+
+- **Recovery**: a ship has broken up nearby and its crew is adrift in the
+  wreckage, scattered in every direction: four suited survivors and a
+  lifeboat with four aboard, each on a clock of air (the nearest run out
+  first, from about 2:20). Their beacons ping in turn every 4 s (flashing
+  amber on the pod, red when the air is nearly gone). Rope one and tow it
+  into our hold; let go of the keys while towing and flight assist keeps
+  station with what you tow instead of braking (so it doesn't run into
+  you). A survivor is light; the lifeboat is 600 kg, so a second rope on it
+  nearly doubles the pull. Win with everyone accounted for and at least 4
+  of the 8 home; alone you can't reach them all, so split up.
 
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn
@@ -259,7 +270,13 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     despawns the world, spawns the scenario's, and respawns every player on
     deck (`Respawned`, a view relocation). `Mission` is replicated for the
     HUD: the objective, a status board, markers (label, place, kind, for an
-    objective-marker list), the banner, the report and the debrief.
+    objective-marker list), the banner, the report and the debrief, and the
+    report as numbers (`results`: `won`, `seconds`, and each scenario's
+    own, such as `survivors_home`) for whatever pays out on them. Markers
+    name their body by `BodyId` (given by the authority, replicated with the
+    body) and their player by deck slot, never by entity, so a client that
+    hasn't received the body yet finds nothing rather than something
+    wrong.
   - **Devices** (`sim/devices.rs`) are placed by designs as data (see
     [docs/ships.md](docs/ships.md)) and wired by conditions over each other.
     They're pressed through the same interact path as buttons; the

@@ -30,6 +30,7 @@ pub mod dead_ship;
 pub mod field;
 pub mod gallery;
 pub mod grapple_run;
+pub mod recovery;
 
 /// What a scenario's world is built with.
 pub struct Stage<'a, 'w, 's> {
@@ -71,6 +72,7 @@ pub fn scenario(kind: ScenarioKind) -> &'static Scenario {
         ScenarioKind::Boarding => &boarding::SCENARIO,
         ScenarioKind::GrappleRun => &grapple_run::SCENARIO,
         ScenarioKind::DeadShip => &dead_ship::SCENARIO,
+        ScenarioKind::Recovery => &recovery::SCENARIO,
         ScenarioKind::Gallery => &gallery::SCENARIO,
     }
 }

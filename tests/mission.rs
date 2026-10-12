@@ -11,7 +11,7 @@ use hullbreakers::sim::combat::{Beams, Combatant};
 use hullbreakers::sim::events::{Detach, PlayerEvent};
 use hullbreakers::sim::flight::Flight;
 use hullbreakers::sim::input::PlayerInput;
-use hullbreakers::sim::mission::{Debris, Director, Mission, Phase, ScenarioKind};
+use hullbreakers::sim::mission::{Debris, Director, MarkerKind, Mission, Phase, ScenarioKind};
 use hullbreakers::sim::player::{Mode, Player};
 use hullbreakers::sim::design::design;
 use hullbreakers::sim::devices::Devices;
@@ -669,6 +669,7 @@ fn the_dead_ship_can_be_won() {
     }
     assert!(card.presses >= 9, "{} presses", card.presses);
     assert!(debrief.lines.iter().any(|l| l.starts_with("Reactor restarted by Player 1")), "{:?}", debrief.lines);
+    assert_eq!(debrief.results.iter().find(|(n, _)| n == "core_home").map(|r| r.1), Some(1.0));
 }
 
 /// A pull pulled before its power comes counts when the power does: the
@@ -780,4 +781,234 @@ fn the_grapple_run_is_lost_when_the_clock_runs_out() {
     let m = mission(&mut app);
     assert_eq!((m.phase, m.outcome.as_str()), (Phase::Lost, "OUT OF TIME"));
     assert!(m.report.iter().any(|l| l.contains("out of time at gate 4 of 10")), "{:?}", m.report);
+}
+
+// ---------------------------------------------------------------------------
+// Recovery
+
+use hullbreakers::sim::scenarios::recovery::{NEEDED, Pod, PodKind, PodState};
+
+fn pods(app: &mut App) -> Vec<(Entity, Pod)> {
+    let world = app.world_mut();
+    let mut pods: Vec<(Entity, Pod)> = world.query::<(Entity, &Pod)>().iter(world).map(|(e, p)| (e, *p)).collect();
+    pods.sort_by_key(|(_, p)| p.index);
+    pods
+}
+
+/// Puts a pod in our hold (where the crew would tow it).
+fn deliver(app: &mut App, pod: Entity) {
+    let ship = home(app);
+    let at = frame(app, ship).point_to_world(Vec3::new(0.0, 1.2, 8.0));
+    app.world_mut().get_mut::<Position>(pod).unwrap().0 = at;
+    app.world_mut().get_mut::<LinearVelocity>(pod).unwrap().0 = Vec3::ZERO;
+    ticks(app, 2);
+}
+
+#[test]
+fn the_recovery_crew_is_adrift_and_pings_in_turn() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Recovery);
+    let pods = pods(&mut app);
+    assert_eq!(pods.len(), 5);
+    assert_eq!(pods.iter().filter(|(_, p)| p.kind == PodKind::Lifeboat).count(), 1);
+    // Every beacon pings within a period, and not all at once.
+    let mut heard = std::collections::BTreeSet::new();
+    let mut most = 0;
+    for _ in 0..(4.0 * 60.0) as usize {
+        ticks(&mut app, 1);
+        let markers = mission(&mut app).markers;
+        let goals: Vec<String> = markers.iter().filter(|m| m.kind == MarkerKind::Goal).map(|m| m.label.clone()).collect();
+        most = most.max(goals.len());
+        heard.extend(goals);
+    }
+    assert_eq!(heard.len(), 5, "heard {heard:?}");
+    assert!(most <= 2, "{most} beacons at once");
+    let status = mission(&mut app).status;
+    assert!(status[0].starts_with("Home: 0 of 8"), "{status:?}");
+    assert!(status[1].starts_with("Survivor A"), "{status:?}");
+}
+
+#[test]
+fn recovery_is_won_with_everyone_home_and_credits_who_towed() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Recovery);
+    let pods = pods(&mut app);
+    // A rope on the lifeboat: that's towing.
+    let (boat, _) = *pods.iter().find(|(_, p)| p.kind == PodKind::Lifeboat).unwrap();
+    set_player(&mut app, |p| {
+        p.grapple = Some(hullbreakers::sim::player::Grapple {
+            target: boat,
+            anchor: Vec3::ZERO,
+            length: 500.0,
+            tension: 0.0,
+        });
+    });
+    ticks(&mut app, 2);
+    assert!(mission(&mut app).markers.iter().any(|m| m.label == "Hold"), "no marker on the hold while towing");
+    for (pod, _) in &pods {
+        deliver(&mut app, *pod);
+    }
+    let m = mission(&mut app);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Won, "EVERYONE HOME"));
+    assert_eq!(m.result_of("survivors_home"), Some(8.0));
+    assert!(m.report.iter().any(|l| l.starts_with("Lifeboat E home at") && l.ends_with("by Player 1.")), "{:?}", m.report);
+    ticks(&mut app, (hullbreakers::sim::scenarios::BANNER_SECONDS * 60.0) as usize + 5);
+    let debrief = mission(&mut app).debrief.expect("no debrief");
+    assert!(debrief.crew[0].credits.iter().any(|c| c == "brought Lifeboat E home"), "{:?}", debrief.crew[0].credits);
+    assert_eq!(debrief.results.iter().find(|(n, _)| n == "won").map(|r| r.1), Some(1.0));
+}
+
+#[test]
+fn recovery_is_lost_once_too_few_can_be_saved() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Recovery);
+    let pods = pods(&mut app);
+    // One survivor home; the lifeboat's air is out (5 of 8 can still be saved).
+    deliver(&mut app, pods[0].0);
+    let run_out = |app: &mut App, pod: Entity| {
+        app.world_mut().get_mut::<Pod>(pod).unwrap().oxygen_until = 0;
+        ticks(app, 2);
+    };
+    run_out(&mut app, pods[4].0);
+    assert_eq!(app.world().get::<Pod>(pods[4].0).unwrap().state, PodState::Lost);
+    assert_eq!(mission(&mut app).phase, Phase::Underway);
+    // Two more lost: 1 home and 1 adrift is under NEEDED.
+    run_out(&mut app, pods[1].0);
+    run_out(&mut app, pods[2].0);
+    let m = mission(&mut app);
+    assert!(1 + 1 < NEEDED);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Lost, "RESCUE FAILED"));
+    assert!(m.report.iter().any(|l| l.contains("ran out of air")), "{:?}", m.report);
+}
+
+/// Ropes a survivor 6 m behind a player `out` metres behind our stern,
+/// facing the cargo door; returns the pod.
+fn rope_a_survivor(app: &mut App, out: f32) -> Entity {
+    let ship = home(app);
+    let (pod, _) = pods(app)[0];
+    let ours = frame(app, ship);
+    let start = ours.point_to_world(Vec3::new(0.0, 1.2, 15.0 + out));
+    let behind = ours.point_to_world(Vec3::new(0.0, 1.2, 21.0 + out));
+    app.world_mut().get_mut::<Position>(pod).unwrap().0 = behind;
+    app.world_mut().get_mut::<LinearVelocity>(pod).unwrap().0 = Vec3::ZERO;
+    app.world_mut().get_mut::<AngularVelocity>(pod).unwrap().0 = Vec3::ZERO;
+    set_player(app, |p| {
+        p.mode = Mode::Eva {
+            position: start,
+            velocity: Vec3::ZERO,
+            orientation: ours.rotation,
+            pitch: 0.0,
+        };
+        p.reference_body = Some(ship);
+        p.grapple = Some(hullbreakers::sim::player::Grapple {
+            target: pod,
+            anchor: Vec3::ZERO,
+            length: 6.0,
+            tension: 0.0,
+        });
+    });
+    pod
+}
+
+/// Towing a survivor on a rope (the rope is inelastic, so a tow can't
+/// bounce): fly toward our ship pulling them, then let go of the keys and
+/// let flight assist brake. The survivor coasts on toward us, slowly, and
+/// the rope never yo-yos (measured: one slack/taut change, closing at about
+/// half a metre a second).
+#[test]
+fn towing_a_survivor_is_steady() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Recovery);
+    // Far out, so nothing's in the way.
+    let pod = rope_a_survivor(&mut app, 200.0);
+    let separation = |app: &mut App| {
+        let p = player(app);
+        let Mode::Eva { position, velocity, .. } = p.mode else { panic!("not in EVA") };
+        let pod_at = app.world().get::<Position>(pod).unwrap().0;
+        let pod_v = app.world().get::<LinearVelocity>(pod).unwrap().0;
+        (pod_at.distance(position), (pod_v - velocity).dot((pod_at - position).normalize()))
+    };
+    walk_forward(&mut app, true);
+    ticks(&mut app, 180);
+    let (_, towing) = separation(&mut app);
+    walk_forward(&mut app, false);
+    let (mut flips, mut was_taut, mut worst) = (0, true, 0.0f32);
+    for _ in 0..600 {
+        ticks(&mut app, 1);
+        let (d, closing) = separation(&mut app);
+        let taut = d > 5.9;
+        if taut != was_taut {
+            flips += 1;
+            was_taut = taut;
+        }
+        worst = worst.max(closing.abs());
+    }
+    eprintln!("tow: {towing:.2} m/s along the rope while towing; braking, {flips} slack/taut changes, at most {worst:.2} m/s along the rope");
+    assert!(flips <= 3, "{flips} slack/taut changes: a yo-yo");
+    assert!(worst < 1.0, "{worst:.2} m/s along the rope");
+}
+
+/// A straight tow, into the cargo door and up to the bulkhead, brings the
+/// survivor into the hold behind us.
+#[test]
+fn a_straight_tow_brings_a_survivor_home() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Recovery);
+    rope_a_survivor(&mut app, 40.0);
+    walk_forward(&mut app, true);
+    for second in 0..30 {
+        ticks(&mut app, 60);
+        let m = mission(&mut app);
+        if m.report.iter().any(|l| l.starts_with("Survivor A home")) {
+            eprintln!("towed home in {} s", second + 1);
+            return;
+        }
+    }
+    panic!("never got the survivor home: {:?}", player(&mut app).mode);
+}
+
+/// The lifeboat is heavy: two ropes on it pull it about twice as fast as
+/// one.
+#[test]
+fn two_ropes_tow_the_lifeboat_faster_than_one() {
+    use hullbreakers::sim::player::{DeckSlot, Grapple, new_player};
+    let lifeboat_speed = |crew: u32| {
+        let mut app = app();
+        start(&mut app, ScenarioKind::Recovery);
+        let ship = home(&mut app);
+        for slot in 1..crew {
+            let tuning = Tuning::default();
+            app.world_mut().spawn((new_player(ship, slot), Vitals::full(&tuning)));
+        }
+        ticks(&mut app, 2);
+        let (boat, _) = *pods(&mut app).iter().find(|(_, p)| p.kind == PodKind::Lifeboat).unwrap();
+        let ours = frame(&mut app, ship);
+        let behind = ours.point_to_world(Vec3::new(0.0, 1.2, 221.0));
+        app.world_mut().get_mut::<Position>(boat).unwrap().0 = behind;
+        app.world_mut().get_mut::<LinearVelocity>(boat).unwrap().0 = Vec3::ZERO;
+        app.world_mut().get_mut::<AngularVelocity>(boat).unwrap().0 = Vec3::ZERO;
+        let world = app.world_mut();
+        for (slot, mut p, mut input) in world.query_filtered::<(&DeckSlot, &mut Player, &mut PlayerInput), Without<Robot>>().iter_mut(world) {
+            let at = ours.point_to_world(Vec3::new(slot.0 as f32 * 2.0 - 1.0, 1.2, 213.0));
+            p.mode = Mode::Eva {
+                position: at,
+                velocity: Vec3::ZERO,
+                orientation: ours.rotation,
+                pitch: 0.0,
+            };
+            p.reference_body = Some(ship);
+            p.grapple = Some(Grapple {
+                target: boat,
+                anchor: Vec3::ZERO,
+                length: at.distance(behind),
+                tension: 0.0,
+            });
+            input.movement = Vec3::Z;
+        }
+        ticks(&mut app, 120);
+        app.world().get::<LinearVelocity>(boat).unwrap().0.length()
+    };
+    let (alone, together) = (lifeboat_speed(1), lifeboat_speed(2));
+    eprintln!("lifeboat after 2 s of towing: {alone:.2} m/s alone, {together:.2} m/s with two");
+    assert!(together > alone * 1.6, "alone {alone:.2}, two {together:.2}");
 }

@@ -100,6 +100,7 @@ impl Plugin for SimSharedPlugin {
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid)
             .add_observer(mission::shape_debris)
+            .add_observer(scenarios::recovery::shape_pod)
             // A ship's closed doors are part of its collider, wherever it is.
             .add_systems(
                 FixedPostUpdate,
@@ -174,6 +175,9 @@ impl Plugin for SimPlugin {
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
+            .init_resource::<mission::NextBodyId>()
+            .add_observer(mission::name_body::<ship::ShipHull>)
+            .add_observer(mission::name_body::<scenarios::recovery::Pod>)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
             .add_systems(

@@ -13,7 +13,7 @@ use crate::sim::bots::{self, Robot};
 use crate::sim::combat::Combatant;
 use crate::sim::design::ShipDesign;
 use crate::sim::flight::{Duel, Flight, Path};
-use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, break_up, presses};
+use crate::sim::mission::{CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, break_up, presses};
 use crate::sim::player::Player;
 use crate::sim::ship::{self, ControlAction, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
@@ -153,6 +153,7 @@ fn drop_shields(
             ship.shield = false;
             let name = players.get(who).ok().and_then(|(_, _, n)| n).map_or("?".to_string(), |n| n.to_string());
             mission.report.push(format!("Shield dropped by {name}. Remember that name."));
+            mission.result("shield_dropped", 1.0);
             tally.credit(who, "dropped the carrier's shield");
         }
     }
@@ -208,6 +209,7 @@ fn settle_battle(
 fn show(
     mission: Single<&mut Mission>,
     ships: Query<(Entity, &Combatant, &ShipHull, Has<HomeShip>)>,
+    marked: MarkedBodies,
 ) {
     let mut mission = mission.into_inner();
     let enemy = ships.iter().find(|(.., home)| !home);
@@ -221,22 +223,14 @@ fn show(
     };
     let mut markers = Vec::new();
     match (enemy, home) {
-        (Some((carrier, _, hull, _)), _) if shield_up => markers.push(Marker {
-            label: "Shield console".into(),
-            kind: MarkerKind::Goal,
-            body: Some(carrier),
-            at: hull.design().marker("objective"),
-            player: None,
-            device: None,
-        }),
-        (_, Some(home)) if mission.phase != Phase::Lost => markers.push(Marker {
-            label: "Ship".into(),
-            kind: MarkerKind::Exit,
-            body: Some(home),
-            at: Vec3::new(0.0, 1.5, 0.0),
-            player: None,
-            device: None,
-        }),
+        (Some((carrier, _, hull, _)), _) if shield_up => markers.extend(
+            marked
+                .id(carrier)
+                .map(|c| Marker::on(c, hull.design().marker("objective"), "Shield console", MarkerKind::Goal)),
+        ),
+        (_, Some(home)) if mission.phase != Phase::Lost => {
+            markers.extend(marked.id(home).map(|h| Marker::on(h, Vec3::new(0.0, 1.5, 0.0), "Ship", MarkerKind::Exit)))
+        }
         _ => {}
     }
     Mission::show(&mut mission, objective.into(), Vec::new(), markers);

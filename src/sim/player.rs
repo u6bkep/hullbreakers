@@ -1025,6 +1025,10 @@ pub fn player_tick(
     }
 }
 
+/// The heaviest thing (kg, along the rope) flight assist treats as a tow
+/// rather than an anchor: survivors, lifeboats, wreckage; not rocks.
+const TOW_MAX_MASS: f32 = 1000.0;
+
 /// How far away a body can be picked as the reference frame.
 const REFERENCE_RANGE: f32 = 2000.0;
 
@@ -1626,6 +1630,15 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
         .filter(|_| cmd.reel_in)
         .and_then(|g| rope_point(ctx, bodies, &g));
     let swinging = !cmd.reel_in && player.grapple.is_some_and(|g| g.tension > 0.0);
+    // Towing: a rope on something light enough to tow (not a rock). With
+    // no input the assist keeps station with the load (how fast its end of
+    // the rope is going) instead of braking, so a tow you let go of coasts
+    // with you rather than overrunning you.
+    let towing = player.grapple.filter(|_| !cmd.reel_in).and_then(|g| {
+        let end = far_end(bodies, &g)?;
+        let along = (end.point - position).normalize_or_zero();
+        (end.inverse_mass(along) > 1.0 / TOW_MAX_MASS).then(|| end.velocity())
+    });
     let thrust_dv = if cmd.brake {
         (reference_velocity - velocity).clamp_length_max(t.brake_accel * ctx.dt)
     } else if player.flight_assist && !(swinging && input == Vec3::ZERO) {
@@ -1639,6 +1652,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
                 let offset = anchor - position;
                 anchor_velocity + offset.normalize_or_zero() * winch_speed(offset.length(), t)
             }
+            _ if input == Vec3::ZERO && towing.is_some() => towing.unwrap_or_default(),
             _ => reference_velocity + input * t.assist_max_speed * boost,
         };
         (target - velocity).clamp_length_max(max_dv)

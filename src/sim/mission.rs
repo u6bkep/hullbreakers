@@ -19,7 +19,7 @@
 use std::collections::BTreeMap;
 
 use avian3d::prelude::*;
-use bevy::ecs::entity::MapEntities;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -48,17 +48,20 @@ pub enum ScenarioKind {
     GrappleRun,
     /// A dark derelict: bring its power back, open its vault, get out.
     DeadShip,
+    /// A wreck's crew adrift on the clock: find them by beacon, tow them home.
+    Recovery,
     /// Every model in the game set out behind our ship, for review.
     Gallery,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 5] = [
+    pub const ALL: [ScenarioKind; 6] = [
         ScenarioKind::Field,
         ScenarioKind::Boarding,
         ScenarioKind::GrappleRun,
         ScenarioKind::DeadShip,
+        ScenarioKind::Recovery,
         ScenarioKind::Gallery,
     ];
 
@@ -114,6 +117,8 @@ pub struct Debrief {
     pub outcome: String,
     /// The scenario's report, then who made it home.
     pub lines: Vec<String>,
+    /// The report as numbers (see [`Mission::result`]).
+    pub results: Vec<(String, f32)>,
     /// Everyone's score card, by name.
     pub crew: Vec<CrewCard>,
     /// The best of the score cards ("Longest swing: Player 2, 84 m").
@@ -133,49 +138,114 @@ pub enum MarkerKind {
     Exit,
 }
 
+/// A body's name for what refers to it across the network: given by the
+/// authority when the body appears, replicated with it, never reused. A
+/// marker names its body by this rather than by entity, so a client that
+/// hasn't received the body yet finds no body (and draws nothing) instead
+/// of a wrong one: an entity reference would arrive unmapped and could
+/// alias anything.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BodyId(pub u32);
+
+/// Authority: the next [`BodyId`].
+#[derive(Resource, Default)]
+pub struct NextBodyId(u32);
+
+/// Authority: names every new body of a kind that markers can be on
+/// (ships and sites, pods).
+pub fn name_body<C: Component>(add: On<Add, C>, mut next: ResMut<NextBodyId>, mut commands: Commands) {
+    commands.entity(add.entity).insert(BodyId(next.0));
+    next.0 += 1;
+}
+
+/// Finds the bodies markers are on, wherever the markers are read.
+#[derive(SystemParam)]
+pub struct MarkedBodies<'w, 's> {
+    bodies: Query<'w, 's, (Entity, &'static BodyId)>,
+}
+
+impl MarkedBodies<'_, '_> {
+    /// The body called `id` here, if it's arrived.
+    pub fn entity(&self, id: BodyId) -> Option<Entity> {
+        self.bodies.iter().find(|(_, b)| **b == id).map(|(e, _)| e)
+    }
+
+    /// The name of `entity`, if it has one yet.
+    pub fn id(&self, entity: Entity) -> Option<BodyId> {
+        self.bodies.get(entity).ok().map(|(_, b)| *b)
+    }
+}
+
 /// A place the HUD can point the crew to.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Marker {
     pub label: String,
     pub kind: MarkerKind,
     /// The body it's on (`at` in its coordinates), or `None` for a point in
-    /// the world.
-    pub body: Option<Entity>,
+    /// the world. Find it with [`MarkedBodies::entity`]; a marker whose body
+    /// isn't there (yet) isn't anywhere.
+    pub body: Option<BodyId>,
     pub at: Vec3,
-    /// Only this player's marker (`None`: everyone's).
-    pub player: Option<Entity>,
+    /// Only this player's marker, by their [`DeckSlot`] (`None`:
+    /// everyone's).
+    pub player: Option<u32>,
     /// The device it is, if it's one (an index into `body`'s design's
     /// devices), so it can be drawn as the thing to go to.
     pub device: Option<u16>,
 }
 
 impl Marker {
-    /// Where it is, given its body's frame (if it has a body).
-    pub fn position(&self, frame: Option<&BodyFrame>) -> Vec3 {
-        match (self.body, frame) {
-            (Some(_), Some(frame)) => frame.point_to_world(self.at),
-            _ => self.at,
+    /// A marker at `at` on `body`.
+    pub fn on(body: BodyId, at: Vec3, label: &str, kind: MarkerKind) -> Marker {
+        Marker {
+            label: label.to_string(),
+            kind,
+            body: Some(body),
+            at,
+            player: None,
+            device: None,
+        }
+    }
+
+    /// A marker at a point in the world.
+    pub fn at(at: Vec3, label: &str, kind: MarkerKind) -> Marker {
+        Marker {
+            body: None,
+            ..Marker::on(BodyId(0), at, label, kind)
         }
     }
 
     /// A marker on a device of a ship.
-    pub fn device(ship: Entity, design: &ShipDesign, id: &str, kind: MarkerKind) -> Marker {
+    pub fn device(ship: BodyId, design: &ShipDesign, id: &str, kind: MarkerKind) -> Marker {
         let i = design.device(id);
         let device = &design.devices[i];
         Marker {
-            label: device.label.clone(),
-            kind,
-            body: Some(ship),
-            at: device.at,
-            player: None,
             device: Some(i as u16),
+            ..Marker::on(ship, device.at, &device.label, kind)
+        }
+    }
+
+    /// Only for the player at deck slot `slot`.
+    pub fn for_player(self, slot: u32) -> Marker {
+        Marker {
+            player: Some(slot),
+            ..self
+        }
+    }
+
+    /// Where it is, given its body's frame (`None` for a marker in the
+    /// world). `None` if it's on a body whose frame isn't known.
+    pub fn position(&self, frame: Option<&BodyFrame>) -> Option<Vec3> {
+        match (self.body, frame) {
+            (None, _) => Some(self.at),
+            (Some(_), Some(frame)) => Some(frame.point_to_world(self.at)),
+            (Some(_), None) => None,
         }
     }
 }
 
 /// The scenario under way, replicated to everyone for the HUD.
 #[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[component(map_entities)]
 pub struct Mission {
     pub kind: ScenarioKind,
     pub phase: Phase,
@@ -193,30 +263,37 @@ pub struct Mission {
     pub outcome: String,
     /// Lines for the debrief, written as things happen.
     pub report: Vec<String>,
+    /// The same, as numbers, for whatever pays out on them (see
+    /// [`Mission::result`]).
+    pub results: Vec<(String, f32)>,
     /// The mission before this one, if it ended.
     pub debrief: Option<Debrief>,
 }
 
-impl MapEntities for Mission {
-    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
-        for marker in &mut self.markers {
-            if let Some(body) = &mut marker.body {
-                *body = mapper.get_mapped(*body);
-            }
-            if let Some(player) = &mut marker.player {
-                *player = mapper.get_mapped(*player);
-            }
+impl Mission {
+    /// Records a result, by name (`"gates"`, `"pods_rescued"`, ...),
+    /// replacing one of the same name. Every scenario records `"won"` (1 or
+    /// 0) and `"seconds"` when it's decided; see each scenario for the rest.
+    pub fn result(&mut self, name: &str, value: f32) {
+        match self.results.iter_mut().find(|(n, _)| n == name) {
+            Some((_, v)) => *v = value,
+            None => self.results.push((name.to_string(), value)),
         }
     }
-}
 
-impl Mission {
+    /// The result called `name`, if there is one.
+    pub fn result_of(&self, name: &str) -> Option<f32> {
+        self.results.iter().find(|(n, _)| n == name).map(|(_, v)| *v)
+    }
+
     /// Decides it, at `tick`, unless it already is.
     pub fn decide(&mut self, phase: Phase, tick: u32, outcome: &str) {
         if self.phase == Phase::Underway {
             self.phase = phase;
             self.ended = Some(tick);
             self.outcome = outcome.to_string();
+            self.result("won", if phase == Phase::Won { 1.0 } else { 0.0 });
+            self.result("seconds", self.elapsed(tick));
         }
     }
 
@@ -561,6 +638,7 @@ fn debrief(
         seconds: ended.wrapping_sub(mission.started) as f32 / TICK_HZ as f32,
         outcome: mission.outcome.clone(),
         lines,
+        results: mission.results.clone(),
         crew: cards,
         awards,
     }

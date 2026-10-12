@@ -10,6 +10,7 @@ use crate::sim::player::{Grapple, Mode, Player};
 use crate::sim::devices::Devices;
 use crate::sim::scenarios::boarding::CARRIER;
 use crate::sim::scenarios::dead_ship::DERELICT;
+use crate::sim::scenarios::recovery::Pod;
 use crate::sim::ship::{HOME, ShipHull};
 
 #[derive(Resource)]
@@ -34,6 +35,12 @@ pub fn shot_script_from_env() -> Option<ShotScript> {
 
 /// Vantage points: (name, booted feet + up + facing on the ship, or EVA position relative to the ship).
 enum Vantage {
+    /// EVA `offset` (world axes) from the recovery's pod `index`, looking at
+    /// it.
+    NearPod {
+        index: u8,
+        offset: Vec3,
+    },
     Booted {
         feet: Vec3,
         up: Vec3,
@@ -65,6 +72,7 @@ fn tour() -> &'static str {
         Ok("carrier") => CARRIER,
         Ok("derelict") => DERELICT,
         Ok("course") => "course",
+        Ok("recovery") => "recovery",
         _ => HOME,
     }
 }
@@ -74,6 +82,7 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
         CARRIER => return carrier_vantages(),
         DERELICT => return derelict_vantages(),
         "course" => return course_vantages(),
+        "recovery" => return recovery_vantages(),
         _ => {}
     }
     vec![
@@ -242,6 +251,35 @@ fn course_vantages() -> Vec<(&'static str, Vantage)> {
     ]
 }
 
+/// The recovery's tour, from our ship: the wreck's crew out among the
+/// debris (survivor A, near its starting place; the shots run at the start).
+fn recovery_vantages() -> Vec<(&'static str, Vantage)> {
+    vec![
+        (
+            "recovery_stern",
+            Vantage::Eva {
+                offset: Vec3::new(8.0, 4.0, 22.0),
+                look_at: Vec3::new(-90.0, -25.0, 100.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        (
+            "recovery_survivor",
+            Vantage::NearPod {
+                index: 0,
+                offset: Vec3::new(-5.0, 2.0, 4.0),
+            },
+        ),
+        (
+            "recovery_lifeboat",
+            Vantage::NearPod {
+                index: 4,
+                offset: Vec3::new(-7.0, 3.0, 6.0),
+            },
+        ),
+    ]
+}
+
 /// Debug: routes the derelict's power to its vault, as a crew would have,
 /// straight into the authority's state (the shots run on a host).
 fn power_up(hull: &ShipHull, devices: &mut Devices) {
@@ -264,10 +302,11 @@ pub fn run_shot_script(
     mut player: Single<&mut Player, With<super::LocalPlayer>>,
     ships: Query<(Entity, &Transform, &ShipHull)>,
     mut devices: Query<(&ShipHull, &mut Devices)>,
+    pods: Query<(&Pod, &Transform)>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let want = match tour() {
-        "course" => HOME,
+        "course" | "recovery" => HOME,
         ship => ship,
     };
     let Some((ship_entity, ship_transform, _)) = ships.iter().find(|(.., h)| h.0 == want) else {
@@ -343,6 +382,16 @@ pub fn run_shot_script(
         }
         // Set up below, along with the grapple.
         Vantage::Rope { .. } => player.mode,
+        Vantage::NearPod { index, offset } => {
+            let Some((_, pod)) = pods.iter().find(|(p, _)| p.index == index) else { return };
+            let position = pod.translation + offset;
+            Mode::Eva {
+                position,
+                velocity: Vec3::ZERO,
+                orientation: Transform::from_translation(position).looking_at(pod.translation, Vec3::Y).rotation,
+                pitch: 0.0,
+            }
+        }
     };
     if let Vantage::Rope {
         offset,
