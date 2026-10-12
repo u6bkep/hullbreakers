@@ -533,9 +533,17 @@ pub fn update_avatars(
     players: Query<(Entity, &Player, Option<&Robot>, Option<&BodyTuning>), Without<LocalPlayer>>,
     mut avatars: Query<(Entity, &Avatar, &mut Transform)>,
     transforms: Query<&Transform, Without<Avatar>>,
+    drawn_in: Query<&crate::net::robots::DrawnIn>,
     mut commands: Commands,
 ) {
-    let pose = |player: &Player, own: Option<&BodyTuning>| -> Option<Transform> {
+    let pose = |entity: Entity, player: &Player, own: Option<&BodyTuning>| -> Option<Transform> {
+        // A robot flying by a body: on the body as drawn (see `net::robots`).
+        if let Ok(d) = drawn_in.get(entity)
+            && let Ok(body) = transforms.get(d.body)
+        {
+            let frame = render_frame(body);
+            return Some(Transform::from_translation(frame.point_to_world(d.position)).with_rotation(frame.rotation * d.orientation));
+        }
         let tuning = tuning_of(&base, own);
         let half = tuning.capsule_height / 2.0;
         let (center, rotation) = match player.mode {
@@ -562,7 +570,7 @@ pub fn update_avatars(
     };
     let mut seen = Vec::new();
     for (entity, avatar, mut transform) in &mut avatars {
-        match players.get(avatar.player).ok().and_then(|(_, p, _, own)| pose(p, own)) {
+        match players.get(avatar.player).ok().and_then(|(e, p, _, own)| pose(e, p, own)) {
             Some(pose) => {
                 // Written only when it moved: a write re-propagates the whole
                 // model under it, and idle robots and creatures are many.
@@ -577,7 +585,7 @@ pub fn update_avatars(
         if seen.contains(&entity) {
             continue;
         }
-        let Some(pose) = pose(player, own) else { continue };
+        let Some(pose) = pose(entity, player, own) else { continue };
         let tuning = tuning_of(&base, own);
         if let Some(kind) = robot {
             // Its model, whose origin is at its feet (a walker) or its

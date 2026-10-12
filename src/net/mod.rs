@@ -202,6 +202,14 @@ impl Plugin for NetPlugin {
             .add_observer(extrapolate::prepare_extrapolated)
             .add_observer(extrapolate::prepare_flight)
             .add_systems(Update, adopt_host_tuning)
+            // Interpolate two send intervals behind the authority's latest,
+            // not lightyear's 1.2: at 1.2 the next sample was often not in
+            // yet when it was needed (the authority sends every third tick),
+            // so a moving thing held a moment and then caught up, which a
+            // fast one shows as a stutter (`netplay::robot_smoothness`:
+            // 56-87 mm of jolt on a 450 mm step, 4 mm at 2). It costs 40 ms
+            // more behind.
+            .insert_resource(lightyear::prelude::InterpolationConfig::default().with_send_interval_ratio(INTERPOLATION_SEND_INTERVALS))
             .init_resource::<extrapolate::DrawClock>()
             .init_resource::<ViewBeforeRollback>()
             .configure_sets(
@@ -283,6 +291,10 @@ impl Plugin for NetPlugin {
         }
     }
 }
+
+/// How far behind the authority's latest a client interpolates others,
+/// in the authority's send intervals (see where it's set).
+const INTERPOLATION_SEND_INTERVALS: f32 = 2.0;
 
 struct ProtocolPlugin;
 

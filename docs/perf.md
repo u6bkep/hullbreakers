@@ -129,13 +129,24 @@ Checked on a client at 100 ms (2026-10-12): `tools/coop-smoke` with
 `COOP_ONLY=watch_gunners,watch_grappler,watch_crawler,watch_turret,watch_marksman,field_limpet,gallery_shielded,gallery_volatile`
 (host and client views side by side), and in `netplay`: still robots sit
 within 5 mm of the server's, every shot reaches the client's log
-(`a_robots_shots_reach_a_client`). `robot_smoothness` (ignored) measures
-how evenly moving robots step on a client: robots in EVA flying with the
-carrier (27 m/s) step unevenly from frame to frame, by 54-99 mm on a
-450 mm step (mean, over six runs). Before robots went as their views it
-was 48-79 mm (four runs): within the noise, so it isn't the rounding but
-the interpolation's timing, worth a look of its own (relative to the
-carrier, which is drawn on another clock, it may show as a shake).
+(`a_robots_shots_reach_a_client`).
+
+**Fast robots by a moving ship** (2026-10-12, `netplay::robot_smoothness`).
+The carrier's robots in EVA, flying with it at 27 m/s, were drawn 7.6-7.8 m
+from their place by it on a client, and stepped unevenly (jolts up to
+527 mm a frame). Two causes. A client interpolated them 1.2 send intervals
+behind the authority's latest (lightyear's default; the authority sends
+every third tick), which wasn't enough: the next sample was often not in
+when it was needed, so lightyear held the last one (it won't extrapolate)
+and then caught up. Now 2 send intervals (`INTERPOLATION_SEND_INTERVALS`,
+40 ms more behind): mean jolt 56-87 mm -> 4 mm in the world. And a robot was
+interpolated in the world, so drawn where it was an interpolation delay
+ago, while its ship is drawn where it is now (from its extrapolated motion):
+at 27 m/s, metres behind. Now a robot in EVA is posed in its reference
+body's frame on the wire (`RobotView::frame`), blended there, and drawn on
+the body as drawn (`DrawnIn`), as one on a deck already was: 0.13-0.17 m
+from its place by the ship (its own motion relative to the ship over the
+delay), jolts under 25 mm. Asserted: under 0.6 m and 100 mm.
 
 What's left in co-op is mostly the other crew members: each one's whole
 `Player` (loadout, input cursor, event log) goes every tick, since the log
