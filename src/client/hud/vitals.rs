@@ -1,15 +1,7 @@
 //! Your health: the suit block (bottom left), the regen state, the edge of
 //! the screen going red as you get low, arcs round the centre toward
-//! whatever hit you, and dying.
-//!
-//! Where damage came from isn't something the sim records for the victim
-//! (its [`HitLog`](crate::sim::vitals::HitLog) is what a player *dealt*).
-//! The HUD works it out from what every peer already sees: robots' shots
-//! are in their replicated event logs, and beams are traced on every peer.
-//! When your health drops, the hostile shot whose line passed closest to
-//! you (or the beam you were caught in) is where it came from.
-
-use std::collections::HashMap;
+//! whatever hit you (from the authority's [`HurtLog`], which says where each
+//! hurt came from, the killing blow included), and dying.
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
@@ -18,13 +10,11 @@ use egui::{Align2, Rect, Stroke, pos2, vec2};
 use super::style::{self, BOLD, EDGE, HOSTILE, INK, INK_DIM, MICRO, SUIT, WARNING};
 use super::{CameraView, HudMemory, Projector, view};
 use crate::client::LocalPlayer;
-use crate::sim::bots::Robot;
-use crate::sim::combat::Beams;
-use crate::sim::events::{EventLog, LOG_TICKS, PlayerEvent};
+use crate::sim::events::{LOG_TICKS, PlayerEvent};
 use crate::sim::pickups::Pickup;
 use crate::sim::player::Player;
 use crate::sim::tuning::Tuning;
-use crate::sim::vitals::Vitals;
+use crate::sim::vitals::{HurtLog, Vitals};
 
 /// The suit block's size (pt); the nav readouts stack on it.
 pub const SUIT_BLOCK: egui::Vec2 = vec2(340.0, 64.0);
@@ -34,74 +24,31 @@ const LOW: f32 = 0.5;
 const CRITICAL: f32 = 0.25;
 /// How long a damage arc shows (s).
 const ARC_SECONDS: f32 = 1.2;
-/// How far a shot's line may pass from you and still be the one that hit.
-const SHOT_MISS: f32 = 2.5;
-
-/// How long a drop in health waits for the shot that caused it (s): on a
-/// client, robots' shots arrive interpolated, after the damage.
-const PENDING_SECONDS: f32 = 0.3;
-
-/// A hostile shot seen in flight: where from, which way, when.
-struct SeenShot {
-    origin: Vec3,
-    dir: Vec3,
-    at: f32,
-}
-
-/// Where recent damage came from, for the arcs.
+/// What the HUD has read of your own logs.
 #[derive(Default)]
 pub struct Threats {
-    /// Robots' newest read event tick.
-    read: HashMap<Entity, u32>,
-    /// Your own deaths and beam hits already seen, by tick.
-    own_seen: Vec<(u32, bool)>,
-    /// Whether your log has been seen at all.
-    own_started: bool,
-    shots: Vec<SeenShot>,
-    /// When a beam last caught you.
-    beam_hit: Option<f32>,
-    /// Drops in health not yet put down to a source: where you were, when.
-    pending: Vec<(Vec3, f32)>,
-    /// World direction toward each recent hit's source, and when.
+    /// Your deaths already seen, by tick.
+    deaths: Vec<u32>,
+    /// Whether your event log has been seen at all.
+    started: bool,
+    /// How many of your hurts have been read (`None`: not yet any).
+    hurts: Option<u32>,
+    /// World direction toward each recent hurt's source, and when.
     arcs: Vec<(Vec3, f32)>,
-    last_health: Option<f32>,
 }
 
-/// The events in `log` after `cursor`, moving the cursor on. A log seen for
-/// the first time only sets the cursor: what's already in it is history.
-fn read_new(log: &EventLog, cursor: &mut Option<u32>) -> Vec<(u32, PlayerEvent)> {
-    let first = cursor.is_none();
-    let last = *cursor;
-    let mut new = Vec::new();
-    for (tick, event) in log.iter() {
-        if last.is_some_and(|l| tick.wrapping_sub(l) as i32 <= 0) {
-            continue;
-        }
-        *cursor = Some(cursor.map_or(tick, |n| if tick.wrapping_sub(n) as i32 > 0 { tick } else { n }));
-        if !first {
-            new.push((tick, event));
-        }
-    }
-    if cursor.is_none() {
-        // An empty log: start from where it is.
-        *cursor = Some(log.tick());
-    }
-    new
-}
-
-/// Reads robots' shots, your own events and your health each frame; a drop
-/// in health finds its source. Also notices dying, and the case your kit
-/// was left in.
+/// Reads your hurts (for the arcs) and notices dying, and the case your
+/// kit was left in.
 ///
-/// Your deaths are read straight from your log, not as presented events:
+/// Deaths are read straight from your event log, not as presented events:
 /// presentation drops what arrives late, and a death (which only the
-/// authority decides) reaches a laggy client late.
+/// authority decides) reaches a laggy client late. Your log is rewritten
+/// under prediction, so each is taken once, however late (a re-timed copy
+/// within a few ticks is the same one).
 pub fn track_threats(
     mut memory: ResMut<HudMemory>,
     mut threats: Local<Threats>,
-    robots: Query<(Entity, &Player), With<Robot>>,
-    me: Option<Single<(&Player, &Vitals), With<LocalPlayer>>>,
-    beams: Option<Res<Beams>>,
+    me: Option<Single<(&Player, Option<&HurtLog>), With<LocalPlayer>>>,
     camera: CameraView,
     cases: Query<(Entity, &Pickup, &Transform)>,
 ) {
@@ -109,109 +56,50 @@ pub fn track_threats(
     let eye = camera.1.translation;
     // Your body is a little below your eye.
     let body = eye - camera.1.rotation * Vec3::Y * 0.5;
-
     let threats = &mut *threats;
-    for (entity, robot) in &robots {
-        let mut cursor = threats.read.get(&entity).copied();
-        for (_, event) in read_new(&robot.events, &mut cursor) {
-            if let PlayerEvent::Fired { origin, velocity, .. } = event
-                && let Some(dir) = velocity.try_normalize()
-            {
-                threats.shots.push(SeenShot { origin, dir, at: now });
-            }
-        }
-        if let Some(c) = cursor {
-            threats.read.insert(entity, c);
-        }
-    }
-    threats.read.retain(|e, _| robots.contains(*e));
-    threats.shots.retain(|s| now - s.at < 1.5);
-
     let Some(me) = me else {
         return;
     };
-    let (player, vitals) = *me;
-    // Your own log is rewritten under prediction: a death the authority
-    // decided turns up at a tick already passed. Each is taken once,
-    // however late (a re-timed copy within a few ticks is the same one).
+    let (player, hurts) = *me;
+
     let log_now = player.events.tick();
-    threats.own_seen.retain(|(t, _)| log_now.wrapping_sub(*t) <= LOG_TICKS);
-    let started = std::mem::replace(&mut threats.own_started, true);
-    let mut own = Vec::new();
+    threats.deaths.retain(|t| log_now.wrapping_sub(*t) <= LOG_TICKS);
+    let started = std::mem::replace(&mut threats.started, true);
+    let mut died = None;
     for (tick, event) in player.events.iter() {
-        let died = match event {
-            PlayerEvent::Died => true,
-            PlayerEvent::BeamHit => false,
-            _ => continue,
-        };
-        if threats.own_seen.iter().any(|&(t, d)| d == died && (tick.wrapping_sub(t) as i32).unsigned_abs() <= 3) {
+        if event != PlayerEvent::Died || threats.deaths.iter().any(|&t| (tick.wrapping_sub(t) as i32).unsigned_abs() <= 3) {
             continue;
         }
-        threats.own_seen.push((tick, died));
+        threats.deaths.push(tick);
         if started {
-            own.push((tick, event));
+            died = Some(tick);
         }
     }
-    for (tick, event) in own {
-        match event {
-            PlayerEvent::BeamHit => threats.beam_hit = Some(now),
-            PlayerEvent::Died => {
-                if let Some(place) = memory.last_eye {
-                    memory.died = Some(Death {
-                        at: now,
-                        place,
-                        tick,
-                        carried: memory.armed,
-                    });
-                    memory.kit = None;
+    if let Some(tick) = died
+        && let Some(place) = memory.last_eye
+    {
+        memory.died = Some(Death {
+            at: now,
+            place,
+            tick,
+            carried: memory.carrying,
+        });
+        memory.kit = None;
+    }
+    // As of before this frame's events: dying empties your pockets.
+    memory.carrying = view::carries_anything(player);
+
+    // Each new hurt that came from somewhere: an arc toward it.
+    if let Some(log) = hurts {
+        if let Some(seen) = threats.hurts {
+            for hurt in log.since(seen) {
+                if let Some(dir) = hurt.from.and_then(|from| (from - body).try_normalize()) {
+                    threats.arcs.push((dir, now));
                 }
             }
-            _ => {}
         }
+        threats.hurts = Some(log.count);
     }
-    // As of before this frame's events: dying empties your hands.
-    memory.armed = view::armed(player);
-
-    // A drop in health waits a moment for the shot that caused it.
-    if threats.last_health.is_some_and(|before| vitals.health < before - 0.01) {
-        threats.pending.push((body, now));
-    }
-    threats.last_health = Some(vitals.health);
-    let (shots, beam_hit) = (&threats.shots, threats.beam_hit);
-    let mut found = Vec::new();
-    threats.pending.retain(|&(at, when)| {
-        let shot = shots
-            .iter()
-            .filter_map(|s| {
-                let along = (at - s.origin).dot(s.dir);
-                let miss = (at - (s.origin + s.dir * along)).length();
-                (along > 0.0 && miss < SHOT_MISS).then_some((miss, s.origin))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, origin)| origin);
-        let beam = || {
-            beam_hit.filter(|hit| (hit - when).abs() < 0.5)?;
-            beams
-                .as_ref()?
-                .0
-                .iter()
-                .map(|b| {
-                    let d = (b.to - b.from).normalize_or_zero();
-                    let along = (at - b.from).dot(d).clamp(0.0, b.from.distance(b.to));
-                    ((at - (b.from + d * along)).length(), b.from)
-                })
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .map(|(_, from)| from)
-        };
-        match shot.or_else(beam).and_then(|source| (source - at).try_normalize()) {
-            Some(dir) => {
-                found.push(dir);
-                false
-            }
-            None => now - when < PENDING_SECONDS,
-        }
-    });
-    threats.arcs.extend(found.into_iter().map(|dir| (dir, now)));
     threats.arcs.retain(|(_, at)| now - at < ARC_SECONDS);
     memory.arcs.clone_from(&threats.arcs);
 

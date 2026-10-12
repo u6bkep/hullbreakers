@@ -65,10 +65,13 @@ about*, and the hues are few, so each one means one thing:
 | `SHIELD` | `#6ea8ff` | shields |
 | `WEAK` | `#ff40c8` | **weak-spot hits only.** The one colour rule in the game (art-style.md). Nothing else in the HUD may use magenta or anything near it. |
 
-Rarity accents (the weapon card's strip and name), in order: common
-`INK_DIM`, uncommon `#7ee08a`, rare `#5aa9ff`, epic `#a98bff` (a blue
-violet, well clear of `WEAK`), legendary `#ffb03a`. They only ever appear
-on a card or in the menu.
+Rarity accents are the items' own colours (`Rarity::color` in
+`sim/items.rs`, which the cases in the world glow in too; `style::rarity`
+is the HUD's one door to them): standard issue grey, common white,
+uncommon green, rare blue, exotic orange. No purples, which would sit too
+near `WEAK`. They appear on hand cards, the pickup card and the inventory.
+On items, ammo is plain `INK` and cargo (what missions are about) is
+`OBJECTIVE`; a stat that's better is `FRIENDLY`, worse is `WARNING`.
 
 Red is rare on purpose: it is what hurt you, or what's about to kill you.
 If everything is red, nothing is.
@@ -128,8 +131,14 @@ Reference frame 1920x1080 points; margins `EDGE` = 24 pt.
   interact prompt to the right of it. Nothing else may live here.
 - **Damage arcs** sit on a ring at 26% of the height, read as a compass in
   the view's own plane: ahead is the top of the ring, behind the bottom.
-- **Top centre**: the mission strip (objective, timer, the ships' bars).
-  Banners and the debrief below it, in the upper third.
+  Each comes from the authority's `HurtLog` (where a hurt came from).
+- **While the menu or tuning panel is open** (the mouse free), the centre's
+  prompts and card are hidden: the window is what you're looking at.
+- **Top centre**: the mission strip: the scenario's objective (in
+  chevrons), the clock (stopped once the mission is decided; left out when
+  the scenario's own lines carry a time), the ships' bars in a fight, and
+  the scenario's status lines in mono. Banners and the debrief (with each
+  crew member's score card) below it, in the upper third.
 - **Top left**: the event feed (what your boots and rope just did).
 - **Bottom left**: the suit block: health, regen, boots/EVA, assist,
   speed relative to the reference body, rope.

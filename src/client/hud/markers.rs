@@ -15,7 +15,7 @@ use super::{CameraView, HudMemory, Projector, view};
 use crate::client::LocalPlayer;
 use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
-use crate::sim::mission::{Mission, Phase, ScenarioKind};
+use crate::sim::mission::{MarkerKind, Mission, Phase, ScenarioKind};
 use crate::sim::pickups::Pickup;
 use crate::sim::player::Player;
 use crate::sim::ship::{Control, ControlAction, HomeShip, ShipHull};
@@ -42,6 +42,18 @@ pub struct Labels(Vec<Rect>);
 impl Labels {
     pub fn clear(&mut self) {
         self.0.clear();
+    }
+
+    /// Marks the HUD's fixed blocks taken (generously: their sizes vary):
+    /// the suit and nav plates bottom left, the hands and stances bottom
+    /// right, the mission strip top centre.
+    pub fn reserve(&mut self, screen: Rect) {
+        let bottom = screen.max.y - EDGE;
+        let suit = super::vitals::SUIT_BLOCK;
+        self.0.push(Rect::from_min_max(pos2(screen.min.x, bottom - suit.y - 110.0), pos2(screen.min.x + EDGE + suit.x + 8.0, screen.max.y)));
+        let hands = super::hands::BLOCK;
+        self.0.push(Rect::from_min_max(pos2(screen.max.x - EDGE - hands.x - 8.0, bottom - hands.y - 8.0), screen.max));
+        self.0.push(Rect::from_center_size(pos2(screen.center().x, screen.min.y + 50.0), vec2(700.0, 100.0)));
     }
 
     fn free(&self, rect: Rect) -> bool {
@@ -105,9 +117,10 @@ fn edge_mark(painter: &egui::Painter, labels: &mut Labels, screen: Rect, dir: eg
 
 /// Every ship, always marked: a diamond with its name and range, or an arrow
 /// at the screen edge when it's off screen, so nobody loses the fight (or
-/// the way home) among the rocks. The ship you're standing on or inside
-/// isn't marked. A ship the mission names as the enemy is marked HOSTILE;
-/// ours FRIENDLY.
+/// the way home) among the rocks. Only ships that matter: ours (FRIENDLY)
+/// and a hostile one (HOSTILE); a site built as a ship (a derelict, a
+/// course of gates) is the scenario's to mark. The ship you're standing on
+/// or inside isn't marked.
 pub fn ship_markers(
     mut contexts: EguiContexts,
     player: Single<&Player, With<LocalPlayer>>,
@@ -131,12 +144,10 @@ pub fn ship_markers(
         if player.mode.body() == Some(entity) || player.reference_body == Some(entity) || inside || *visibility == Visibility::Hidden {
             continue;
         }
-        let color = if ship.hostile {
-            HOSTILE
-        } else if home {
-            FRIENDLY
-        } else {
-            INK
+        let color = match (ship.hostile, home) {
+            (true, _) => HOSTILE,
+            (false, true) => FRIENDLY,
+            (false, false) => continue,
         };
         // The middle of the hull.
         let center = transform.translation + transform.rotation * Vec3::new(0.0, 1.5, 0.0);
@@ -249,17 +260,32 @@ pub fn reference_overlay(
     Ok(())
 }
 
-/// What a marker marks; sets how it's drawn.
+/// What a mark marks; sets how it's drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MarkerKind {
+pub enum MarkKind {
     /// What to do: the mission's goal.
     Objective,
-    /// On the way to it.
+    /// On the way to it (a gate, a way in).
     Waypoint,
+    /// Something to work: a lever, a key, a junction.
+    Device,
+    /// Where to go to finish: home.
+    Exit,
     /// Somewhere to get kit.
     Supply,
     /// Your own kit, where you fell.
     Kit,
+}
+
+impl From<MarkerKind> for MarkKind {
+    fn from(kind: MarkerKind) -> MarkKind {
+        match kind {
+            MarkerKind::Goal => MarkKind::Objective,
+            MarkerKind::Waypoint => MarkKind::Waypoint,
+            MarkerKind::Device => MarkKind::Device,
+            MarkerKind::Exit => MarkKind::Exit,
+        }
+    }
 }
 
 /// A mark on something in the world.
@@ -267,15 +293,18 @@ pub enum MarkerKind {
 pub struct Objective {
     pub label: String,
     pub position: Vec3,
-    pub kind: MarkerKind,
+    pub kind: MarkKind,
 }
 
-/// Where the current objectives are. Scenarios add theirs in
-/// [`Objectives::list`]: a query here for what they need, an arm there.
+/// Where the current objectives are: the scenario's own markers (from the
+/// replicated [`Mission`]), plus what the HUD knows to point at itself (a
+/// way into the carrier, the mission wall after a win, the weapons locker
+/// while you're unarmed).
 #[derive(SystemParam)]
 pub struct Objectives<'w, 's> {
     missions: Query<'w, 's, &'static Mission>,
     ships: Query<'w, 's, (Entity, &'static ShipHull, &'static Transform, Option<&'static Combatant>, Has<HomeShip>)>,
+    bodies: Query<'w, 's, &'static Transform>,
     controls: Query<'w, 's, (&'static Control, &'static Transform, &'static ChildOf)>,
 }
 
@@ -289,39 +318,54 @@ impl Objectives<'_, '_> {
             .map(|(_, local, _)| transform.transform_point(local.translation))
     }
 
-    /// The marks for `player` just now.
-    pub fn list(&self, player: &Player) -> Vec<Objective> {
+    /// The marks for `player` (entity `me`) just now.
+    pub fn list(&self, me: Entity, player: &Player) -> Vec<Objective> {
         let mut list = Vec::new();
-        let mut mark = |label: &str, position: Option<Vec3>, kind: MarkerKind| {
+        let mut mark = |label: &str, position: Option<Vec3>, kind: MarkKind| {
             if let Some(position) = position {
                 list.push(Objective { label: label.into(), position, kind });
             }
         };
         let home = self.ships.iter().find(|s| s.4).map(|s| s.0);
-        let enemy = self.ships.iter().find(|(_, hull, ..)| hull.design().hostile);
-        if let Ok(mission) = self.missions.single()
-            && mission.kind == ScenarioKind::Boarding
-        {
-            match (mission.phase, enemy) {
-                (Phase::Underway, Some((ship, hull, transform, combatant, _))) if combatant.is_some_and(|c| c.shield) => {
-                    // The way in, until you're aboard; then the console.
-                    if player.mode.body() != Some(ship)
-                        && let Some(&entry) = hull.design().markers.get("entry")
+        let aboard = player.mode.body();
+        if let Ok(mission) = self.missions.single() {
+            for m in &mission.markers {
+                if m.player.is_some_and(|p| p != me) {
+                    continue;
+                }
+                // Home, when you're standing on it, is no place to go.
+                if m.kind == MarkerKind::Exit && m.body.is_some() && m.body == aboard {
+                    continue;
+                }
+                // As drawn: the body's rendered pose, as the camera's is.
+                let at = match m.body {
+                    Some(body) => self.bodies.get(body).ok().map(|t| t.transform_point(m.at)),
+                    None => Some(m.at),
+                };
+                mark(&m.label, at, m.kind.into());
+            }
+            if mission.kind == ScenarioKind::Boarding {
+                let enemy = self.ships.iter().find(|(_, hull, ..)| hull.design().hostile);
+                match (mission.phase, enemy) {
+                    // The way in, until you're aboard.
+                    (Phase::Underway, Some((ship, hull, transform, combatant, _)))
+                        if combatant.is_some_and(|c| c.shield) && aboard != Some(ship) =>
                     {
-                        mark("Hangar", Some(transform.transform_point(entry)), MarkerKind::Waypoint);
+                        let entry = hull.design().markers.get("entry").map(|&e| transform.transform_point(e));
+                        mark("Hangar", entry, MarkKind::Waypoint);
                     }
-                    mark("Disable shields", self.control(ship, ControlAction::DisableShields), MarkerKind::Objective);
+                    // Won, and home: the wall to leave by.
+                    (Phase::Won, _) if aboard.is_some() && aboard == home => {
+                        let wall = home.and_then(|h| self.control(h, ControlAction::Scenario(ScenarioKind::Field)));
+                        mark("Mission wall", wall, MarkKind::Objective);
+                    }
+                    _ => {}
                 }
-                (Phase::Won, _) => {
-                    let wall = home.and_then(|h| self.control(h, ControlAction::Scenario(ScenarioKind::Field)));
-                    mark("Mission wall", wall, MarkerKind::Objective);
-                }
-                _ => {}
             }
         }
         // Unarmed aboard our ship: where the guns are.
-        if !view::armed(player) && player.mode.body().is_some() && player.mode.body() == home {
-            mark("Weapons locker", home.and_then(|h| self.control(h, ControlAction::Armory)), MarkerKind::Supply);
+        if !view::armed(player) && aboard.is_some() && aboard == home {
+            mark("Weapons locker", home.and_then(|h| self.control(h, ControlAction::Armory)), MarkKind::Supply);
         }
         list
     }
@@ -330,7 +374,7 @@ impl Objectives<'_, '_> {
 /// The current objectives, and your kit if it's lying about.
 pub fn objective_markers(
     mut contexts: EguiContexts,
-    player: Single<&Player, With<LocalPlayer>>,
+    player: Single<(Entity, &Player), With<LocalPlayer>>,
     objectives: Objectives,
     mut memory: ResMut<HudMemory>,
     pickups: Query<&Transform, With<Pickup>>,
@@ -341,12 +385,13 @@ pub fn objective_markers(
     let view = Projector::new(camera, cam, ctx);
     let screen = ctx.content_rect();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("objectives")));
-    let mut marks = objectives.list(&player);
+    let (me, player) = *player;
+    let mut marks = objectives.list(me, player);
     match memory.kit.map(|kit| pickups.get(kit)) {
         Some(Ok(case)) => marks.push(Objective {
             label: "Your kit".into(),
             position: case.translation,
-            kind: MarkerKind::Kit,
+            kind: MarkKind::Kit,
         }),
         // Picked up (or gone with its ship).
         Some(Err(_)) => memory.kit = None,
@@ -354,9 +399,10 @@ pub fn objective_markers(
     }
     for mark in &marks {
         let color = match mark.kind {
-            MarkerKind::Objective | MarkerKind::Waypoint => OBJECTIVE,
-            MarkerKind::Supply => INK,
-            MarkerKind::Kit => SUIT,
+            MarkKind::Objective | MarkKind::Waypoint => OBJECTIVE,
+            MarkKind::Device | MarkKind::Supply => INK,
+            MarkKind::Exit => FRIENDLY,
+            MarkKind::Kit => SUIT,
         };
         let range = distance_label(mark.position.distance(cam.translation));
         let Some(p) = view.to_screen(mark.position).filter(|p| screen.shrink(EDGE).contains(*p)) else {
@@ -365,7 +411,7 @@ pub fn objective_markers(
         };
         let color = style::fade(color, clear_of_centre(screen, p));
         let r = match mark.kind {
-            MarkerKind::Objective => {
+            MarkKind::Objective => {
                 // A diamond in chevrons: the loudest mark in the HUD.
                 let r = 9.0;
                 painter.add(egui::Shape::closed_line(style::diamond(p, r + 1.5), Stroke::new(BOLD + 2.0, style::SHADOW)));
@@ -377,13 +423,21 @@ pub fn objective_markers(
                 }
                 r
             }
-            MarkerKind::Waypoint | MarkerKind::Supply => {
+            MarkKind::Waypoint | MarkKind::Supply | MarkKind::Exit => {
                 let r = 6.0;
                 painter.add(egui::Shape::closed_line(style::diamond(p, r + 1.5), Stroke::new(LINE + 2.0, style::SHADOW)));
                 style::glow_line(&painter, style::diamond(p, r), color, LINE, true);
                 r
             }
-            MarkerKind::Kit => {
+            MarkKind::Device => {
+                // A square: a thing to work.
+                let sq = Rect::from_center_size(p, vec2(9.0, 9.0));
+                painter.rect_stroke(sq.expand(1.0), 0.0, Stroke::new(LINE + 2.0, style::SHADOW), egui::StrokeKind::Middle);
+                painter.rect_stroke(sq, 0.0, Stroke::new(LINE, color), egui::StrokeKind::Middle);
+                painter.circle_filled(p, 1.5, color);
+                5.0
+            }
+            MarkKind::Kit => {
                 // A case.
                 let case = Rect::from_center_size(p, vec2(14.0, 9.0));
                 painter.rect_stroke(case.expand(1.0), 0.0, Stroke::new(LINE + 2.0, style::SHADOW), egui::StrokeKind::Middle);

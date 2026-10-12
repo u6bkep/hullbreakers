@@ -1,0 +1,116 @@
+// The derelict: one deck, y = 0 (deck) to 3 (ceiling), inside 14 m wide
+// (x = +-7) and 38 m long (z = -20, the bow, to +18, the stern). No lights
+// of its own and no light probes: it's dark until its power is back.
+//
+// From the stern in: an airlock (always open) into engineering, where the
+// reactor and the power board are. Forward of that the mid section, split
+// along x = -1: a hall to starboard with junction A, and a port room behind
+// the port door with junction B and key B. The bulkhead (z = -4) closes
+// off the forward hall, with junction C; forward of it, the bridge (key A)
+// to starboard and the vault (the data core) to port, behind a door that
+// opens only when both keys are turned at once.
+//
+// The power runs: reactor -> A; A's ways: 0 mid hall lights, 1 the port
+// door, 2 junction B; B's ways: 0 the bulkhead, 1 junction C; C's ways:
+// 0 the bridge lights, 1 the vault bus (which powers both keys). Doors
+// latch open once powered. Releasing the core trips the reactor: every
+// light goes out but the red alarms.
+Module(
+    parts: [
+        // Floor, roof, sides, bow.
+        Span(lo: (-7.3, -0.3, -20.3), hi: (7.3, 0.0, 18.3)),
+        Span(lo: (-7.3, 3.0, -20.3), hi: (7.3, 3.3, 18.3)),
+        Span(lo: (-7.3, 0.0, -20.3), hi: (-7.0, 3.0, 18.3)),
+        Span(lo: (7.0, 0.0, -20.3), hi: (7.3, 3.0, 18.3)),
+        Span(lo: (-7.0, 0.0, -20.3), hi: (7.0, 3.0, -20.0)),
+        // Stern, with the airlock's outer door (always open), and the
+        // airlock's walls.
+        WallAcross(z: 18.15, x: (-7.0, 7.0), y: (0.0, 3.0), thickness: 0.3, doors: [(-0.9, 0.9, 2.4)]),
+        WallAlong(x: -2.0, z: (14.0, 18.0), y: (0.0, 3.0), thickness: 0.2),
+        WallAlong(x: 2.0, z: (14.0, 18.0), y: (0.0, 3.0), thickness: 0.2),
+        // Airlock to engineering; engineering to the mid hall.
+        WallAcross(z: 14.0, x: (-7.0, 7.0), y: (0.0, 3.0), thickness: 0.2, doors: [(-0.8, 0.8, 2.3)]),
+        WallAcross(z: 6.0, x: (-7.0, 7.0), y: (0.0, 3.0), thickness: 0.2, doors: [(2.0, 3.6, 2.3)]),
+        // The port room's wall, with the port door's doorway.
+        WallAlong(x: -1.0, z: (-4.0, 6.0), y: (0.0, 3.0), thickness: 0.2, doors: [(0.3, 1.7, 2.3)]),
+        // The bulkhead's doorway.
+        WallAcross(z: -4.0, x: (-7.0, 7.0), y: (0.0, 3.0), thickness: 0.2, doors: [(2.0, 3.6, 2.3)]),
+        // The vault's doorway and the bridge's; the wall between them.
+        WallAcross(z: -12.0, x: (-7.0, 7.0), y: (0.0, 3.0), thickness: 0.2, doors: [(-4.0, -2.4, 2.3), (3.0, 4.6, 2.3)]),
+        WallAlong(x: 1.0, z: (-20.0, -12.0), y: (0.0, 3.0), thickness: 0.2),
+        // The reactor, and its stack to the ceiling.
+        Box(center: (4.8, 1.2, 10.0), size: (2.6, 2.4, 3.0), material: Trim),
+        Box(center: (4.8, 2.7, 10.0), size: (1.0, 0.6, 1.0), material: Trim),
+        // Crates in engineering, the port room and the forward hall; a bench
+        // in the mid hall.
+        Box(center: (-5.5, 0.5, 7.5), size: (1.4, 1.0, 1.2), material: Trim),
+        Box(center: (-5.8, 0.4, 12.5), size: (1.0, 0.8, 1.0), material: Trim),
+        Box(center: (-4.0, 0.6, -2.5), size: (1.2, 1.2, 1.2), material: Trim),
+        Box(center: (-5.8, 0.4, 0.0), size: (1.0, 0.8, 1.6), material: Trim),
+        Box(center: (5.6, 0.45, -1.5), size: (1.6, 0.9, 1.2), material: Trim),
+        Box(center: (-4.5, 0.6, -8.0), size: (1.6, 1.2, 2.4), material: Trim),
+        // The data core's cradle, in the vault; the bridge console.
+        Box(center: (-3.0, 0.5, -17.0), size: (1.6, 1.0, 1.6), material: Trim),
+        Box(center: (4.0, 0.5, -19.2), size: (4.0, 1.0, 0.8), material: Trim),
+        // Outside: engine blocks either side of the airlock, a dorsal
+        // block, an antenna, and a solar wing on a strut.
+        Box(center: (-4.6, 1.5, 19.8), size: (2.6, 2.2, 3.0)),
+        Box(center: (4.6, 1.5, 19.8), size: (2.6, 2.2, 3.0)),
+        Box(center: (2.5, 3.6, 0.0), size: (4.0, 0.6, 10.0)),
+        Box(center: (-3.0, 4.3, -12.0), size: (0.3, 2.0, 0.3), material: Trim),
+        Box(center: (-8.0, 1.5, -4.0), size: (1.4, 0.3, 0.3), material: Trim),
+        Box(center: (-10.2, 1.5, -4.0), size: (3.0, 0.1, 7.0), material: Trim),
+    ],
+    // One light probe for the whole inside, so the sky doesn't light it
+    // through the walls (the client dims it while the lights are out).
+    cabins: [(center: (0.0, 1.5, -1.0), size: (14.0, 3.0, 38.0))],
+    markers: {"entry": (0.0, 0.0, 16.5), "objective": (-3.0, 0.0, -15.0)},
+    devices: [
+        // Engineering: the reactor's restart lever, and the board that shows
+        // where the power goes.
+        (id: "reactor", label: "Reactor restart", kind: Pull, at: (3.42, 1.2, 10.0), face: (-1.0, 0.0, 0.0)),
+        (id: "board", label: "Power board", kind: Board(size: (1.6, 2.0), rows: [
+            ("REACTOR", On("reactor")),
+            ("MID HALL", On("mid_lights")),
+            ("PORT DOOR", On("port_door")),
+            ("JUNCTION B", On("j2")),
+            ("BULKHEAD", On("bulkhead")),
+            ("JUNCTION C", On("j3")),
+            ("BRIDGE", On("bridge_lights")),
+            ("VAULT BUS", On("vault_bus")),
+            ("KEY A", On("key_a")),
+            ("KEY B", On("key_b")),
+            ("VAULT", On("vault")),
+        ]), at: (-6.95, 1.6, 10.0), face: (1.0, 0.0, 0.0), power: On("reactor")),
+        // The junctions.
+        (id: "j1", label: "Junction A", kind: Junction(ways: 3), at: (6.88, 1.3, 1.0), face: (-1.0, 0.0, 0.0), power: On("reactor")),
+        (id: "j2", label: "Junction B", kind: Junction(ways: 2), at: (-6.88, 1.3, -1.5), face: (1.0, 0.0, 0.0), power: Port("j1", 2), start: 1),
+        (id: "j3", label: "Junction C", kind: Junction(ways: 2), at: (6.88, 1.3, -8.0), face: (-1.0, 0.0, 0.0), power: Port("j2", 1)),
+        // Doors.
+        (id: "port_door", label: "Port door", kind: Door(size: (0.15, 2.3, 1.4), latch: true), at: (-1.0, 1.15, 1.0), face: (1.0, 0.0, 0.0), power: Port("j1", 1)),
+        (id: "bulkhead", label: "Bulkhead", kind: Door(size: (1.6, 2.3, 0.15), latch: true), at: (2.8, 1.15, -4.0), face: (0.0, 0.0, 1.0), power: Port("j2", 0)),
+        (id: "vault", label: "Vault door", kind: Door(size: (1.6, 2.3, 0.15), latch: true), at: (-3.2, 1.15, -12.0), face: (0.0, 0.0, 1.0), power: All([On("key_a"), On("key_b")])),
+        // The vault bus: a lamp beside the vault door, and the keys it
+        // powers (key B holds longer for a crew of one).
+        (id: "vault_bus", label: "Vault bus", kind: Lamp, at: (-2.0, 2.0, -11.86), face: (0.0, 0.0, 1.0), power: Port("j3", 1)),
+        (id: "key_a", label: "Key A", kind: Key(hold: 1.5), at: (4.5, 0.8, -18.72), face: (0.0, 0.0, 1.0), power: On("vault_bus")),
+        (id: "key_b", label: "Key B", kind: Key(hold: 1.5, solo: Some(5.0)), at: (-5.5, 1.3, 5.83), face: (0.0, 0.0, -1.0), power: On("vault_bus")),
+        // The data core's clamp. (Wave 4: the core itself, carried home.)
+        (id: "core_clamp", label: "Release data core", kind: Pull, at: (-3.0, 0.75, -16.12), face: (0.0, 0.0, 1.0), power: On("vault")),
+        // Lights, room by room; the alarms once the core is out.
+        (id: "eng_lights", kind: Lights(at: [(0.0, 2.85, 10.0), (-4.0, 2.85, 10.0), (0.0, 2.85, 16.0)]), power: All([On("reactor"), Not(On("core_clamp"))])),
+        (id: "mid_lights", kind: Lights(at: [(3.0, 2.85, 3.0), (3.0, 2.85, -2.0)]), power: All([Port("j1", 0), Not(On("core_clamp"))])),
+        (id: "port_lights", kind: Lights(at: [(-4.0, 2.85, 1.0)]), power: All([On("j2"), Not(On("core_clamp"))])),
+        (id: "fwd_lights", kind: Lights(at: [(0.0, 2.85, -8.0), (4.5, 2.85, -8.0)]), power: All([On("j3"), Not(On("core_clamp"))])),
+        (id: "bridge_lights", kind: Lights(at: [(4.0, 2.85, -16.0)]), power: All([Port("j3", 0), Not(On("core_clamp"))])),
+        (id: "vault_lights", kind: Lights(at: [(-3.0, 2.85, -16.0)]), power: All([On("vault"), Not(On("core_clamp"))])),
+        (id: "alarm", kind: Lights(at: [(2.0, 2.85, 12.0), (0.0, 2.85, 15.0), (5.0, 2.85, 1.0), (-4.0, 2.85, 4.0), (-2.0, 2.85, -6.0), (-5.0, 2.85, -14.0), (6.0, 2.85, -14.0)], color: (1.0, 0.12, 0.05), flash: true), power: On("core_clamp")),
+        // Conduits: the power, where it runs.
+        (id: "c_feed", kind: Conduit(path: [(4.8, 2.4, 8.5), (4.8, 2.85, 8.5), (6.85, 2.85, 8.5), (6.85, 2.85, 1.0), (6.85, 1.65, 1.0)]), power: On("reactor")),
+        (id: "c_port", kind: Conduit(path: [(6.85, 0.95, 0.8), (6.85, 0.05, 0.8), (6.85, 0.05, 0.1), (-0.85, 0.05, 0.1), (-0.85, 2.35, 0.1)]), power: Port("j1", 1)),
+        (id: "c_j2", kind: Conduit(path: [(6.85, 0.95, 1.2), (6.85, 0.05, 1.2), (6.85, 0.05, -3.7), (-6.85, 0.05, -3.7), (-6.85, 0.05, -1.2), (-6.85, 0.95, -1.2)]), power: Port("j1", 2)),
+        (id: "c_bulk", kind: Conduit(path: [(-6.85, 0.95, -1.8), (-6.85, 0.12, -1.8), (-6.85, 0.12, -3.55), (1.85, 0.12, -3.55), (1.85, 2.35, -3.55)]), power: Port("j2", 0)),
+        (id: "c_j3", kind: Conduit(path: [(-6.85, 1.65, -1.5), (-6.85, 2.85, -1.5), (-6.85, 2.85, -8.2), (6.85, 2.85, -8.2), (6.85, 1.65, -8.2)]), power: Port("j2", 1)),
+        (id: "c_bus", kind: Conduit(path: [(6.85, 0.95, -8.2), (6.85, 0.05, -8.2), (6.85, 0.05, -11.75), (-1.95, 0.05, -11.75), (-1.95, 1.8, -11.75)]), power: Port("j3", 1)),
+    ],
+)

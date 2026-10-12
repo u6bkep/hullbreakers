@@ -6,16 +6,19 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use egui::{Align2, Color32, Rect, pos2, vec2};
 
-use super::style::{self, EDGE, HOSTILE, INK, INK_DIM, MICRO, NUMERAL, RARITY, SMALL, SUIT, WARNING};
+use super::style::{self, EDGE, HOSTILE, INK, INK_DIM, MICRO, NUMERAL, SMALL, SUIT, WARNING};
 use super::view::{self, HandItem, HandTag, HandView};
 use crate::client::LocalPlayer;
 use crate::client::bindings::{Action, Bindings};
 use crate::sim::player::Player;
 use crate::sim::tuning::Tuning;
-use crate::sim::weapons::{Hand, SWITCH_SECONDS};
+use crate::sim::weapons::Hand;
 
-const CARD: egui::Vec2 = vec2(264.0, 92.0);
+/// Wide enough for a generated weapon's name on a line of its own.
+const CARD: egui::Vec2 = vec2(300.0, 104.0);
 const GAP: f32 = 8.0;
+/// The whole block: both cards, the stance strip and the unarmed line.
+pub const BLOCK: egui::Vec2 = vec2(2.0 * CARD.x + GAP, CARD.y + 8.0 + 26.0 + 30.0);
 
 pub fn hands_hud(
     mut contexts: EguiContexts,
@@ -59,7 +62,7 @@ pub fn hands_hud(
         style::text(&painter, pos2(rect.min.x + 10.0, rect.center().y), Align2::LEFT_CENTER, (i + 1).to_string(), style::num(SMALL + 1.0), number);
         style::caps(&painter, pos2(rect.min.x + 26.0, rect.center().y), Align2::LEFT_CENTER, &format!("{} · {}", s.off, s.main), MICRO, words);
         if current {
-            let done = if switching { 1.0 - loadout.switching / SWITCH_SECONDS } else { 1.0 };
+            let done = 1.0 - loadout.switch_fraction();
             let line = Rect::from_min_size(pos2(rect.min.x, rect.max.y - 2.0), vec2(rect.width() * done, 2.0));
             painter.rect_filled(line, 0.0, SUIT);
         }
@@ -110,8 +113,9 @@ fn fitted(painter: &egui::Painter, text: &str, size: f32, width: f32, color: Col
 
 fn card(painter: &egui::Painter, rect: Rect, view: &HandView, key: &str, alpha: f32, now: f32) {
     let accent = match (&view.item, view.rarity) {
-        (HandItem::Weapon, Some(r)) => RARITY[r as usize],
+        (HandItem::Weapon, Some(r)) => style::rarity(r),
         (HandItem::Grapple { .. }, _) => SUIT,
+        (HandItem::Cargo, _) => WARNING,
         _ => INK_DIM,
     };
     let empty = view.item == HandItem::Empty;
@@ -130,7 +134,7 @@ fn card(painter: &egui::Painter, rect: Rect, view: &HandView, key: &str, alpha: 
         Hand::Main => "Main",
         Hand::Off => "Off",
     };
-    // Which hand and its button; tags on the right.
+    // Row 1: which hand and its button; tags on the right.
     let r = style::caps(painter, inner.left_top(), Align2::LEFT_TOP, side, MICRO, a(INK_DIM));
     style::key_cap(painter, pos2(r.max.x + 6.0, r.center().y), key, a(INK_DIM));
     let mut x = inner.max.x;
@@ -140,40 +144,46 @@ fn card(painter: &egui::Painter, rect: Rect, view: &HandView, key: &str, alpha: 
         x = r.min.x - 10.0;
     }
 
-    let numbers_w = 76.0;
-    let name_y = inner.min.y + 20.0;
+    // Row 2: the name, the card's whole width. Row 3: what it is, and
+    // (right) the numbers. A bar along the bottom.
+    let name_y = inner.min.y + 18.0;
+    let detail_y = inner.min.y + 48.0;
+    let bar = Rect::from_min_size(pos2(inner.min.x, inner.max.y - 5.0), vec2(inner.width(), 5.0));
+    let name_color = match view.item {
+        HandItem::Missing => INK_DIM,
+        _ => INK,
+    };
+    if !empty {
+        let g = fitted(painter, &view.name, 20.0, inner.width(), a(name_color));
+        painter.galley(pos2(inner.min.x, name_y), g, a(name_color));
+    }
     match &view.item {
         HandItem::Empty => {
-            style::caps(painter, pos2(inner.min.x, name_y + 6.0), Align2::LEFT_TOP, "Empty hand", SMALL, a(INK_DIM));
+            style::caps(painter, pos2(inner.min.x, name_y + 8.0), Align2::LEFT_TOP, "Empty hand", SMALL, a(INK_DIM));
         }
         HandItem::Missing => {
-            let g = fitted(painter, &view.name, 21.0, inner.width() - numbers_w, a(INK_DIM));
-            painter.galley(pos2(inner.min.x, name_y), g, a(INK_DIM));
-            style::caps(painter, pos2(inner.min.x, name_y + 28.0), Align2::LEFT_TOP, "Not carried", MICRO, a(WARNING));
+            style::caps(painter, pos2(inner.min.x, detail_y), Align2::LEFT_TOP, &view.detail, MICRO, a(WARNING));
+        }
+        HandItem::Cargo => {
+            style::caps(painter, pos2(inner.min.x, detail_y), Align2::LEFT_TOP, &view.detail, MICRO, a(WARNING));
+            style::caps(painter, pos2(inner.max.x, detail_y + 12.0), Align2::RIGHT_CENTER, "No guns, no grapple", MICRO, a(INK_DIM));
         }
         HandItem::Grapple { line, range } => {
-            let g = style::galley(painter, "Grapple", style::ui(21.0), a(INK), 0.0);
-            painter.galley(pos2(inner.min.x, name_y), g, a(INK));
-            style::caps(painter, pos2(inner.min.x, name_y + 28.0), Align2::LEFT_TOP, "Suit system", MICRO, a(INK_DIM));
-            let bar = Rect::from_min_size(pos2(inner.min.x, inner.max.y - 5.0), vec2(inner.width(), 4.0));
+            style::caps(painter, pos2(inner.min.x, detail_y), Align2::LEFT_TOP, &view.detail, MICRO, a(INK_DIM));
             match line {
                 Some(line) => {
-                    let r = style::unit(painter, pos2(inner.max.x, name_y + 13.0), Align2::RIGHT_CENTER, "m", a(INK_DIM));
-                    style::text(painter, pos2(r.min.x - 3.0, name_y + 10.0), Align2::RIGHT_CENTER, format!("{line:.0}"), style::num(26.0), a(SUIT));
+                    let r = style::unit(painter, pos2(inner.max.x, detail_y + 16.0), Align2::RIGHT_CENTER, "m", a(INK_DIM));
+                    style::text(painter, pos2(r.min.x - 3.0, detail_y + 12.0), Align2::RIGHT_CENTER, format!("{line:.0}"), style::num(26.0), a(SUIT));
                     style::seg_bar(painter, bar, 1, line / range.max(1.0), 0.0, a(SUIT));
                 }
                 None => {
-                    style::caps(painter, pos2(inner.max.x, name_y + 10.0), Align2::RIGHT_CENTER, "Ready", SMALL, a(SUIT));
+                    style::caps(painter, pos2(inner.max.x, detail_y + 12.0), Align2::RIGHT_CENTER, "Ready", SMALL, a(SUIT));
                     style::seg_bar(painter, bar, 1, 0.0, 0.0, a(SUIT));
                 }
             }
         }
         HandItem::Weapon => {
-            let g = fitted(painter, &view.name, 21.0, inner.width() - numbers_w, a(INK));
-            painter.galley(pos2(inner.min.x, name_y), g, a(INK));
-            if let Some(r) = view.rarity.filter(|r| *r != view::Rarity::Common) {
-                style::caps(painter, pos2(inner.min.x, name_y + 28.0), Align2::LEFT_TOP, r.label(), MICRO, a(RARITY[r as usize]));
-            }
+            style::caps(painter, pos2(inner.min.x, detail_y), Align2::LEFT_TOP, &view.detail, MICRO, a(accent));
             let (mag, capacity) = view.mag.unwrap_or((0, 1));
             let dry = view.tags.contains(&HandTag::Dry) || mag == 0;
             let color = if dry {
@@ -183,13 +193,15 @@ fn card(painter: &egui::Painter, rect: Rect, view: &HandView, key: &str, alpha: 
             } else {
                 INK
             };
-            let n = style::text(painter, pos2(inner.max.x, name_y - 4.0), Align2::RIGHT_TOP, mag.to_string(), style::num(NUMERAL), a(color));
+            // "38 / 160": the mag big, what's spare small after it.
+            let mut right = inner.max.x;
             if let Some(reserve) = view.reserve {
                 let reserve_color = if reserve == 0 { HOSTILE } else { INK_DIM };
-                style::text(painter, pos2(inner.max.x, n.max.y - 2.0), Align2::RIGHT_TOP, format!("/ {reserve}"), style::num(SMALL), a(reserve_color));
+                let r = style::text(painter, pos2(right, bar.min.y - 8.0), Align2::RIGHT_BOTTOM, format!("/ {reserve}"), style::num(SMALL), a(reserve_color));
+                right = r.min.x - 5.0;
             }
+            style::text(painter, pos2(right, bar.min.y - 3.0), Align2::RIGHT_BOTTOM, mag.to_string(), style::num(NUMERAL), a(color));
             // The mag: a cell per round when they fit; the reload sweeps it.
-            let bar = Rect::from_min_size(pos2(inner.min.x, inner.max.y - 5.0), vec2(inner.width(), 5.0));
             let cells = if capacity <= 50 { capacity as usize } else { 25 };
             match view.reload {
                 Some(done) => style::seg_bar(painter, bar, cells, done, 0.0, a(SUIT)),

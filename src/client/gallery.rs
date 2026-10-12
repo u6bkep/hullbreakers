@@ -14,7 +14,7 @@ use bevy::world_serialization::WorldAssetRoot;
 use bevy_egui::{EguiContexts, egui};
 
 use super::camera::PlayerCamera;
-use crate::sim::mission::{GALLERY_AT, GalleryAnchor};
+use crate::sim::scenarios::gallery::{GALLERY_AT, GalleryAnchor};
 
 /// Where assets are read from: the repo's `assets/` when run from a build
 /// of it, otherwise `assets/` beside wherever the game is started.

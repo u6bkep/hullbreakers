@@ -92,15 +92,14 @@ pub fn fade(color: Color32, alpha: f32) -> Color32 {
     color.gamma_multiply(alpha.clamp(0.0, 1.0))
 }
 
-// Rarity accents for weapon cards, in order; none near WEAK.
+// Rarity: the colours are the items' own (`Rarity::color`, which the
+// world's cases glow in too), so there is one source of them.
 
-pub const RARITY: [Color32; 5] = [
-    INK_DIM,
-    Color32::from_rgb(0x7e, 0xe0, 0x8a),
-    Color32::from_rgb(0x5a, 0xa9, 0xff),
-    Color32::from_rgb(0xa9, 0x8b, 0xff),
-    Color32::from_rgb(0xff, 0xb0, 0x3a),
-];
+/// A weapon's rarity accent. None of them is near WEAK.
+pub fn rarity(rarity: crate::sim::items::Rarity) -> Color32 {
+    let [r, g, b] = rarity.color();
+    Color32::from_rgb(r, g, b)
+}
 
 // Painters.
 

@@ -12,9 +12,10 @@ use super::view;
 use crate::client::LocalPlayer;
 use crate::client::bindings::{Action, Bindings};
 use crate::client::camera::PlayerCamera;
+use crate::client::input::MouseCaptured;
 use crate::sim::{Layer, SimTick};
 use crate::sim::bodies::Bodies;
-use crate::sim::pickups::{PICKUP_HALF, Pickup};
+use crate::sim::pickups::Pickup;
 use crate::sim::player::{CONTROL_REACH, Player};
 use crate::sim::ship::Control;
 use crate::sim::tuning::Tuning;
@@ -31,8 +32,14 @@ pub fn reticle(
     controls: Query<(&Control, &Transform, &ChildOf)>,
     pickups: Query<&Pickup>,
     tick: Res<SimTick>,
+    captured: Res<MouseCaptured>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
+    // With the menu or the tuning panel open (the mouse free), the world's
+    // prompts aren't for you: the centre stays clear for the window.
+    if !captured.0 {
+        return Ok(());
+    }
     let (own, player) = *player;
     let c = ctx.content_rect().center();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("reticle")));
@@ -137,13 +144,13 @@ fn control_prompt(
             frame.dir_to_local(*dir),
             control.half_size,
         )?;
-        (t <= CONTROL_REACH && t <= blocked).then(|| (t, control.action.label().to_string()))
+        (t <= CONTROL_REACH && t <= blocked).then(|| (t, control.label.to_string()))
     });
     // Pickups sit in the open, a little further than a wall behind them.
     let blocked = blocked + 0.1;
     let cases = pickups.iter().filter_map(|pickup| {
         let (at, turn) = pickup.sim_pose(bodies, tick)?;
-        let t = crate::sim::player::ray_box(turn.inverse() * (eye - at), turn.inverse() * *dir, PICKUP_HALF)?;
+        let t = crate::sim::player::ray_box(turn.inverse() * (eye - at), turn.inverse() * *dir, pickup.half())?;
         (t <= CONTROL_REACH && t <= blocked).then(|| (t, view::pickup_label(pickup)))
     });
     buttons

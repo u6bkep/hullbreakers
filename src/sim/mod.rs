@@ -9,16 +9,19 @@ pub mod bodies;
 pub mod bots;
 pub mod combat;
 pub mod design;
+pub mod devices;
 pub mod events;
 pub mod flight;
 pub mod frame;
 pub mod input;
+pub mod items;
 pub mod mission;
 pub mod motion;
 pub mod nav;
 pub mod pickups;
 pub mod player;
 pub mod rope;
+pub mod scenarios;
 pub mod ship;
 pub mod shots;
 pub mod tuning;
@@ -88,13 +91,21 @@ impl Plugin for SimSharedPlugin {
         }
         app.add_message::<ship::ShipCommand>()
             .add_message::<bots::SpawnRobots>()
+            .add_message::<pickups::SpawnLoot>()
             .init_resource::<nav::NavGrids>()
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
             .add_observer(bots::add_body_tuning)
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid)
-            .add_observer(mission::shape_debris);
+            .add_observer(mission::shape_debris)
+            // A ship's closed doors are part of its collider, wherever it is.
+            .add_systems(
+                FixedPostUpdate,
+                devices::fit_doors
+                    .in_set(SimSystems::Mission)
+                    .after(mission::MissionSystems::React),
+            );
     }
 }
 
@@ -160,7 +171,9 @@ impl Plugin for SimPlugin {
         app.add_message::<vitals::Damage>()
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
+            .add_observer(pickups::set_adrift)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
+            .init_resource::<mission::CrewTally>()
             .add_systems(
                 FixedUpdate,
                 (
@@ -200,25 +213,44 @@ impl Plugin for SimPlugin {
                     .after(SimSystems::Beams)
                     .before(SimSystems::Players),
             )
-            .add_systems(
+            .configure_sets(
                 FixedPostUpdate,
                 (
-                    combat::apply_damage,
-                    shots::launch_shots,
-                    shots::fly_shots,
-                    vitals::beam_burns,
-                    vitals::apply_damage,
-                    pickups::remove_taken,
-                    vitals::settle_deaths,
-                    bots::settle_robot_deaths,
-                    mission::handle_presses,
-                    mission::settle_battle,
-                    mission::switch_scenario,
-                    mission::gallery_arrivals,
+                    mission::MissionSystems::Settle,
+                    mission::MissionSystems::React,
+                    mission::MissionSystems::Judge,
+                    mission::MissionSystems::Switch,
                 )
                     .chain()
                     .in_set(SimSystems::Mission),
+            )
+            .add_systems(
+                FixedPostUpdate,
+                (
+                    (
+                        combat::apply_damage,
+                        shots::launch_shots,
+                        shots::fly_shots,
+                        vitals::beam_burns,
+                        vitals::apply_damage,
+                        pickups::remove_taken,
+                        pickups::spawn_drops,
+                        pickups::debug_spawn_loot,
+                        vitals::settle_deaths,
+                        pickups::drop_robot_loot,
+                        bots::settle_robot_deaths,
+                    )
+                        .chain()
+                        .in_set(mission::MissionSystems::Settle),
+                    (mission::handle_presses, devices::run_devices, mission::tally_crew)
+                        .chain()
+                        .in_set(mission::MissionSystems::React),
+                    (mission::return_when_decided, mission::switch_scenario, mission::arrivals)
+                        .chain()
+                        .in_set(mission::MissionSystems::Switch),
+                ),
             );
+        scenarios::add_scenarios(app);
     }
 }
 

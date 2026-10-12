@@ -24,7 +24,7 @@ pub mod view;
 pub mod vitals;
 
 use bevy::prelude::*;
-use bevy_egui::{EguiPrimaryContextPass, egui};
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use super::camera::PlayerCamera;
 
@@ -49,6 +49,7 @@ impl Plugin for HudPlugin {
                     markers::reference_overlay,
                     markers::ship_markers,
                     reticle::reticle,
+                    crate::client::items_hud::pickup_card,
                     flight::flight_hud,
                     flight::event_feed,
                     mission::mission_hud,
@@ -73,8 +74,9 @@ pub struct HudMemory {
     pub last_eye: Option<Vec3>,
     /// Your last death.
     pub died: Option<vitals::Death>,
-    /// Whether you carry a weapon (as of last frame).
-    pub armed: bool,
+    /// Whether you carry anything a death would leave behind (as of last
+    /// frame).
+    pub carrying: bool,
     /// The case your kit was left in, once it's been seen.
     pub kit: Option<Entity>,
     /// World direction toward each recent hit's source, and when.
@@ -83,9 +85,13 @@ pub struct HudMemory {
     pub labels: markers::Labels,
 }
 
-fn begin_frame(time: Res<Time>, mut memory: ResMut<HudMemory>) {
+fn begin_frame(mut contexts: EguiContexts, time: Res<Time>, mut memory: ResMut<HudMemory>) -> Result {
     memory.now = time.elapsed_secs();
     memory.labels.clear();
+    // World markers' labels keep off the HUD's own blocks.
+    let screen = contexts.ctx_mut()?.content_rect();
+    memory.labels.reserve(screen);
+    Ok(())
 }
 
 /// World to HUD points through the player's camera.

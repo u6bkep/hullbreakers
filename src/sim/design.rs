@@ -23,6 +23,7 @@ use serde::Deserialize;
 
 use super::SimMaterial;
 use super::bots::Robot;
+use super::devices::{Device, DeviceFile};
 use super::mission::ScenarioKind;
 use super::nav::NavGrid;
 use super::ship::ControlAction;
@@ -79,6 +80,8 @@ struct ModuleFile {
     posts: Vec<Post>,
     #[serde(default)]
     markers: HashMap<String, Vec3>,
+    #[serde(default)]
+    devices: Vec<DeviceFile>,
 }
 
 /// A piece of a module's geometry, in its frame.
@@ -193,15 +196,32 @@ pub struct ShipDesign {
     pub shield: Shield,
     pub turrets: Vec<Vec3>,
     pub boxes: Vec<HullBox>,
-    /// Buttons: (action, centre, half size).
+    /// Buttons: (action, centre, half size), including every device a
+    /// player presses (as [`ControlAction::Device`]).
     pub controls: Vec<(ControlAction, Vec3, Vec3)>,
     pub cabins: Vec<Cabin>,
     pub lights: Vec<Vec3>,
     pub posts: Vec<Post>,
     pub markers: HashMap<String, Vec3>,
+    /// Devices (see [`super::devices`]), and the order they're evaluated
+    /// in (each after whatever its conditions read).
+    pub devices: Vec<Device>,
+    pub device_order: Vec<u16>,
 }
 
 impl ShipDesign {
+    /// The index of the device called `id`.
+    pub fn device_index(&self, id: &str) -> Option<usize> {
+        self.devices.iter().position(|d| d.id == id)
+    }
+
+    /// The device called `id`; every design a scenario uses has the
+    /// devices it reads.
+    pub fn device(&self, id: &str) -> usize {
+        self.device_index(id)
+            .unwrap_or_else(|| panic!("ship design {:?} has no device {id:?}", self.id))
+    }
+
     /// A named point; every design that's used for something has the
     /// markers that use needs (see [`check`]).
     pub fn marker(&self, name: &str) -> Vec3 {
@@ -236,7 +256,7 @@ pub fn designs() -> impl Iterator<Item = &'static ShipDesign> {
     all.into_iter()
 }
 
-fn assemble(id: &str, text: &str, files: &HashMap<&str, &str>) -> Result<ShipDesign, String> {
+pub(crate) fn assemble(id: &str, text: &str, files: &HashMap<&str, &str>) -> Result<ShipDesign, String> {
     let file: DesignFile = ron::from_str(text).map_err(|e| format!("design.ron: {e}"))?;
     let mut ship = ShipDesign {
         id: id.to_string(),
@@ -251,7 +271,10 @@ fn assemble(id: &str, text: &str, files: &HashMap<&str, &str>) -> Result<ShipDes
         lights: Vec::new(),
         posts: Vec::new(),
         markers: HashMap::new(),
+        devices: Vec::new(),
+        device_order: Vec::new(),
     };
+    let mut conds = Vec::new();
     let hull = if file.hostile { SimMaterial::HostileHull } else { SimMaterial::Hull };
     for place in &file.modules {
         let text = files.get(place.module.as_str()).ok_or_else(|| format!("no module {:?}", place.module))?;
@@ -294,6 +317,26 @@ fn assemble(id: &str, text: &str, files: &HashMap<&str, &str>) -> Result<ShipDes
             if ship.markers.insert(name.clone(), to_ship(at)).is_some() {
                 return Err(format!("marker {name:?} placed twice"));
             }
+        }
+        for d in &module.devices {
+            let (device, rows) = super::devices::place(d, &to_ship, turn, &turn_extent);
+            conds.push((d.power.clone(), rows));
+            ship.devices.push(device);
+        }
+    }
+    ship.device_order = super::devices::wire(&mut ship.devices, conds).map_err(|e| format!("devices: {e}"))?;
+    for (i, device) in ship.devices.iter().enumerate() {
+        if device.pressable() {
+            ship.controls.push((ControlAction::Device(i as u16), device.at, device.press_box()));
+        }
+        // A gate's frame is structure: something to grapple and to hit.
+        for (center, size, rotation) in device.gate_frame() {
+            ship.boxes.push(HullBox {
+                center,
+                size,
+                rotation,
+                material: SimMaterial::Trim,
+            });
         }
     }
     // Turret bases, where the turrets are mounted.
@@ -392,6 +435,12 @@ fn wall_across(z: f32, (x0, x1): (f32, f32), (y0, y1): (f32, f32), t: f32, doors
 /// shortfall (empty when it passes). See docs/ships.md.
 pub fn check(ship: &ShipDesign) -> Vec<String> {
     let mut problems = Vec::new();
+    // A site with nothing to walk to (a course of gates) has no floor plan
+    // to check, and may be far too big for one.
+    let walked = ship.hostile || !ship.posts.is_empty() || !ship.controls.is_empty() || ship.markers.contains_key("entry");
+    if !walked {
+        return problems;
+    }
     let grid = NavGrid::for_design(ship);
     // Robots stand where a walker can, and every walker's post is reachable
     // from wherever boarders come in; flyers hold station clear of the hull.
@@ -440,7 +489,26 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
             problems.push(format!("control {action:?} at {center}: nowhere to stand within reach"));
         }
     }
-    if !ship.hostile {
+    // Loot crates (`loot…` markers) stand on a floor the boarders can walk to.
+    let mut loot: Vec<_> = ship.markers.iter().filter(|(name, _)| name.starts_with("loot")).collect();
+    loot.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, &at) in loot {
+        let on = grid.standing_on(at).map(|n| grid.point(n));
+        if !on.is_some_and(|p| near(p, at, 0.6)) {
+            problems.push(format!("loot marker {name:?} at {at}: not on a floor"));
+        } else if entry_node.is_some() && !reachable(at) {
+            problems.push(format!("loot marker {name:?} at {at}: can't be walked to from the entry"));
+        }
+    }
+    // A site to explore (with its doors open): its objective can be walked
+    // to from its entry.
+    if !ship.hostile
+        && let (Some(e), Some(&o)) = (entry, ship.markers.get("objective"))
+        && !reachable(o)
+    {
+        problems.push(format!("the objective ({o}) can't be walked to from the entry ({e}), even with every door open"));
+    }
+    if ship.id == super::ship::HOME {
         // The crew's ship: the mission wall and the locker.
         for kind in ScenarioKind::ALL {
             if !ship.controls.iter().any(|(a, ..)| *a == ControlAction::Scenario(kind)) {

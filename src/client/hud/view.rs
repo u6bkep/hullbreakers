@@ -1,35 +1,14 @@
 //! What the HUD shows of the player's kit, read from the sim in one place.
 //!
 //! The HUD draws hands, stances and pickups from these small views, never
-//! from the loadout directly, so when what players carry changes (weapons
-//! as items, an inventory), only the functions here change.
+//! from the loadout directly, so when what players carry changes, only the
+//! functions here change.
 
+use crate::sim::items::Rarity;
 use crate::sim::pickups::Pickup;
 use crate::sim::player::Player;
 use crate::sim::tuning::Tuning;
 use crate::sim::weapons::{GunKind, Hand, Slot};
-
-/// How rare a weapon is; its card's accent (see `style::RARITY`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Rarity {
-    Common,
-    Uncommon,
-    Rare,
-    Epic,
-    Legendary,
-}
-
-impl Rarity {
-    pub fn label(self) -> &'static str {
-        match self {
-            Rarity::Common => "Common",
-            Rarity::Uncommon => "Uncommon",
-            Rarity::Rare => "Rare",
-            Rarity::Epic => "Epic",
-            Rarity::Legendary => "Legendary",
-        }
-    }
-}
 
 /// What a hand holds, as far as its card cares.
 #[derive(Clone, Debug, PartialEq)]
@@ -37,8 +16,10 @@ pub enum HandItem {
     Weapon,
     /// The grapple's launcher; `line` is how much rope is out (m), of `range`.
     Grapple { line: Option<f32>, range: f32 },
-    /// A stance slot whose weapon isn't carried.
+    /// A stance's weapon slot with no gun in it.
     Missing,
+    /// Bulky cargo fills both hands.
+    Cargo,
     Empty,
 }
 
@@ -61,7 +42,10 @@ pub enum HandTag {
 pub struct HandView {
     pub hand: Hand,
     pub item: HandItem,
+    /// The name, as long as it is ("Halvard Mk 3 Longshot Auto-Rifle").
     pub name: String,
+    /// A line under it: what it is ("Rare rifle", "Suit system").
+    pub detail: String,
     pub rarity: Option<Rarity>,
     /// Rounds in the mag, and what it holds.
     pub mag: Option<(u16, u16)>,
@@ -83,12 +67,19 @@ fn hand_view(player: &Player, tuning: &Tuning, hand: Hand) -> HandView {
         hand,
         item: HandItem::Empty,
         name: String::new(),
+        detail: String::new(),
         rarity: None,
         mag: None,
         reserve: None,
         reload: None,
         tags: Vec::new(),
     };
+    if let Some(cargo) = loadout.inventory.carrying {
+        view.item = HandItem::Cargo;
+        view.name = cargo.name().into();
+        view.detail = "Hands full".into();
+        return view;
+    }
     match slot {
         Slot::Empty => {}
         Slot::Grapple => {
@@ -97,31 +88,32 @@ fn hand_view(player: &Player, tuning: &Tuning, hand: Hand) -> HandView {
                 range: tuning.grapple_range,
             };
             view.name = "Grapple".into();
+            view.detail = "Suit system".into();
         }
         Slot::Gun(i) => {
-            let Some(slot_gun) = loadout.guns.get(i as usize) else {
-                return view;
-            };
-            view.name = slot_gun.kind.stats().name.into();
-            let Some(gun) = loadout.gun(hand) else {
+            let Some(weapon) = loadout.weapon(hand) else {
                 view.item = HandItem::Missing;
+                view.name = format!("Weapon slot {}", i + 1);
+                view.detail = "Empty slot".into();
                 return view;
             };
-            let stats = gun.kind.stats();
-            let state = loadout.hands[hand as usize];
+            let stats = weapon.stats();
+            let reserve = loadout.reserve(hand).unwrap_or(0);
             view.item = HandItem::Weapon;
-            view.rarity = Some(Rarity::Common);
-            view.mag = Some((gun.mag, stats.mag));
-            view.reserve = Some(gun.reserve);
-            view.reload = state.reloading.map(|left| 1.0 - (left / stats.reload).clamp(0.0, 1.0));
+            view.name = weapon.name();
+            view.detail = format!("{} {}", weapon.rarity.name(), weapon.frame.name());
+            view.rarity = Some(weapon.rarity);
+            view.mag = Some((weapon.mag, stats.mag));
+            view.reserve = Some(reserve);
+            view.reload = loadout.reload_progress(hand);
             if view.reload.is_some() {
                 view.tags.push(HandTag::Reloading);
-            } else if state.reload_queued {
+            } else if loadout.hands[hand as usize].reload_queued {
                 view.tags.push(HandTag::Queued);
             }
-            if gun.mag == 0 && gun.reserve == 0 {
+            if weapon.mag == 0 && reserve == 0 {
                 view.tags.push(HandTag::Dry);
-            } else if (gun.mag as f32) < stats.mag as f32 * 0.25 {
+            } else if (weapon.mag as f32) < stats.mag as f32 * 0.25 {
                 view.tags.push(HandTag::Low);
             }
             if loadout.braced(hand) {
@@ -144,13 +136,13 @@ pub fn stance_views(player: &Player) -> Vec<StanceView> {
     let short = |slot: Slot| match slot {
         Slot::Empty => "—",
         Slot::Grapple => "GRP",
-        Slot::Gun(i) => match loadout.guns.get(i as usize) {
-            Some(g) if g.carried => match g.kind {
+        Slot::Gun(i) => match loadout.inventory.weapons.get(i as usize).copied().flatten() {
+            Some(g) => match g.frame {
                 GunKind::Smg => "SMG",
                 GunKind::Rifle => "RFL",
                 _ => "GUN",
             },
-            _ => "—",
+            None => "—",
         },
     };
     loadout
@@ -163,16 +155,21 @@ pub fn stance_views(player: &Player) -> Vec<StanceView> {
         .collect()
 }
 
-/// Whether the player carries any weapon (or anything that would be left
-/// behind on death).
+/// Whether the player has any weapon in their weapon slots.
 pub fn armed(player: &Player) -> bool {
-    player.loadout.guns.iter().any(|g| g.carried)
+    player.loadout.inventory.weapons.iter().any(Option::is_some)
 }
 
 /// What looking at a pickup offers.
 pub fn pickup_label(pickup: &Pickup) -> String {
-    let names: Vec<&str> = pickup.guns.iter().map(|g| g.kind.stats().name).collect();
-    format!("Pick up: {}", names.join(", "))
+    pickup.label()
+}
+
+/// Whether dying now would leave a case behind: anything in the weapon
+/// slots, the pack, the ammo pools or the hands.
+pub fn carries_anything(player: &Player) -> bool {
+    let inv = &player.loadout.inventory;
+    inv.weapons.iter().any(Option::is_some) || inv.pack.iter().any(Option::is_some) || inv.ammo.iter().any(|&a| a > 0) || inv.carrying.is_some()
 }
 
 #[cfg(test)]
@@ -180,6 +177,7 @@ mod tests {
     use super::*;
     use crate::sim::events::EventLog;
     use crate::sim::input::InputCursor;
+    use crate::sim::items::{CargoKind, Weapon};
     use crate::sim::player::Mode;
     use crate::sim::weapons::Loadout;
     use bevy::prelude::*;
@@ -207,19 +205,29 @@ mod tests {
     fn the_full_kit_shows_a_gun_and_the_grapple() {
         let [main, off] = hand_views(&player(Loadout::default()), &Tuning::default());
         assert_eq!(main.item, HandItem::Weapon);
-        assert_eq!(main.name, "SMG");
-        assert_eq!(main.mag, Some((40, 40)));
+        assert_eq!(main.rarity, Some(Rarity::Standard));
+        assert!(main.mag.is_some_and(|(n, of)| n == of && of > 0));
         assert!(main.tags.is_empty(), "{:?}", main.tags);
         assert!(matches!(off.item, HandItem::Grapple { line: None, .. }));
     }
 
     #[test]
-    fn a_gun_alone_is_braced_and_flags_a_low_mag() {
+    fn a_generated_gun_shows_its_name_and_rarity() {
+        let mut loadout = Loadout::default();
+        let gun = Weapon::new(GunKind::Rifle, 7, Rarity::Exotic);
+        loadout.inventory.weapons[0] = Some(Weapon { mag: 1, ..gun });
+        let [main, _] = hand_views(&player(loadout), &Tuning::default());
+        assert_eq!(main.name, gun.name());
+        assert_eq!(main.rarity, Some(Rarity::Exotic));
+        assert!(main.tags.contains(&HandTag::Low));
+    }
+
+    #[test]
+    fn a_gun_alone_is_braced() {
         let mut loadout = Loadout::default();
         loadout.current = 2;
-        loadout.guns[1].mag = 3;
         let [main, off] = hand_views(&player(loadout), &Tuning::default());
-        assert_eq!(main.tags, vec![HandTag::Low, HandTag::Braced]);
+        assert_eq!(main.tags, vec![HandTag::Braced]);
         assert_eq!(off.item, HandItem::Empty);
     }
 
@@ -229,8 +237,17 @@ mod tests {
         loadout.current = 0;
         let p = player(loadout);
         assert!(!armed(&p));
+        assert!(!carries_anything(&p));
         let [main, _] = hand_views(&p, &Tuning::default());
         assert_eq!(main.item, HandItem::Missing);
         assert_eq!(stance_views(&p)[0].main, "—");
+    }
+
+    #[test]
+    fn bulky_cargo_fills_both_hands() {
+        let mut loadout = Loadout::default();
+        loadout.inventory.carrying = Some(CargoKind::PowerCell);
+        let views = hand_views(&player(loadout), &Tuning::default());
+        assert!(views.iter().all(|v| v.item == HandItem::Cargo));
     }
 }

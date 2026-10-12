@@ -21,7 +21,6 @@ use super::tuning::Tuning;
 use super::events::PlayerEvent;
 use super::player::Player;
 use super::vitals::{Damage, Vitals};
-use super::weapons::GunKind;
 
 /// How deep past where a bullet meets a body it can still find the weak
 /// spot (m): weak spots sit just inside the hull capsule, so a shot from
@@ -44,10 +43,14 @@ pub enum Team {
 pub struct Shot {
     pub shooter: Entity,
     pub team: Team,
-    pub gun: GunKind,
+    /// What it does to what it hits, and its mass (kg), for its push.
+    pub damage: f32,
+    pub mass: f32,
     pub position: Vec3,
     pub velocity: Vec3,
     pub age: f32,
+    /// Where it was fired from: what its victim is told.
+    pub origin: Vec3,
 }
 
 /// Every bullet in flight.
@@ -63,7 +66,8 @@ pub fn launch_shots(
     for (entity, player, team) in &players {
         for (at, event) in player.events.iter() {
             let PlayerEvent::Fired {
-                gun,
+                damage,
+                mass,
                 origin,
                 velocity,
                 ..
@@ -75,10 +79,12 @@ pub fn launch_shots(
                 shots.0.push(Shot {
                     shooter: entity,
                     team: team.copied().unwrap_or_default(),
-                    gun,
+                    damage,
+                    mass,
                     position: origin,
                     velocity,
                     age: 0.0,
+                    origin,
                 });
             }
         }
@@ -117,7 +123,6 @@ pub fn fly_shots(
             return shot.age < SHOT_LIFE;
         };
         let point = shot.position + dir * hit.distance;
-        let stats = shot.gun.stats();
         if vitals.contains(hit.entity) {
             // A robot's weak spot is a sphere (inside it, or behind its
             // armour); the bullet's line through the body finds it.
@@ -131,13 +136,14 @@ pub fn fly_shots(
             });
             damage.write(Damage {
                 target: hit.entity,
-                amount: if weak { stats.damage * WEAK_MULTIPLIER } else { stats.damage },
+                amount: if weak { shot.damage * WEAK_MULTIPLIER } else { shot.damage },
                 source: Some(shot.shooter),
                 weak,
+                from: Some(shot.origin),
             });
         } else if let Some(body) = bodies.body_of_collider(hit.entity) {
             let relative = shot.velocity - bodies.frame(body).map_or(Vec3::ZERO, |f| f.point_velocity(point));
-            bodies.apply_impulse(body, relative * stats.bullet_mass, point);
+            bodies.apply_impulse(body, relative * shot.mass, point);
         }
         false
     });

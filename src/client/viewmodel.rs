@@ -22,12 +22,15 @@ use super::camera::{PlayerCamera, VIEW_MODEL_LAYER};
 use super::gallery::asset_root;
 use crate::sim::events::PlayerEvent;
 use crate::sim::player::Player;
-use crate::sim::weapons::{GunKind, Hand, SWITCH_SECONDS, Slot};
+use super::pickup_look::WeaponPaint;
+use crate::sim::items::{Paint, Rarity, Weapon};
+use crate::sim::weapons::{GunKind, Hand, Slot};
 
 /// What a hand shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Held {
-    Gun(GunKind),
+    /// A gun of a frame, in its paint (`None`: standard issue, as modelled).
+    Gun(GunKind, Option<Paint>),
     Grapple,
     /// The glove alone, on the foregrip of the rifle the other hand holds.
     Brace,
@@ -36,12 +39,34 @@ pub enum Held {
 impl Held {
     pub fn model(self) -> Option<&'static str> {
         match self {
-            Held::Gun(GunKind::Smg) => Some("weapons/smg_frame/smg_frame.glb"),
-            Held::Gun(GunKind::Rifle) => Some("weapons/rifle/rifle.glb"),
-            Held::Gun(_) => None,
+            Held::Gun(frame, _) => frame_model(frame),
             Held::Grapple => Some("weapons/grapple/grapple.glb"),
             Held::Brace => None,
         }
+    }
+}
+
+/// A frame's model, if it has one.
+pub fn frame_model(frame: GunKind) -> Option<&'static str> {
+    match frame {
+        GunKind::Smg => Some("weapons/smg_frame/smg_frame.glb"),
+        GunKind::Rifle => Some("weapons/rifle/rifle.glb"),
+        _ => None,
+    }
+}
+
+impl Held {
+    /// The paint a gun wears, if not its model's own.
+    pub fn paint(self) -> Option<Paint> {
+        match self {
+            Held::Gun(_, paint) => paint,
+            _ => None,
+        }
+    }
+
+    /// For a weapon in hand.
+    pub fn gun(weapon: &Weapon) -> Held {
+        Held::Gun(weapon.frame, (weapon.rarity != Rarity::Standard).then(|| weapon.look().paint))
     }
 }
 
@@ -108,23 +133,21 @@ pub fn spawn_view_hands(add: On<Add, PlayerCamera>, mut commands: Commands) {
     }
 }
 
-/// What each hand holds, from the stance (a gun not carried shows nothing).
+/// What each hand holds, from the stance (an empty weapon slot shows
+/// nothing, and neither do hands full of cargo).
 pub fn held(player: &Player) -> [Option<Held>; 2] {
     let loadout = &player.loadout;
-    let stance = loadout.stances[loadout.current as usize];
-    let item = |slot: Slot| match slot {
+    let stance = loadout.stance();
+    let item = |hand: Hand| match stance.slot(hand) {
+        _ if loadout.hands_full() => None,
         Slot::Empty => None,
         Slot::Grapple => Some(Held::Grapple),
-        Slot::Gun(i) => loadout
-            .guns
-            .get(i as usize)
-            .filter(|g| g.carried)
-            .map(|g| Held::Gun(g.kind)),
+        Slot::Gun(_) => loadout.weapon(hand).map(Held::gun),
     };
-    let (main, off) = (item(stance.main), item(stance.off));
+    let (main, off) = (item(Hand::Main), item(Hand::Off));
     // A rifle with the other hand free is braced on its foregrip.
     let brace = |this: Option<Held>, other: Option<Held>| match (this, other) {
-        (None, Some(Held::Gun(GunKind::Rifle))) => Some(Held::Brace),
+        (None, Some(Held::Gun(GunKind::Rifle, _))) => Some(Held::Brace),
         _ => this,
     };
     [brace(main, off), brace(off, main)]
@@ -162,7 +185,7 @@ pub fn pose_view_hands(
 
     let what = held(&player);
     let loadout = &player.loadout;
-    let switching = (loadout.switching / SWITCH_SECONDS).clamp(0.0, 1.0);
+    let switching = loadout.switch_fraction();
     let braced = what.contains(&Some(Held::Brace));
     let reeling = local.0.reel_in || local.0.pay_out;
     // The main hand's pose, for a brace to follow.
@@ -180,12 +203,15 @@ pub fn pose_view_hands(
                 }
             }
             if let Some(path) = item.and_then(Held::model) {
-                commands.spawn((
+                let mut model = commands.spawn((
                     HandModel,
                     WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
                     Transform::default(),
                     ChildOf(entity),
                 ));
+                if let Some(paint) = item.and_then(Held::paint) {
+                    model.insert(WeaponPaint(paint));
+                }
             }
             if item.is_some() && asset_root().join(ARMS).is_file() {
                 commands.spawn((
@@ -232,11 +258,9 @@ pub fn pose_view_hands(
             // Aim at where the line of fire crosses the tracers' path.
             let aim = Transform::from_translation(grip).looking_at(Vec3::NEG_Z * CONVERGE, Vec3::Y);
             // Reloading: dip and turn the gun over, then bring it back.
-            let reload = loadout.hands[index].reloading.zip(match item {
-                Held::Gun(kind) => Some(kind.stats().reload),
-                _ => None,
-            });
-            let dip = reload.map_or(0.0, |(left, total)| (std::f32::consts::PI * (1.0 - left / total).clamp(0.0, 1.0)).sin());
+            let dip = loadout
+                .reload_progress(hand.hand)
+                .map_or(0.0, |done| (std::f32::consts::PI * done).sin());
             let drop = switching * SWITCH_DROP + dip * RELOAD_DIP;
             let kick = hand.kick;
             let offset = Vec3::new(sway.x * 0.3, sway.y * 0.3 - drop, kick * KICK_BACK);
