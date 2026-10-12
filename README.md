@@ -239,3 +239,10 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 
 All feel parameters are in `sim/tuning.rs` and appear in the F1 panel. "Save"
 writes `tuning.ron` in the working directory, which is loaded at startup.
+
+## Working notes
+
+- [TheBook.md](TheBook.md) is a ledger of friction: every time a library or
+  one of our subsystems gets in the way, it gets an entry, so that a
+  pattern of small costs shows up in review before it's a big one.
+- Plans live in `docs/plan-*.md`; parked ideas in `docs/spitball.md`.
