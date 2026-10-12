@@ -9,6 +9,7 @@ cargo run -- --server [--port 5888]      # dedicated headless server
 cargo test                               # movement, client-world and netplay tests
 HULLBREAKERS_SHOTS=dir cargo run           # scripted screenshot tour, then exit
 HULLBREAKERS_SCENARIO=boarding cargo run   # host straight into a scenario
+HULLBREAKERS_SAVE=alt.ron cargo run        # another profile (default profile.ron)
 ```
 
 ## Scenarios
@@ -73,10 +74,12 @@ kit. A scenario change keeps what you carry.
 What you own and earn is kept in `profile.ron` beside the game, on your own
 machine (Deep Rock style: co-op is between friends, so a client's profile is
 trusted). On joining, it goes to the host; the host keeps it while you play
-and sends it back, and your machine saves it every few seconds while it
-changes, at a mission's end, and when you quit. A missing file starts a
-fresh profile; an unreadable one is kept as `profile.ron.bad` and a fresh one
-started.
+and sends back a snapshot whenever your gear changes (every few seconds while
+only ammo does), which your machine saves. A missing file starts a fresh
+profile; an unparseable one is kept as `profile.ron.bad` and a fresh one
+started; one that can't be read at all is left alone (a fresh profile, not
+saved). `HULLBREAKERS_SAVE=path` keeps it elsewhere; `tools/hl` gives each
+game it runs its own. Mission cargo (a data core) stays in its mission.
 
 - **Your guns are yours, for good.** Every gun you pick up is yours. Store
   the ones you aren't carrying in the **armory** (up to 40). What you leave

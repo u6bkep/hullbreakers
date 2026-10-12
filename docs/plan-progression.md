@@ -109,6 +109,11 @@ Defaults chosen in building it (the numbers are in `sim/progression.rs`):
 - Tune: 120 / 350 / 900 salvage to uncommon / rare / exotic. Refit 60 a
   part. Repaint 20. Scrap: 15 / 40 / 100 / 250 by rarity. Stash cap 40.
 - Ranks: 500 xp for rank 2, then 1000 more, 1500 more... to 10.
-- The profile is saved continuously (every 3 s while it changes), not only at
-  a mission's end: the plan's "at mission end and on leaving" is kept as
-  well, and a host vanishing loses at most a few seconds.
+- The profile is saved continuously, not only at a mission's end: the host
+  snapshots each player's profile and what they carry in one tick
+  (`SavedProfile`, replicated) whenever their gear changes (every 5 s when
+  only ammo does), and the client saves that. A host vanishing loses at most
+  a few seconds of ammo.
+- Mission cargo is left in the mission's world at a switch, and never saved.
+- A player leaving takes their guns out of the world (their save has them in
+  the stash).
