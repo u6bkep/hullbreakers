@@ -1253,7 +1253,13 @@ fn fire_grapple(ctx: &TickContext, bodies: &Bodies, entity: Entity, player: &mut
         length,
         tension: 0.0,
     });
-    if hit.anchor.is_some() {
+    // A body hooked becomes what the assist flies relative to, except a
+    // load to tow (see [`TOW_MAX_MASS`]): the assist's speed limit and its
+    // brakes stay relative to what you were flying by (our ship), or a tow
+    // would run away with you, the limit riding along with the load.
+    let towable = bodies.mass(hit.target).is_some_and(|m| m.inverse_mass > 1.0 / TOW_MAX_MASS)
+        && !ctx.untowable.contains(&hit.target);
+    if hit.anchor.is_some() && !towable {
         player.reference_body = Some(hit.target);
     }
     player.emit(PlayerEvent::GrappleAttached {

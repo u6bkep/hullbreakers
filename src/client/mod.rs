@@ -28,6 +28,7 @@ pub mod save;
 pub mod sfx;
 pub mod sky;
 pub mod stress;
+pub mod telemetry;
 pub mod viewmodel;
 pub mod weapons_fx;
 pub mod workbench;
@@ -172,6 +173,9 @@ impl Plugin for ClientPlugin {
             );
         if let Some(tour) = coop_tour::coop_tour_from_env() {
             app.insert_resource(tour).add_systems(Update, coop_tour::run_coop_tour);
+        }
+        if let Some(telemetry) = telemetry::telemetry_from_env() {
+            app.insert_resource(telemetry).add_systems(Update, telemetry::write_telemetry);
         }
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)

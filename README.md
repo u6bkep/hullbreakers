@@ -59,7 +59,7 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   conduits on the floors and ceilings show where the power runs; doors
   latch open as power reaches them. The vault opens only when its two keys,
   on the bridge and in the port room, are turned within 1.5 s of each other
-  (alone, key B holds 5 s: race to key A). Release the data core's clamp,
+  (alone, key B holds 10 s: race to key A). Release the data core's clamp,
   take the core off its cradle (it goes in your pack), and get it and
   everyone back aboard in the 75 s before the tripped reactor goes.
 
@@ -74,7 +74,7 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   nearly doubles the pull. Win with everyone accounted for and at least 4
   of the 8 home; alone you can't reach them all, so split up.
 
-- **Escort**: a disabled freighter lies 20 m off our stern, robots
+- **Escort**: a disabled freighter lies 33 m off our stern, robots
   aboard, a power cell in its cargo bay. Bring the cell to our hold. It's
   bulky: whoever carries it can't shoot, grapple, work a switch or button, or
   pick anything up, so the

@@ -29,6 +29,9 @@ pub struct HomeShip;
 pub struct Drift {
     /// Tick the current forward lurch started on.
     lurch_start: Option<u32>,
+    /// Held level and still beside a site at rest (no roll, no wobble), so
+    /// the crew steps off it level with the site; it can still lurch.
+    parked: bool,
 }
 
 /// Orders for drifting ships, from whoever is allowed to give them. Consumed
@@ -137,6 +140,27 @@ pub fn drifting_home_ship() -> impl Bundle {
         Name::new("Ship"),
         HomeShip,
         Drift::default(),
+        ShipHull::new(HOME),
+        RigidBody::Kinematic,
+        SleepingDisabled,
+        PreviousVelocity::default(),
+        Position::default(),
+        Rotation::default(),
+    )
+}
+
+/// The crew's ship held level and still at the origin, beside a site at
+/// rest (a derelict, a freighter, a course of gates, a rescue): rolling, it
+/// would leave the crew stepping off it at an angle to the site, which they
+/// then have to roll level to fit through a doorway.
+pub fn parked_home_ship() -> impl Bundle {
+    (
+        Name::new("Ship"),
+        HomeShip,
+        Drift {
+            parked: true,
+            ..default()
+        },
         ShipHull::new(HOME),
         RigidBody::Kinematic,
         SleepingDisabled,
@@ -265,7 +289,11 @@ pub fn drive_ship(
         let wobble_freq = std::f32::consts::TAU / WOBBLE_SECONDS as f32;
         let yaw_rate = tuning.ship_yaw_wobble_deg.to_radians() * wobble_freq * phase.cos();
         let roll_axis = rot.0 * SHIP_FORWARD;
-        ang.0 = roll_axis * tuning.ship_roll_rate_deg.to_radians() + rot.0 * Vec3::Y * yaw_rate;
+        ang.0 = if ship.parked {
+            Vec3::ZERO
+        } else {
+            roll_axis * tuning.ship_roll_rate_deg.to_radians() + rot.0 * Vec3::Y * yaw_rate
+        };
 
         let lurching = ship.lurch_start.is_some_and(|start| {
             (tick.0.wrapping_sub(start) as f32 / TICK_HZ as f32) < LURCH_SECONDS

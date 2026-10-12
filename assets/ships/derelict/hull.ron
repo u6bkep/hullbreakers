@@ -91,10 +91,11 @@ Module(
         (id: "bulkhead", label: "Bulkhead", kind: Door(size: (1.6, 2.3, 0.15), latch: true), at: (2.8, 1.15, -4.0), face: (0.0, 0.0, 1.0), power: Port("j2", 0)),
         (id: "vault", label: "Vault door", kind: Door(size: (1.6, 2.3, 0.15), latch: true), at: (-3.2, 1.15, -12.0), face: (0.0, 0.0, 1.0), power: All([On("key_a"), On("key_b")])),
         // The vault bus: a lamp beside the vault door, and the keys it
-        // powers (key B holds longer for a crew of one).
+        // powers (key B holds 10 s for a crew of one: the 27 m from it to key A,
+        // through four doorways, takes a first-timer that long).
         (id: "vault_bus", label: "Vault bus", kind: Lamp, at: (-2.0, 2.0, -11.86), face: (0.0, 0.0, 1.0), power: Port("j3", 1)),
         (id: "key_a", label: "Key A", kind: Key(hold: 1.5), at: (4.5, 0.8, -18.72), face: (0.0, 0.0, 1.0), power: On("vault_bus")),
-        (id: "key_b", label: "Key B", kind: Key(hold: 1.5, solo: Some(5.0)), at: (-5.5, 1.3, 5.83), face: (0.0, 0.0, -1.0), power: On("vault_bus")),
+        (id: "key_b", label: "Key B", kind: Key(hold: 1.5, solo: Some(10.0)), at: (-5.5, 1.3, 5.83), face: (0.0, 0.0, -1.0), power: On("vault_bus")),
         // The data core's clamp. (Wave 4: the core itself, carried home.)
         (id: "core_clamp", label: "Release data core", kind: Pull, at: (-3.0, 0.75, -16.12), face: (0.0, 0.0, 1.0), power: On("vault")),
         // Lights, room by room; the alarms once the core is out.

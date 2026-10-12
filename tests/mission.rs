@@ -1576,3 +1576,51 @@ fn full_hands_work_nothing() {
     assert!(!player(&mut app).events.iter().any(|(_, e)| matches!(e, PlayerEvent::Pressed { .. })));
 }
 
+/// Hooking a survivor (fired, as a player does) leaves you flying by our
+/// ship, so the assist's speed limit holds while you tow: a tow at full
+/// thrust tops out at the limit, rather than running away (it used to,
+/// the limit riding along with the load).
+#[test]
+fn a_tow_keeps_the_assist_flying_by_our_ship() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Recovery);
+    let ship = home(&mut app);
+    let (pod, _) = pods(&mut app)[0];
+    let ours = frame(&mut app, ship);
+    let me = ours.point_to_world(Vec3::new(0.0, 1.2, 60.0));
+    let pod_at = ours.point_to_world(Vec3::new(0.0, 1.2, 50.0));
+    app.world_mut().get_mut::<Position>(pod).unwrap().0 = pod_at;
+    app.world_mut().get_mut::<LinearVelocity>(pod).unwrap().0 = Vec3::ZERO;
+    app.world_mut().get_mut::<AngularVelocity>(pod).unwrap().0 = Vec3::ZERO;
+    let eye = Tuning::default().eye_height - Tuning::default().capsule_height / 2.0;
+    set_player(&mut app, |p| {
+        p.mode = Mode::Eva {
+            position: me,
+            velocity: Vec3::ZERO,
+            orientation: Transform::IDENTITY.looking_to(pod_at - (me + Vec3::Y * eye), Vec3::Y).rotation,
+            pitch: 0.0,
+        };
+        p.reference_body = Some(ship);
+    });
+    {
+        let world = app.world_mut();
+        let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
+        input.presses.main.press();
+    }
+    ticks(&mut app, 2);
+    let p = player(&mut app);
+    assert_eq!(p.grapple.map(|g| g.target), Some(pod), "didn't hook the pod");
+    assert_eq!(p.reference_body, Some(ship), "the tow became the reference");
+    // Away from our ship at full thrust, towing, for 8 s.
+    walk_forward(&mut app, false);
+    set_player(&mut app, |p| {
+        if let Mode::Eva { orientation, .. } = &mut p.mode {
+            *orientation = Transform::IDENTITY.looking_to(Vec3::Z, Vec3::Y).rotation;
+        }
+    });
+    walk_forward(&mut app, true);
+    ticks(&mut app, 8 * 60);
+    let Mode::Eva { velocity, .. } = player(&mut app).mode else { panic!("not in EVA") };
+    let limit = Tuning::default().assist_max_speed;
+    assert!(velocity.length() < limit * 1.1, "a runaway tow at {:.1} m/s (limit {limit})", velocity.length());
+}

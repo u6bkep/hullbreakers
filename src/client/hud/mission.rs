@@ -263,8 +263,12 @@ fn debrief_card(painter: &egui::Painter, screen: Rect, debrief: &Debrief, alpha:
                 style::text(painter, pos2(cx, y + 9.0), Align2::LEFT_CENTER, cell, font, c);
                 cx += w;
             }
-            let (word, c) = if card.aboard { ("Home", FRIENDLY) } else { ("Adrift", WARNING) };
-            style::caps(painter, pos2(right, y + 9.0), Align2::RIGHT_CENTER, word, MICRO, style::fade(c, alpha));
+            // Home or adrift, where getting home is part of it (not after a
+            // grapple run, say).
+            if crate::sim::scenarios::scenario(debrief.scenario).homecoming {
+                let (word, c) = if card.aboard { ("Home", FRIENDLY) } else { ("Adrift", WARNING) };
+                style::caps(painter, pos2(right, y + 9.0), Align2::RIGHT_CENTER, word, MICRO, style::fade(c, alpha));
+            }
             y += 22.0;
             if !card.credits.is_empty() {
                 style::text(painter, pos2(x + 12.0, y + 7.0), Align2::LEFT_CENTER, card.credits.join(", "), style::ui(SMALL), dim);

@@ -145,7 +145,7 @@ const ADRIFT: [(PodKind, Vec3, f32); 5] = [
 fn build(stage: &mut Stage) -> Entity {
     let commands = &mut *stage.commands;
     let tick = stage.tick;
-    let home = commands.spawn(ship::drifting_home_ship()).id();
+    let home = commands.spawn(ship::parked_home_ship()).id();
     let mut rng = ChaCha8Rng::seed_from_u64(0x7e5c_0e00 ^ tick as u64);
     let mut rocks = Vec::new();
     for (index, &(kind, at, air)) in ADRIFT.iter().enumerate() {

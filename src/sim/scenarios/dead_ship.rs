@@ -53,7 +53,7 @@ pub const DERELICT_AT: Vec3 = Vec3::new(0.0, 0.0, 55.0);
 pub const OVERLOAD_SECONDS: f32 = 75.0;
 
 fn build(stage: &mut Stage) -> Entity {
-    let home = stage.commands.spawn(ship::drifting_home_ship()).id();
+    let home = stage.commands.spawn(ship::parked_home_ship()).id();
     let derelict = stage
         .commands
         .spawn(ship::site("Derelict", DERELICT, DERELICT_AT, Quat::from_rotation_y(std::f32::consts::PI)))
