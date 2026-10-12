@@ -19,7 +19,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::bodies::Bodies;
-use super::bots::{BodyTuning, Robot};
+use super::bots::{BodyTuning, Gait, Robot, Wrecked};
 use super::design::ShipDesign;
 use super::events::PlayerEvent;
 use super::input::TickInput;
@@ -310,14 +310,17 @@ pub fn spawn_drops(tick: Res<SimTick>, players: Query<&Player>, mut commands: Co
 }
 
 /// Authority: a robot out of health leaves something behind (before it's
-/// removed): mostly ammo, sometimes a gun, better from tougher robots.
+/// removed): mostly ammo, sometimes a gun, better from tougher robots. Once:
+/// on the tick it's destroyed, not the tick its wreck is cleared (see
+/// [`Wrecked`]). A hull turret leaves nothing: it's bolted to the outside of
+/// the hull, where nothing would stay put.
 pub fn drop_robot_loot(
     tick: Res<SimTick>,
-    robots: Query<(Entity, &Player, &Vitals, &BodyTuning), With<Robot>>,
+    robots: Query<(Entity, &Robot, &Player, &Vitals, &BodyTuning), Without<Wrecked>>,
     mut commands: Commands,
 ) {
-    for (entity, player, vitals, tuning) in &robots {
-        if vitals.health > 0.0 {
+    for (entity, kind, player, vitals, tuning) in &robots {
+        if vitals.health > 0.0 || kind.gait() == Gait::Mount {
             continue;
         }
         let bits = entity.to_bits();

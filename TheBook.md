@@ -108,6 +108,46 @@ it.
   and a two-camera setup (tonemapping, bloom and egui moved to the view
   model camera).
 
+## Our player controller (sim/player.rs)
+
+- 2026-10-12. Robots grappling the crew (the Grappler). `player_rope`, the
+  solver for a rope between two players, moved both ends by the rope
+  owner's tuning, so a 300 kg robot's rope treated the crew member as 300 kg
+  with a robot's grip. And when both ends stood on boots on the same
+  immovable body (one ship), each end's inverse mass was the ship's, zero,
+  so the solver returned nothing and a running winch never tested anyone's
+  grip: two crew on one deck couldn't reel each other either. Fix: each end
+  by its own tuning, and with both held fast a winch pulls at its full force
+  and whichever boots that beats let go. Cost: about 40 minutes, found by
+  the grappler's test. A client still doesn't predict being pulled by
+  someone else's rope (robot or crew); it's corrected.
+
+## Bevy ECS
+
+- 2026-10-12. A client system had a `Single<&Transform, With<PlayerCamera>>`
+  next to a `Query<&mut Transform, Without<RobotLook>>`: a B0001 conflict
+  that only shows as a panic when the game starts, since the tests don't run
+  client systems (`src/client/robot_fx.rs`). Cost: one harness round trip.
+  Pattern: client systems get no compile- or test-time check of their
+  queries; every new one needs one launch.
+
+## Blender pipeline (hb, the verifier, asset_view)
+
+- 2026-10-12, from building the Grappler. Bevelled clevis plates (25 mm
+  thick, 14 mm bevel) made 4 near-degenerate triangles, and the verifier
+  failed "triangle winding agrees with stored normals" without naming the
+  part; finding it (`thigh_l/r`) took a throwaway script. Fixed with
+  `bevel=0` on the plates. A 17 mm radial step under a 10 mm bevel failed flat
+  shading by 50° (the documented "bevel eats narrow steps"). A warning
+  "1 modelled-flat plane has no triangles left" on `claw_l` never said which
+  plane. Cost: maybe an hour of the agent's time.
+- 2026-10-12. Affix parts live in the robots' own models and are hidden by
+  the game, but the previews and `asset_view` always show every part, so
+  there's no way to look at a model as it's seen without them (the turret's
+  builder cut the section out of `build.py` and rebuilt to see it). Also,
+  `asset_view` given several models draws them on the same spot, overlapping.
+  Cost: a few iterations each.
+
 ## Headless harness (system audio)
 
 - 2026-10-12. The harness's ALSA null config didn't stop the game playing

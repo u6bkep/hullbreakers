@@ -17,7 +17,7 @@ use bevy::prelude::*;
 
 use super::render::Avatar;
 use super::viewmodel::held;
-use crate::sim::bots::{BodyTuning, Robot};
+use crate::sim::bots::{BodyTuning, Condition, Robot};
 use crate::sim::events::PlayerEvent;
 use crate::sim::player::{Mode, Player};
 use crate::sim::tuning::Tuning;
@@ -42,6 +42,10 @@ pub struct Rig {
     /// own frame: what its thrusters are doing.
     last_velocity: Option<Vec3>,
     thrust: Vec3,
+    /// A Grappler's winch drum, turned so far (radians).
+    spin: f32,
+    /// A Grappler's harpoon arm drawn back for a throw (0 to 1), eased.
+    draw: f32,
 }
 
 /// What kind of body a model is.
@@ -70,6 +74,23 @@ fn parts_of(body: Body) -> &'static [&'static str] {
             "gun_arm_r",
         ],
         Body::Robot(Robot::Swarmer) => &["body", "gun", "thruster_fl", "thruster_fr", "thruster_rl", "thruster_rr"],
+        Body::Robot(Robot::Grappler) => &[
+            "pelvis",
+            "torso",
+            "head",
+            "thigh_l",
+            "thigh_r",
+            "shin_l",
+            "shin_r",
+            "foot_l",
+            "foot_r",
+            "upper_arm_l",
+            "claw_l",
+            "upper_arm_r",
+            "harpoon_r",
+            "winch",
+        ],
+        Body::Robot(Robot::Turret) => &["head", "barrel"],
         Body::Crew => &[
             "pelvis",
             "torso",
@@ -119,6 +140,8 @@ pub fn rig_avatars(
                 bob: 0.0,
                 last_velocity: None,
                 thrust: Vec3::ZERO,
+                spin: 0.0,
+                draw: 0.0,
             });
         }
     }
@@ -135,12 +158,12 @@ pub fn animate_avatars(
     time: Res<Time>,
     base: Res<Tuning>,
     mut rigs: Query<(&Avatar, &mut Rig)>,
-    players: Query<(&Player, Option<&BodyTuning>)>,
+    players: Query<(&Player, Option<&BodyTuning>, Option<&Condition>)>,
     mut transforms: Query<&mut Transform, Without<Avatar>>,
 ) {
     let dt = time.delta_secs();
     for (Avatar { player }, mut rig) in &mut rigs {
-        let Ok((player, own)) = players.get(*player) else { continue };
+        let Ok((player, own, condition)) = players.get(*player) else { continue };
         let rig = &mut *rig;
         // New shots kick the gun that fired.
         for (at, e) in player.events.iter() {
@@ -182,7 +205,7 @@ pub fn animate_avatars(
         let speed = flat.length();
         let booted = matches!(player.mode, Mode::Booted { .. });
         match rig.body {
-            Body::Robot(Robot::Gunner) | Body::Crew => {
+            Body::Robot(Robot::Gunner) | Body::Robot(Robot::Grappler) | Body::Crew => {
                 let target = if booted { (speed / walk).min(1.2) } else { 0.0 };
                 rig.stride += (target - rig.stride) * (1.0 - (-8.0 * dt).exp());
                 rig.phase += speed / STRIDE * std::f32::consts::PI * dt;
@@ -236,6 +259,27 @@ pub fn animate_avatars(
                     }
                     continue;
                 }
+                if rig.body == Body::Robot(Robot::Grappler) {
+                    // The harpoon arm follows the aim and draws back as it
+                    // winds up to throw, snapping forward as it does; the
+                    // winch on its back runs while the rope's in someone;
+                    // the claw arm hangs ready.
+                    let winding = condition.map_or(0.0, |c| c.winding_fraction());
+                    let target = if winding > 0.0 { 1.0 } else { 0.0 };
+                    let rate = if target > rig.draw { 4.0 } else { 18.0 };
+                    rig.draw += (target - rig.draw) * (1.0 - (-rate * dt).exp());
+                    let reeling = player.grapple.is_some_and(|g| g.tension > 1.0);
+                    let winch_rate = if reeling { 14.0 } else if player.grapple.is_some() { 2.0 } else { 0.0 };
+                    rig.spin += winch_rate * dt;
+                    pose("head", Quat::from_rotation_x(pitch * 0.6), Vec3::ZERO);
+                    pose("upper_arm_r", Quat::from_rotation_x(pitch * 0.5 + 0.9 * rig.draw), Vec3::ZERO);
+                    pose("harpoon_r", Quat::from_rotation_x(pitch * 0.5 - 0.5 * rig.draw), Vec3::ZERO);
+                    pose("winch", Quat::from_rotation_x(-rig.spin), Vec3::ZERO);
+                    let arm = -0.2 * rig.stride * rig.phase.sin();
+                    pose("upper_arm_l", Quat::from_rotation_x(arm + 0.15), Vec3::ZERO);
+                    pose("claw_l", Quat::from_rotation_x(0.35 + 0.1 * (rig.bob * 1.3).sin()), Vec3::ZERO);
+                    continue;
+                }
                 // Aim: the head and gun follow the view's pitch; the gun
                 // kicks up as it fires; the free arm swings a little.
                 let kick = rig.kick[0];
@@ -265,6 +309,12 @@ pub fn animate_avatars(
                 pose("body", Quat::from_rotation_z(0.04 * (rig.bob * 1.1).sin()), Vec3::Y * hover);
                 // The gun turret jolts as it sprays.
                 pose("gun", Quat::from_rotation_x(rig.kick[0] * 0.5), Vec3::ZERO);
+            }
+            Body::Robot(Robot::Turret) => {
+                // The body turns the whole mount; the head tips to the
+                // aim's pitch, and the barrel recoils into it as it fires.
+                pose("head", Quat::from_rotation_x(pitch), Vec3::ZERO);
+                pose("barrel", Quat::IDENTITY, Vec3::Z * rig.kick[0] * 1.2);
             }
         }
     }

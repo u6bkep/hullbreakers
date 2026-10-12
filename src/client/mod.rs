@@ -18,6 +18,7 @@ pub mod menu;
 pub mod pickup_look;
 pub mod profile;
 pub mod render;
+pub mod robot_fx;
 pub mod sfx;
 pub mod sky;
 pub mod stress;
@@ -55,7 +56,7 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, hud::HudPlugin))
+        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, robot_fx::RobotFxPlugin, hud::HudPlugin))
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<input::TuningOpen>()
             .init_resource::<menu::Menu>()

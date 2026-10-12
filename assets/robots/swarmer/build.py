@@ -179,6 +179,38 @@ for tag, bx in (("l", -0.034), ("r", 0.034)):
               mats=[BARE, BARE, DARK, DARK, DARK], segments=10, bevel=0.003)
     a.socket(f"SOCKET_muzzle_{tag}", gun, at=(bx, BY, BZ1))
 
+# ---------------------------------------------------------------- affixes
+# Variations the game shows only on a robot that has them (it hides every affix_ part
+# otherwise): affix_<tag>_<what>. Their lights are emissive_secondary; the game tints them.
+
+# Shielded: an emitter dish on a stalk on the thorax, ahead of the crest.
+emit = a.part("affix_shield_emitter", body, bevel=0)
+EM = (0.0, -0.06)                                                    # (x, z)
+emit.cylinder("y", EM, 0.009, (0.12, 0.19), mat=BARE, segments=8)
+emit.lathe([(0.012, 0.185), (0.046, 0.198), (0.05, 0.206), (0.02, 0.21), (0, 0.212)], axis="y", center=EM,
+           mat=DARK, segments=8)
+emit.lathe([(0.052, 0.198), (0.052, 0.206)], axis="y", center=EM, mat=LIGHT, segments=8)
+
+# Overclocked: radiator fins either side of the crest on the abdomen, glowing beneath; it
+# vents from SOCKET_vent.
+oc = a.part("affix_overclock_radiators", body, bevel=0)
+for s in (-1, 1):
+    xa, xb = sorted((s * 0.03, s * 0.105))
+    oc.box((xa, 0.096, 0.045), (xb, 0.108, 0.135), mat=LIGHT)
+    for k in range(4):
+        x0, x1 = sorted((s * (0.036 + k * 0.02), s * (0.046 + k * 0.02)))
+        oc.box((x0, 0.105, 0.05), (x1, 0.175 - k * 0.012, 0.13), mat=BARE)
+a.socket("SOCKET_vent", body, at=(0.0, 0.18, 0.09), forward=(0, 1, 0), up=(0, 0, 1))
+
+# Volatile: a fat charge slung under the belly behind the gun, with a warning band: it flies
+# at you as a bomb.
+vol = a.part("affix_volatile_charge", body, bevel=0.005)
+vol.lathe([(0.02, 0.0), (0.042, 0.015), (0.042, 0.15), (0.02, 0.165)], axis="z", center=(0.0, -0.13),
+          mats=["paint_secondary"] * 3, segments=8)
+vol.cylinder("z", (0.0, -0.13), 0.045, (0.07, 0.09), mat=LIGHT, segments=8, bevel=0)
+for z in (0.035, 0.125):
+    vol.box((-0.05, -0.135, z - 0.008), (0.05, -0.085, z + 0.008), mat=BLACK, bevel=0)  # straps
+
 # ---------------------------------------------------------------- colliders
 # One hull for the shell, head, crest, reactor and gun; one slab through the legs and pods.
 a.collider("COL_body", points=sym((0.15, -0.13, -0.31), (0.15, 0.12, -0.25), (0.15, -0.10, 0.14), (0.12, 0.15, 0.10),

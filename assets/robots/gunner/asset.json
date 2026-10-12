@@ -1,7 +1,7 @@
 {
   "name": "gunner",
   "kind": "large_robot",
-  "brief": "Gunner: baseline hostile robot, ~1.9 m, mag-boot walker in zero-g with a rifle built into its right arm. Industrial, repurposed for war: squat torso, sensor head with one strong amber eye, chunky mag-boot feet, exposed joints. Rigid parts pivoted at their joints for procedural animation. Faded teal paint, worn hazard-yellow accents, dark metal joints. Weak spot: a magenta coolant core caged in the backpack, hidden from the front. Quiet pale-teal power lights.",
+  "brief": "Gunner: baseline hostile robot, ~1.9 m, mag-boot walker in zero-g with a rifle built into its right arm. Industrial, repurposed for war: squat torso, sensor head with one strong amber eye, chunky mag-boot feet, exposed joints. Rigid parts pivoted at their joints for procedural animation. Faded teal paint, worn hazard-yellow accents, dark metal joints. Weak spot: a magenta coolant core caged in the backpack, hidden from the front. Quiet pale-teal power lights. Affix parts (shown only on robots with that affix): armour slabs, a shield emitter, overclock radiators and exhaust stacks, volatile charges, a marksman barrel and scope, a leader's antenna mast and crest.",
   "palette": {
     "paint_primary": "#5b8a84",
     "paint_secondary": "#b99a3e",
@@ -10,17 +10,24 @@
     "emissive_core": "#ff40c8"
   },
   "expect": {
-    "size": {"x": [0.95, 1.25], "y": [1.85, 1.95], "z": [1.1, 1.45]},
+    "size": {"x": [0.95, 1.25], "y": [1.85, 2.32], "z": [1.1, 1.95]},
     "parts": ["pelvis", "torso", "head",
               "upper_arm_l", "forearm_l", "hand_l", "upper_arm_r", "gun_arm_r",
-              "thigh_l", "shin_l", "foot_l", "thigh_r", "shin_r", "foot_r"],
+              "thigh_l", "shin_l", "foot_l", "thigh_r", "shin_r", "foot_r",
+              "affix_armour_chest", "affix_armour_head", "affix_armour_pauldron_l", "affix_armour_pauldron_r",
+              "affix_armour_thigh_l", "affix_armour_thigh_r", "affix_armour_shin_l", "affix_armour_shin_r",
+              "affix_shield_emitter", "affix_overclock_radiators", "affix_overclock_stacks",
+              "affix_volatile_charges", "affix_volatile_canister", "affix_marksman_barrel", "affix_marksman_scope",
+              "affix_leader_mast", "affix_leader_crest"],
     "colliders": ["COL_torso", "COL_pelvis", "COL_head", "COL_thigh_l", "COL_shin_l", "COL_thigh_r", "COL_shin_r"],
     "sockets": {
       "SOCKET_eye":    {"at": [0, 1.785, -0.305], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.02},
       "SOCKET_muzzle": {"at": [0.44, 1.235, -0.96], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.03},
       "SOCKET_foot_l": {"at": [-0.18, 0, -0.05], "forward": [0, -1, 0], "up": [0, 0, -1], "tol": 0.03},
       "SOCKET_foot_r": {"at": [0.18, 0, -0.05], "forward": [0, -1, 0], "up": [0, 0, -1], "tol": 0.03},
-      "SOCKET_weak":   {"at": [0, 1.42, 0.31], "tol": 0.02}
+      "SOCKET_weak":   {"at": [0, 1.42, 0.31], "tol": 0.02},
+      "SOCKET_aim":    {"at": [0.44, 1.235, -1.43], "forward": [0, 0, -1], "tol": 0.01},
+      "SOCKET_beacon": {"at": [0, 2.235, 0.205], "tol": 0.01}
     },
     "tolerance": 0.01
   }

@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 
 use super::{LocalInput, LocalPlayer};
-use crate::sim::bots::{Robot, new_robot};
+use crate::sim::bots::{Affixes, Robot, new_robot};
 use crate::sim::mission::{Director, Mission, ScenarioKind};
 use crate::sim::player::{Mode, Player};
 use crate::sim::ship::HomeShip;
@@ -116,7 +116,7 @@ fn set_up_firefight(
             orientation: Quat::from_rotation_y(std::f32::consts::PI),
             pitch: 0.0,
         };
-        commands.spawn(new_robot(Robot::Gunner, mode, home, feet, &tuning, 1000 + i as u32));
+        commands.spawn(new_robot(Robot::Gunner, Affixes::NONE, mode, home, feet, &tuning, 1000 + i as u32));
     }
     // The ship is at rest in the field (see `ship::drifting_home_ship`), so
     // its frame is close enough to the world's here.
@@ -129,7 +129,7 @@ fn set_up_firefight(
             orientation: Quat::IDENTITY,
             pitch: 0.0,
         };
-        commands.spawn(new_robot(Robot::Swarmer, mode, home, post, &tuning, 2000 + i as u32));
+        commands.spawn(new_robot(Robot::Swarmer, Affixes::NONE, mode, home, post, &tuning, 2000 + i as u32));
     }
     info!("stress: firefight set up ({GUNNERS} Gunners, {SWARMERS} Swarmers)");
 }

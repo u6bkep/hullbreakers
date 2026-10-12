@@ -14,7 +14,7 @@ use crate::sim::combat::Combatant;
 use crate::sim::design::ShipDesign;
 use crate::sim::flight::{Duel, Flight, Path};
 use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, break_up, presses};
-use crate::sim::player::{Mode, Player};
+use crate::sim::player::Player;
 use crate::sim::ship::{self, ControlAction, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
 use crate::sim::{SimTick, TICK_HZ, asteroids};
@@ -125,43 +125,14 @@ fn build(stage: &mut Stage) -> Entity {
         exposed_seconds: tuning.home_survival_seconds,
     });
     if stage.robots {
-        crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick);
+        bots::crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick, BOARDING_THREAT);
     }
     crate::sim::pickups::stock_ship(commands, carrier, ShipHull::new(CARRIER).design(), tick);
     home
 }
 
-/// Puts robots at the posts of `design` aboard `ship` (flying `flight`):
-/// walkers standing on its decks, flyers holding station about it.
-fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, flight: &Flight, tick: u32) {
-    let frame = flight.frame(tick, Vec3::ZERO);
-    for (i, post) in design.posts.iter().enumerate() {
-        let mode = match post.robot {
-            Robot::Gunner => Mode::Booted {
-                body: ship,
-                feet: post.at + Vec3::Y * 0.01,
-                up: Vec3::Y,
-                velocity: Vec3::ZERO,
-                orientation: post.rotation(),
-                pitch: 0.0,
-            },
-            Robot::Swarmer => {
-                let position = frame.point_to_world(post.at);
-                Mode::Eva {
-                    position,
-                    velocity: frame.point_velocity(position),
-                    orientation: frame.rotation * post.rotation(),
-                    pitch: 0.0,
-                }
-            }
-        };
-        let home_post = match mode {
-            Mode::Booted { feet, .. } => feet,
-            Mode::Eva { .. } => post.at,
-        };
-        commands.spawn(bots::new_robot(post.robot, mode, ship, home_post, tuning, i as u32));
-    }
-}
+/// How dangerous the carrier's crew is (see [`bots::Threat`]).
+const BOARDING_THREAT: bots::Threat = bots::Threat(3);
 
 /// Pressing the shield console drops that ship's shield.
 fn drop_shields(

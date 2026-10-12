@@ -40,12 +40,19 @@ pub fn tuning_panel(
             if ui.button("Ship lurch (L)").clicked() {
                 ship_orders.write(ShipCommand::Lurch);
             }
-            // Host only: the authority reads these.
-            if ui.button("Spawn Gunner on bridge").clicked() {
-                robot_orders.write(SpawnRobots(Robot::Gunner));
-            }
-            if ui.button("Spawn 3 Swarmers to port").clicked() {
-                robot_orders.write(SpawnRobots(Robot::Swarmer));
+        });
+        // Host only: the authority reads these. (Turrets need a hull
+        // mount, so they aren't offered.)
+        ui.horizontal(|ui| {
+            ui.label("Spawn:");
+            for (label, kind) in [
+                ("Gunner on bridge", Robot::Gunner),
+                ("Grappler on bridge", Robot::Grappler),
+                ("3 Swarmers to port", Robot::Swarmer),
+            ] {
+                if ui.button(label).clicked() {
+                    robot_orders.write(SpawnRobots(kind));
+                }
             }
         });
         ui.label(&panel.status);

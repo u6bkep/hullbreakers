@@ -6,7 +6,7 @@
 //! Exits non-zero if any design falls short.
 
 use bevy::prelude::*;
-use hullbreakers::sim::bots::Robot;
+use hullbreakers::sim::bots::Gait;
 use hullbreakers::sim::devices::DeviceKind;
 use hullbreakers::sim::design::{ShipDesign, check, design, designs};
 use hullbreakers::sim::nav::NavGrid;
@@ -38,8 +38,15 @@ fn report(ship: &ShipDesign) -> bool {
         size.z,
         grid.len()
     );
-    let walkers = ship.posts.iter().filter(|p| p.robot == Robot::Gunner).count();
-    println!("posts: {walkers} walkers, {} flyers; {} controls, {} lights", ship.posts.len() - walkers, ship.controls.len(), ship.lights.len());
+    let count = |gait: Gait| ship.posts.iter().filter(|p| p.robot.gait() == gait).count();
+    println!(
+        "posts: {} walkers, {} flyers, {} mounts; {} controls, {} lights",
+        count(Gait::Walker),
+        count(Gait::Flyer),
+        count(Gait::Mount),
+        ship.controls.len(),
+        ship.lights.len()
+    );
     let entry = ship.markers.get("entry").copied();
     if let (Some(entry), Some(objective)) = (entry, ship.markers.get("objective")) {
         match grid.path(entry, *objective) {
@@ -73,7 +80,7 @@ fn report(ship: &ShipDesign) -> bool {
     marks.extend(ship.controls.iter().map(|c| (c.1 - Vec3::Y * 1.0, 'C')));
     // Doors (drawn open: the plan is with every door open).
     marks.extend(ship.devices.iter().filter(|d| matches!(d.kind, DeviceKind::Door { .. })).map(|d| (d.at - Vec3::Y * 1.1, 'D')));
-    marks.extend(ship.posts.iter().filter(|p| p.robot == Robot::Gunner).map(|p| (p.at, 'G')));
+    marks.extend(ship.posts.iter().filter(|p| p.robot.gait() == Gait::Walker).map(|p| (p.at, 'G')));
     for (name, at) in &ship.markers {
         let c = match name.as_str() {
             "entry" => 'E',

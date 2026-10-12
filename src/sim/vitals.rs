@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SimTick;
 use super::events::PlayerEvent;
-use super::bots::Robot;
+use super::bots::{self, Affixes, Brain, Condition, Robot};
 use super::pickups::{Pickup, left_where};
 use super::combat::Beams;
 use super::player::{DeckSlot, Mode, Player};
@@ -163,43 +163,48 @@ pub fn beam_burns(
 }
 
 /// Authority: applies this tick's damage, and heals whoever has gone long
-/// enough unhurt.
+/// enough unhurt. A robot's affixes have their say first (a shell, armour:
+/// see [`bots::absorb`]).
 pub fn apply_damage(
     time: Res<Time>,
     tuning: Res<Tuning>,
     mut damage: MessageReader<Damage>,
-    mut vitals: Query<(&mut Vitals, Has<Robot>)>,
+    mut vitals: Query<(&mut Vitals, Has<Robot>, Option<(&Affixes, &mut Brain, &mut Condition)>)>,
     mut logs: Query<&mut HitLog>,
     mut hurts: Query<&mut HurtLog>,
 ) {
     let dt = time.delta_secs();
     // The crew's suits heal; robots don't.
-    for (mut v, robot) in &mut vitals {
+    for (mut v, robot, _) in &mut vitals {
         v.since_hurt += dt;
         if !robot && v.since_hurt > tuning.health_regen_delay {
             v.health = (v.health + tuning.health_regen_rate * dt).min(tuning.player_health);
         }
     }
     for hit in damage.read() {
-        let Ok((mut v, _)) = vitals.get_mut(hit.target) else {
+        let Ok((mut v, _, guard)) = vitals.get_mut(hit.target) else {
             continue;
         };
         // Already dead this tick: no more hits to count.
         if v.health <= 0.0 {
             continue;
         }
-        v.health = (v.health - hit.amount).max(0.0);
+        let (amount, weak) = match guard {
+            Some((affixes, mut brain, mut condition)) => bots::absorb(*affixes, &mut brain, &mut condition, hit.source, hit.amount, hit.weak),
+            None => (hit.amount, hit.weak),
+        };
+        v.health = (v.health - amount).max(0.0);
         v.since_hurt = 0.0;
         if let Ok(mut log) = hurts.get_mut(hit.target) {
             log.push(Hurt {
                 from: hit.from,
-                amount: hit.amount,
+                amount,
                 kill: v.health <= 0.0,
             });
         }
         if let Some(mut log) = hit.source.and_then(|s| logs.get_mut(s).ok()) {
             log.push(Hit {
-                weak: hit.weak,
+                weak,
                 kill: v.health <= 0.0,
             });
         }

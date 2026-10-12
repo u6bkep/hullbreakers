@@ -1,6 +1,8 @@
 //! The model gallery (debug): every model under `assets/` set out in a row
 //! behind our ship, for review (the client sets them out; see
-//! `client::gallery`). The crew floats in front of it.
+//! `client::gallery`). The crew floats in front of it. Below the models, a
+//! row of live robots: every kind, with each affix it can have, dormant
+//! (see `bots::spawn_zoo`).
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -37,8 +39,16 @@ fn build(stage: &mut Stage) -> Entity {
         Staged,
         Transform::from_translation(GALLERY_AT),
     ));
-    stage.commands.spawn(ship::drifting_home_ship()).id()
+    let home = stage.commands.spawn(ship::drifting_home_ship()).id();
+    if stage.robots {
+        crate::sim::bots::spawn_zoo(stage.commands, stage.tuning, home, GALLERY_AT + ZOO_OFFSET);
+    }
+    home
 }
+
+/// Where the gallery's robots float, from its row of models: below them,
+/// nearer the visitors.
+const ZOO_OFFSET: Vec3 = Vec3::new(0.0, -3.0, 3.0);
 
 /// Puts a player in front of the gallery's row, facing it (−Z), floating
 /// beside the others.

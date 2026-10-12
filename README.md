@@ -55,8 +55,10 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
 
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn
-  as small axes (red +X, green +Y, blue forward). You start floating in
-  front of it.
+  as small axes (red +X, green +Y, blue forward), with every robot model's
+  affix parts showing at once. Below it, a labelled row of live robots: each
+  kind, and each with every affix it can have. They don't fight back. You
+  start floating in front of it.
 
 You start (and respawn) with the base kit: your suit and its grapple. Guns
 are in the **weapons locker** on the starboard wall of our ship's aft hold
@@ -102,17 +104,45 @@ gun with the other hand empty is braced and shoots tighter. Bullets fly at reali
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's
 hand works its rope; stow it and the rope holds its length.
 
-The carrier is crewed by robots: seven **Gunners** posted from its hangar to
-its bridge (walkers with rifle arms that keep their distance and strafe)
-and six **Swarmers** flying escort (fast, fragile
-drones that rush in and spray). Robots are players driven by a brain on the
-host, so they move, aim and shoot by the crew's rules; they see along clear
-sight lines, chase a target that ducks out of view for a few seconds, and
-are destroyed at zero health. Each has a **weak spot**, a glowing magenta
-core (the Gunner's backpack, the Swarmer's rear reactor) that takes 2.5×
-damage: flank them. Hit markers show your hits (white), weak-spot hits
-(magenta) and kills (an X); robots don't heal. The F1 panel can spawn a Gunner on our bridge
-or three Swarmers off our port side, for trying out a fight.
+The carrier is crewed by robots. Robots are players driven by a brain on
+the host, so they move, aim and shoot by the crew's rules; they see along
+clear sight lines, chase a target that ducks out of view for a few seconds,
+call to each other, and are destroyed at zero health, coming apart into
+tumbling, darkened pieces. Each has a **weak spot**, a glowing magenta core
+that takes 2.5× damage: flank them. Hit markers show your hits (white),
+weak-spot hits (magenta) and kills (an X); robots don't heal. Four kinds:
+
+- **Gunners** (walkers with rifle arms that keep their distance and strafe),
+  posted from the hangar to the bridge. Weak spot: the backpack.
+- **Swarmers** flying escort: fast, fragile drones that rush in and spray.
+  Weak spot: the reactor between the rear thrusters.
+- **Grapplers**: heavy walkers that harpoon you (they draw back first, with
+  a ratchet), reel you off your boots and let go, flinging you out of cover
+  or off the hull. Weak spot: the winch's power cell on the back.
+- **Hull turrets** bolted to the carrier's engine pods and keel, covering the
+  approach to the hangar: a searchlight sweeps for anyone crossing, and the
+  slow shells lead you, so change your velocity. Weak spot: the coolant
+  core at the back of the base.
+
+Robots can have **affixes**, each shown on the model: **Armoured** (dark
+slabs; body hits do 30%, the weak spot is soft), **Shielded** (a shell that
+takes everything until broken, then comes back if left alone), **Overclocked**
+(radiators and stacks; fast and frantic, its lights heat up, then it stops
+to vent steam: while venting every hit is a weak-spot hit), **Volatile**
+(hazard-yellow charges; it explodes when killed, hurting and shoving
+everything near it, robots too, so blasts chain), **Marksman** (Gunners: a
+long barrel and scope; a laser and a swelling glint before each slow, heavy
+shot, its aim locking just before it fires: move then) and **Leader**
+(Gunners: an antenna mast and crest; robots near it aim and fire better, their
+lights pulsing gold with its beacon, until it dies). A ship is crewed for a
+**threat** level that sets how many affixes, and which kinds man which
+posts (`sim::bots::crew`); the boarding action's carrier is threat 3: two
+Grapplers, three turrets, a Leader on the bridge and six affixes. The model
+gallery has a row of every kind with each of its affixes, dormant but
+shootable.
+
+The F1 panel can spawn a Gunner on our bridge or three Swarmers off our
+port side, for trying out a fight.
 
 Players have suit health (bottom left). It comes back after a few seconds
 unhurt; at zero you respawn aboard the home ship, and the HUD marks where
