@@ -708,12 +708,15 @@ pub fn switch_scenario(
         Without<Robot>,
     >,
     mut shots: ResMut<super::shots::Shots>,
+    mut damage: ResMut<Messages<super::vitals::Damage>>,
 ) {
     let Some(kind) = director.next.take() else {
         return;
     };
-    // Bullets in flight belonged to the old world.
+    // Bullets in flight belonged to the old world, and so does damage not
+    // yet dealt (a blast, a trampling, written after this tick's damage).
     shots.0.clear();
+    damage.clear();
     info!("starting scenario {kind:?}");
     let debrief = (mission.phase != Phase::Underway).then(|| {
         let crew = players.iter().map(|(entity, player, _, _, name)| {
@@ -767,6 +770,30 @@ pub fn arrivals(
         if let Some(mut previous) = previous {
             previous.0 = player.mode;
         }
+    }
+}
+
+/// Authority: a player who leaves the game (or is otherwise taken out of
+/// it) holding mission cargo leaves it where they were, for anyone.
+pub fn drop_cargo_on_leaving(
+    remove: On<Remove, Player>,
+    tick: Res<SimTick>,
+    players: Query<&Player>,
+    mut commands: Commands,
+) {
+    let Ok(player) = players.get(remove.entity) else { return };
+    let inventory = &player.loadout.inventory;
+    let cargo: Vec<super::items::Item> = inventory
+        .carrying
+        .map(super::items::Item::Cargo)
+        .into_iter()
+        .chain(inventory.pack.iter().flatten().copied().filter(|i| matches!(i, super::items::Item::Cargo(_))))
+        .collect();
+    if !cargo.is_empty() {
+        commands.spawn((
+            Name::new("Dropped cargo"),
+            super::pickups::Pickup::dropped(super::pickups::left_where(&player.mode), tick.0, cargo),
+        ));
     }
 }
 

@@ -230,9 +230,19 @@ pub fn settle_deaths(
         }
         // What they carried stays where they fell: on the deck under them,
         // or adrift on their last velocity.
-        let items = player.loadout.inventory.empty_out();
+        // Their own gear is theirs to come back for; mission cargo is
+        // anyone's, in a case of its own.
+        let (cargo, items): (Vec<_>, Vec<_>) = player
+            .loadout
+            .inventory
+            .empty_out()
+            .into_iter()
+            .partition(|i| matches!(i, crate::sim::items::Item::Cargo(_)));
         if !items.is_empty() {
             commands.spawn((Name::new("Dropped kit"), Pickup::left_by(entity, left_where(&player.mode), tick.0, items)));
+        }
+        if !cargo.is_empty() {
+            commands.spawn((Name::new("Dropped cargo"), Pickup::dropped(left_where(&player.mode), tick.0, cargo)));
         }
         player.events.push(PlayerEvent::Died);
         player.respawn(*home, slot.0);

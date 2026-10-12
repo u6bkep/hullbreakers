@@ -103,6 +103,9 @@ impl Plugin for SimSharedPlugin {
             .add_observer(asteroids::shape_asteroid)
             .add_observer(fauna::shape_grazer)
             .add_observer(mission::shape_debris)
+            .init_resource::<bodies::VanishedBodies>()
+            .add_observer(bodies::note_vanished)
+            .add_systems(FixedFirst, bodies::forget_vanished.after(advance_tick))
             .add_observer(scenarios::recovery::shape_pod)
             // How its devices look here (a client's own presses at once).
             .add_systems(Update, devices::show_devices)
@@ -190,6 +193,7 @@ impl Plugin for SimPlugin {
             .add_observer(mission::name_body::<scenarios::recovery::Pod>)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
+            .add_observer(mission::drop_cargo_on_leaving)
             .add_systems(
                 FixedUpdate,
                 (

@@ -8,8 +8,10 @@
 //! 20 m gap to our ship, crossed on jetpacks. Alone: carry it, set it down
 //! (drop, G) to fight or to work a switch, pick it up again.
 //!
-//! Won when the cell is in our hold, carried or set down there. Results:
-//! `cell_home` (1 when won), `carriers` (how many of the crew carried it).
+//! Won when the cell is in our hold, carried or set down there; lost if it
+//! drifts more than [`ADRIFT_LOST`] from our ship. Whoever dies or leaves
+//! holding it leaves it where they were, for anyone. Results: `cell_home`
+//! (1 when won), `carriers` (how many of the crew carried it).
 
 use std::collections::BTreeSet;
 
@@ -50,6 +52,9 @@ const THREAT: Threat = Threat(2);
 
 /// The prize.
 pub const CELL: Item = Item::Cargo(CargoKind::PowerCell);
+
+/// How far from our ship (m) the cell may drift before it's lost.
+pub const ADRIFT_LOST: f32 = 400.0;
 
 fn build(stage: &mut Stage) -> Entity {
     let commands = &mut *stage.commands;
@@ -142,6 +147,17 @@ fn escort(
         Cell::Lying { world, .. } => in_hold(ship.point_to_local(world)),
         Cell::Gone => false,
     };
+    // Lost: the cell gone from the world, or adrift past reach.
+    let lost = match cell {
+        Cell::Gone => true,
+        Cell::Lying { body: None, world, .. } => world.distance(ship.position) > ADRIFT_LOST,
+        _ => false,
+    };
+    if mission.phase == Phase::Underway && lost {
+        mission.report.push("The power cell drifted out of reach.".into());
+        mission.result("cell_home", 0.0);
+        mission.decide(Phase::Lost, tick.0, "CELL LOST");
+    }
     if mission.phase == Phase::Underway && at_home {
         let by: Vec<String> = haul.carriers.iter().map(|&e| name(e)).collect();
         let started = mission.started;

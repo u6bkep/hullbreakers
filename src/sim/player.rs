@@ -558,6 +558,9 @@ struct TickContext<'a, 'w, 's> {
     pickups: &'a [PickupPoint],
     /// Every laser beam firing this tick.
     beams: &'a Beams,
+    /// Bodies with minds of their own (fauna): never a tow (see
+    /// [`TOW_MAX_MASS`]).
+    untowable: &'a [Entity],
 }
 
 impl<'a, 'w, 's> TickContext<'a, 'w, 's> {
@@ -845,7 +848,9 @@ pub fn player_tick(
     mut players: Query<PlayerQuery>,
     controls: Query<(&Control, &Transform, &ChildOf)>,
     pickups: Query<(Entity, &Pickup)>,
+    fauna: Query<Entity, With<super::fauna::Grazer>>,
 ) {
+    let untowable: Vec<Entity> = fauna.iter().collect();
     let controls: Vec<ControlPoint> = controls
         .iter()
         .map(|(control, transform, ship)| ControlPoint {
@@ -893,6 +898,7 @@ pub fn player_tick(
         players: &points,
         controls: &controls,
         pickups: &pickups,
+        untowable: &untowable,
         beams: &beams,
     };
     if ctx.dt <= 0.0 {
@@ -930,7 +936,9 @@ pub fn player_tick(
         // Recorded after look so the camera interpolates movement only; look
         // is applied immediately (see `update_camera`).
         previous.0 = player.mode;
-        if cmd.interact {
+        // Bulky cargo fills both hands: nothing else can be worked or taken
+        // until it's set down (drop).
+        if cmd.interact && !player.loadout.hands_full() {
             // The nearest of a button or a pickup under the crosshair.
             let control = control_under_crosshair(&ctx, &bodies, entity, player);
             let pickup = pickup_under_crosshair(&ctx, &bodies, entity, player);
@@ -1038,7 +1046,10 @@ pub fn player_tick(
 }
 
 /// The heaviest thing (kg, along the rope) flight assist treats as a tow
-/// rather than an anchor: survivors, lifeboats, wreckage; not rocks.
+/// rather than an anchor: survivors, lifeboats, cargo, wreckage, crew-sized
+/// rocks (under about half a metre); not big rocks, which are anchors, and
+/// never fauna (a hooked grazer bolts: the assist would chase it), which
+/// the context lists as `untowable`.
 const TOW_MAX_MASS: f32 = 1000.0;
 
 /// How far away a body can be picked as the reference frame.
@@ -1292,14 +1303,16 @@ fn booted_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd:
     else {
         return;
     };
+    // The body underfoot has gone (a recycled rock, a killed grazer, a pod
+    // brought home): float free where we were on it, moving as it was.
+    if let Some(last) = bodies.vanished(body) {
+        player.mode = booted_to_eva(&last, feet, up, velocity, orientation, pitch, t);
+        player.detach_timer = t.detach_cooldown;
+        player.emit(PlayerEvent::Detached(Detach::Blasted));
+        return;
+    }
+    // A body this peer hasn't got (yet): stay as we are.
     let Some(frame) = bodies.frame(body) else {
-        // Body vanished: float free where we were, at rest.
-        player.mode = Mode::Eva {
-            position: feet,
-            velocity: Vec3::ZERO,
-            orientation,
-            pitch,
-        };
         return;
     };
     let previous_frame = bodies.previous_frame(body).unwrap_or(frame);
@@ -1659,11 +1672,11 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
         .filter(|_| cmd.reel_in)
         .and_then(|g| rope_point(ctx, bodies, &g));
     let swinging = !cmd.reel_in && player.grapple.is_some_and(|g| g.tension > 0.0);
-    // Towing: a rope on something light enough to tow (not a rock). With
-    // no input the assist keeps station with the load (how fast its end of
-    // the rope is going) instead of braking, so a tow you let go of coasts
-    // with you rather than overrunning you.
-    let towing = player.grapple.filter(|_| !cmd.reel_in).and_then(|g| {
+    // Towing: a rope on something light enough to tow (see [`TOW_MAX_MASS`]:
+    // not big rocks, not fauna). With no input the assist keeps station with
+    // the load (how fast its end of the rope is going) instead of braking,
+    // so a tow you let go of coasts with you rather than overrunning you.
+    let towing = player.grapple.filter(|g| !cmd.reel_in && !ctx.untowable.contains(&g.target)).and_then(|g| {
         let end = far_end(bodies, &g)?;
         let along = (end.point - position).normalize_or_zero();
         (end.inverse_mass(along) > 1.0 / TOW_MAX_MASS).then(|| end.velocity())

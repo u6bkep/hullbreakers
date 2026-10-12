@@ -76,7 +76,8 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
 
 - **Escort**: a disabled freighter lies 20 m off our stern, robots
   aboard, a power cell in its cargo bay. Bring the cell to our hold. It's
-  bulky: whoever carries it can't shoot, grapple or work a switch, so the
+  bulky: whoever carries it can't shoot, grapple, work a switch or button, or
+  pick anything up, so the
   crew escorts them, or alone you set it down (G) and pick it up again
   (F). The way out: the bay door opens for 3 s at a turn of either key
   (one in the hall, one in the bay) and stays open while anyone stands in
