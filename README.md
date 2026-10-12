@@ -431,7 +431,15 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     `InputCursor`, so a repeated input is a no-op and a skipped one catches up.
   - **Events** (`sim/events.rs`) are tick-stamped entries in each player's
     `EventLog`, not messages. A re-simulated tick rewrites its own entries.
-    The client presents each one once (`client/events.rs`).
+    The client presents each one once (`client/events.rs`); one a
+    correction brings in late (more than 15 ticks) is dropped, as stale.
+    What only the authority decides (`Died`, `Respawned`,
+    `Detached(Blasted)` from a blast, a shot or a ship coming apart, and the
+    rope that snaps then) isn't in that log: a client can't predict it, so
+    it would arrive only by a correction, late or (a respawn on the spot you
+    stood on corrects nothing) never. It goes in the player's
+    `AuthorityLog`, written only by the authority, replicated and not
+    predicted, and read by count: presented once, however late it arrives.
   - Time-dependent behaviour (ship wobble, lurch, turret fire, scripted
     flight) derives from `SimTick`. Orders to a drifting ship arrive as
     `ShipCommand` messages.
@@ -441,7 +449,7 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     `sim/mission.rs` is what they share: button presses are player events
     (`Pressed`) that the `Director` acts on after the players move; a switch
     despawns the world, spawns the scenario's, and respawns every player on
-    deck (`Respawned`, a view relocation). `Mission` is replicated for the
+    deck (`Respawned`, in the `AuthorityLog`, a view relocation). `Mission` is replicated for the
     HUD: the objective, a status board, markers (label, place, kind, for an
     objective-marker list), the banner, the report and the debrief, and the
     report as numbers (`results`: `won`, `seconds`, and each scenario's
@@ -478,7 +486,9 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 - **Prediction**: a client simulates its own player ahead of the server
   (`PlayerSimPlugin`: a player with `PlayerInput` is simulated wherever it
   is) against bodies posed at the same tick from their motion, and rolls
-  back when the server's state differs beyond tolerance (`player_diverged`).
+  back when the server's state differs beyond tolerance (`player_diverged`),
+  up to a second back (`MAX_ROLLBACK_TICKS`: lightyear's default of 20 ticks
+  refused every correction past ~220 ms of round trip).
   The camera blends over corrections (`ViewCorrection`). Other players are
   interpolated. `HULLBREAKERS_LAG=ms[,loss%]` simulates a bad link on a client;
   clients log their rollback rate every 10 s.

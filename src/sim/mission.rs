@@ -29,7 +29,7 @@ use super::asteroids::{self, Asteroid};
 use super::bodies::{PreviousVelocity, dynamic_mass};
 use super::bots::Robot;
 use super::design::ShipDesign;
-use super::events::PlayerEvent;
+use super::events::{AuthorityLog, PlayerEvent};
 use super::frame::BodyFrame;
 use super::player::{DeckSlot, Mode, Player, PreviousMode};
 use super::scenarios::{self, Stage};
@@ -477,10 +477,10 @@ impl CrewTally {
 pub fn tally_crew(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
-    players: Query<(Entity, &Player), Without<Robot>>,
+    players: Query<(Entity, &Player, &AuthorityLog), Without<Robot>>,
     mut tally: ResMut<CrewTally>,
 ) {
-    for (entity, player) in &players {
+    for (entity, player, told) in &players {
         let stats = tally.0.entry(entity).or_default();
         let eva = matches!(player.mode, Mode::Eva { .. });
         if eva {
@@ -501,12 +501,11 @@ pub fn tally_crew(
             if at != tick.0 {
                 continue;
             }
-            match event {
-                PlayerEvent::Pressed { .. } => stats.presses += 1,
-                PlayerEvent::Died => stats.deaths += 1,
-                _ => {}
+            if let PlayerEvent::Pressed { .. } = event {
+                stats.presses += 1;
             }
         }
+        stats.deaths += told.iter().filter(|&(at, event)| at == tick.0 && event == PlayerEvent::Died).count() as u32;
     }
 }
 
@@ -538,6 +537,7 @@ pub fn break_up<'a>(
     tick: u32,
     tuning: &Tuning,
     players: impl IntoIterator<Item = (Entity, Mut<'a, Player>, bool)>,
+    told: &mut Query<&mut AuthorityLog>,
 ) {
     info!("{} destroyed", design.id);
     for (entity, mut player, robot) in players {
@@ -547,7 +547,9 @@ pub fn break_up<'a>(
             }
             continue;
         }
-        player.thrown_off(ship, frame, tuning);
+        if let Ok(mut told) = told.get_mut(entity) {
+            player.thrown_off(ship, frame, tuning, &mut told, tick);
+        }
     }
     let mut rng = ChaCha8Rng::seed_from_u64(tick as u64);
     for b in &design.boxes {
@@ -707,6 +709,7 @@ pub fn switch_scenario(
         (Entity, &mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>),
         Without<Robot>,
     >,
+    mut told: Query<&mut AuthorityLog>,
     mut shots: ResMut<super::shots::Shots>,
     mut damage: ResMut<Messages<super::vitals::Damage>>,
 ) {
@@ -744,9 +747,10 @@ pub fn switch_scenario(
         debrief,
         ..default()
     };
-    for (index, (_, mut player, slot, previous, _)) in players.iter_mut().enumerate() {
+    for (index, (entity, mut player, slot, previous, _)) in players.iter_mut().enumerate() {
         let slot = slot.map_or(index as u32, |s| s.0);
-        player.respawn(home, slot);
+        let Ok(mut told) = told.get_mut(entity) else { continue };
+        player.respawn(home, slot, &mut told, tick.0);
         if let Some(arrive) = scenario.arrive {
             arrive(&mut player, slot);
         }

@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SimTick;
 use super::bodies::{Bodies, BodyInertia};
-use super::events::{Detach, EventLog, PlayerEvent};
+use super::events::{AuthorityLog, Detach, EventLog, PlayerEvent};
 use super::frame::{BodyFrame, BodyMass};
 use super::input::{InputCursor, PlayerInput, TickInput};
 use super::combat::{Beams, beam_shove};
@@ -177,8 +177,12 @@ pub struct Grapple {
 }
 
 /// Everything about a player that the simulation carries from tick to tick.
+///
+/// Every player has an [`AuthorityLog`] beside it, for what only the
+/// authority decides happens to them.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[component(map_entities)]
+#[require(AuthorityLog)]
 pub struct Player {
     pub mode: Mode,
     pub boots_on: bool,
@@ -219,8 +223,9 @@ impl Player {
     /// Puts the player back aboard `ship`, on deck spot `slot`, as at the
     /// start of a game: boots on, nothing grappled.
     /// What they carry they keep (it's theirs: see `sim::progression`); a
-    /// death has already left it where they fell.
-    pub fn respawn(&mut self, ship: Entity, slot: u32) {
+    /// death has already left it where they fell. Authority: it's told in
+    /// `told`, at `tick`.
+    pub fn respawn(&mut self, ship: Entity, slot: u32, told: &mut AuthorityLog, tick: u32) {
         self.mode = deck_mode(ship, slot);
         self.boots_on = true;
         self.grapple = None;
@@ -231,13 +236,13 @@ impl Player {
             hand.reload_queued = false;
             hand.beam = None;
         }
-        self.emit(PlayerEvent::Respawned);
+        told.push(tick, PlayerEvent::Respawned);
     }
 
     /// `ship` (whose frame is `frame`) is coming apart: a player standing on
     /// it is thrown clear, and one tied to it or flying relative to it lets
-    /// go.
-    pub fn thrown_off(&mut self, ship: Entity, frame: &BodyFrame, tuning: &Tuning) {
+    /// go. Authority: it's told in `told`, at `tick`.
+    pub fn thrown_off(&mut self, ship: Entity, frame: &BodyFrame, tuning: &Tuning, told: &mut AuthorityLog, tick: u32) {
         if let Mode::Booted {
             body,
             feet,
@@ -258,11 +263,11 @@ impl Player {
             }
             self.mode = mode;
             self.detach_timer = tuning.detach_cooldown;
-            self.emit(PlayerEvent::Detached(Detach::Blasted));
+            told.push(tick, PlayerEvent::Detached(Detach::Blasted));
         }
         if self.grapple.is_some_and(|g| g.target == ship) {
             self.grapple = None;
-            self.emit(PlayerEvent::RopeSnapped);
+            told.push(tick, PlayerEvent::RopeSnapped);
         }
         if self.reference_body == Some(ship) {
             self.reference_body = None;
@@ -272,8 +277,9 @@ impl Player {
     /// Shoved (by a blast): `dv` (world, m/s) is added to the player's
     /// velocity. On boots (`frame` the body underfoot's), a shove that beats
     /// their grip, lifting them off the deck or sliding them along it, knocks
-    /// them off; a lesser one is a stagger along the deck.
-    pub fn shove(&mut self, dv: Vec3, frame: Option<&BodyFrame>, tuning: &Tuning) {
+    /// them off; a lesser one is a stagger along the deck. Authority: being
+    /// knocked off is told in `told`, at `tick`.
+    pub fn shove(&mut self, dv: Vec3, frame: Option<&BodyFrame>, tuning: &Tuning, told: &mut AuthorityLog, tick: u32) {
         match self.mode {
             Mode::Eva { ref mut velocity, .. } => *velocity += dv,
             Mode::Booted {
@@ -291,7 +297,7 @@ impl Player {
                 if peel > tuning.adhesion_accel * SHOVE_SECONDS || along.length() > tuning.shear_accel * SHOVE_SECONDS {
                     self.mode = booted_to_eva(frame, feet, up, velocity + local, orientation, pitch, tuning);
                     self.detach_timer = tuning.detach_cooldown;
-                    self.emit(PlayerEvent::Detached(Detach::Blasted));
+                    told.push(tick, PlayerEvent::Detached(Detach::Blasted));
                 } else if let Mode::Booted { velocity, .. } = &mut self.mode {
                     *velocity += along;
                 }

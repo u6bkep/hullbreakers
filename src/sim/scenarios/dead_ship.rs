@@ -27,6 +27,7 @@ use crate::sim::devices::{DeviceKind, Devices};
 use crate::sim::mission::{CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, break_up, clock, countdown, presses};
 use crate::sim::items::{CargoKind, Item};
 use crate::sim::pickups::{PICKUP_HALF, Pickup};
+use crate::sim::events::AuthorityLog;
 use crate::sim::player::Player;
 use crate::sim::ship::{self, ControlAction, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
@@ -124,6 +125,7 @@ fn salvage(
     ships: Query<(&ShipHull, &Devices)>,
     homes: Query<Entity, With<HomeShip>>,
     mut players: Query<(Entity, &mut Player, Has<Robot>)>,
+    mut told: Query<&mut AuthorityLog>,
     names: Query<&Name>,
     pickups: Query<&Pickup>,
     marked: MarkedBodies,
@@ -245,7 +247,7 @@ fn salvage(
             // Either way, it goes: the crew watches from home, or is thrown
             // off it.
             if let Some(frame) = bodies.frame(derelict) {
-                break_up(&mut commands, derelict, design, &frame, tick.0, &tuning, &mut players);
+                break_up(&mut commands, derelict, design, &frame, tick.0, &tuning, &mut players, &mut told);
             }
         }
     }

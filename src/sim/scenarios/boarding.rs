@@ -31,6 +31,7 @@ use crate::sim::devices::Devices;
 use crate::sim::design::ShipDesign;
 use crate::sim::flight::{Duel, Flight, Path};
 use crate::sim::mission::{Staged, CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, break_up, presses};
+use crate::sim::events::AuthorityLog;
 use crate::sim::player::Player;
 use crate::sim::ship::{self, ControlAction, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
@@ -186,6 +187,7 @@ fn settle_battle(
     mut mission: Single<&mut Mission>,
     mut ships: Query<(Entity, &mut Combatant, &ShipHull, Has<HomeShip>, Option<&mut Flight>)>,
     mut players: Query<(Entity, &mut Player, Has<Robot>)>,
+    mut told: Query<&mut AuthorityLog>,
 ) {
     let wrecked: Vec<(Entity, &'static ShipDesign, bool)> = ships
         .iter()
@@ -196,7 +198,7 @@ fn settle_battle(
         let Some(frame) = bodies.frame(ship) else {
             continue;
         };
-        break_up(&mut commands, ship, design, &frame, tick.0, &tuning, &mut players);
+        break_up(&mut commands, ship, design, &frame, tick.0, &tuning, &mut players, &mut told);
         // Nobody shoots at wreckage, and it can't shake anyone.
         for (_, mut combatant, _, _, flight) in &mut ships {
             if combatant.target == Some(ship) {
