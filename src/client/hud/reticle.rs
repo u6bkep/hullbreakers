@@ -55,6 +55,18 @@ pub fn reticle(
     painter.circle_filled(c, 1.6, Color32::from_black_alpha(110));
     painter.circle_filled(c, 1.0, INK);
 
+    // Zoomed: a scope's ring round the crosshair, with long hairlines out
+    // to it and the magnification, in the suit's colour.
+    let zoom = player.loadout.zoom;
+    if zoom > 1.0 {
+        let r = ctx.content_rect().height() * 0.11;
+        style::glow_line(&painter, style::arc_points(c, r, 0.0, std::f32::consts::PI), style::fade(SUIT, 0.8), style::HAIR, true);
+        for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
+            painter.line_segment([c + d * (gap + len + 6.0), c + d * r], Stroke::new(style::HAIR, style::fade(INK, 0.5)));
+        }
+        style::caps(&painter, c + vec2(r * 0.72, r * 0.72), Align2::LEFT_TOP, &format!("x{zoom:.1}"), style::MICRO, SUIT);
+    }
+
     // A button or a case under the crosshair wins over the grapple readout.
     let prompt = control_prompt(player, own, &tuning, tick.0, &spatial, &bodies, &controls, &pickups);
     if let Some(label) = prompt {

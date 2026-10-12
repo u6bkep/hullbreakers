@@ -1,0 +1,19 @@
+{
+  "name": "rifle_emitter_arc",
+  "kind": "weapon_part",
+  "brief": "Rifle emitter, arc: Two forked prongs with insulator rings, a spark between them.",
+  "palette": {
+    "paint_primary": "#d6cfba",
+    "emissive": "#8fd8ff"
+  },
+  "expect": {
+    "parts": [
+      "emitter"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

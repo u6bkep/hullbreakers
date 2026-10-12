@@ -156,6 +156,17 @@ it.
   hand-kept sidecars would drift. Cost: half an hour. The "bevel eats narrow steps"
   warning came back on every barrel (collar and crown steps of 1.5–3 mm under a 2 mm
   bevel); widened to 4 mm.
+- 2026-10-12, wave 4 guns (shotgun, sniper, six family emitters; 40 assets).
+  There's no way to see an assembled gun outside the game: the previews show
+  each part alone, so overall length and fit took a throwaway Blender script
+  that hangs part .glbs on a receiver's sockets and renders orthographic views
+  (kept at `/tmp/hbcompose/compose.py` during the work; worth bringing in-tree
+  as `tools/assets/compose`). The "flat planes have no triangles left"
+  warning still doesn't name the plane (every case was a 2–3 mm crown step
+  under a 1.5 mm bevel). Lathe end caps sit flush where a lens goes, so glass
+  must stand proud of the cap to show. `paint_secondary` tape on a near-black
+  secondary paint vanishes: the quick mags use `paint_primary`. Cost: a few
+  hours of a modelling agent's time.
 
 ## Our gallery (client/gallery.rs)
 
@@ -229,3 +240,11 @@ it.
   braking with the load behind you (a rope can't push), which a player
   learns to do slowly.
 
+- 2026-10-12. A shotgun's shove (or a plasma burst's) is an impulse on a
+  floating player's velocity, and flight assist (on by default) brakes any
+  velocity the keys didn't ask for: a shoved crewmate with assist on stops
+  within a second, one with it off tumbles on. That's the intended feel, but
+  a test that measures a shove must turn the target's assist off (or it
+  reads zero a few ticks later). Robots float with their own brains' assist,
+  so a Swarmer's shove fades the same way. Cost: half an hour
+  (`tests/families.rs`, `target`).

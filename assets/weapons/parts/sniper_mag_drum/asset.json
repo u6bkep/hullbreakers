@@ -1,0 +1,19 @@
+{
+  "name": "sniper_mag_drum",
+  "kind": "weapon_part",
+  "brief": "Sniper mag, drum: A short neck into a drum.",
+  "palette": {
+    "paint_primary": "#b9a37a",
+    "emissive": "#9fe8ff"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

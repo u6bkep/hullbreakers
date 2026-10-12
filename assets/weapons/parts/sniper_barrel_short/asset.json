@@ -1,0 +1,29 @@
+{
+  "name": "sniper_barrel_short",
+  "kind": "weapon_part",
+  "brief": "Sniper barrel, short: A short fluted stub.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.07
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

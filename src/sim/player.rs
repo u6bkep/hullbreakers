@@ -28,7 +28,7 @@ use super::combat::{Beams, beam_shove};
 use super::bots::{BodyTuning, Robot, tuning_of};
 use super::pickups::{Pickup, PickupPoint};
 use super::ship::ControlAction;
-use super::weapons::{Loadout, ShotOut};
+use super::weapons::{Loadout, ShotKind, ShotOut};
 use super::rope::{RopeEnd, solve_rope};
 use super::ship::Control;
 use super::tuning::Tuning;
@@ -1175,7 +1175,13 @@ fn fire_shot(ctx: &TickContext, bodies: &Bodies, player: &mut Player, shot: &Sho
         damage: shot.damage,
         mass: shot.bullet_mass,
         origin: eye,
-        velocity: own_velocity + dir * shot.muzzle_speed,
+        // An instant shot (an arc, a beam) owes nothing to how the shooter
+        // moves; a flown one keeps their velocity.
+        velocity: match shot.kind {
+            ShotKind::Arc { .. } | ShotKind::Laser { .. } => dir * shot.muzzle_speed,
+            _ => own_velocity + dir * shot.muzzle_speed,
+        },
+        kind: shot.kind,
     });
     if let Mode::Eva { velocity, .. } = &mut player.mode {
         *velocity -= dir * shot.bullet_mass * shot.muzzle_speed / ctx.tuning.player_mass;

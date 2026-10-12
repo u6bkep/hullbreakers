@@ -1,0 +1,25 @@
+{
+  "name": "shotgun_receiver",
+  "kind": "handheld",
+  "brief": "The combat shotgun's body, which its parts mount on (crowd control): short, chunky and wide, a vent-ribbed heat shield over the bore, a pump slide on a tube under it (the off hand's place), a box-mag well, a shell saddle on the left. Olive body, near-black furniture, amber lights. Barrel, magazine, stock, sight and muzzle device are separate part models (assets/weapons/parts).",
+  "palette": {
+    "paint_primary": "#6f7a45",
+    "paint_secondary": "#2b2d2f",
+    "emissive": "#ffb347"
+  },
+  "expect": {
+    "size": {"x": [0.07, 0.1], "y": [0.22, 0.26], "z": [0.46, 0.5]},
+    "parts": ["receiver", "grip", "trigger_guard", "handguard", "pump"],
+    "colliders": ["COL_body", "COL_barrel", "COL_grip", "COL_pump"],
+    "sockets": {
+      "SOCKET_grip":     {"at": [0, 0, 0], "tol": 0.001, "forward": [0, 0, -1], "up": [0, 1, 0]},
+      "SOCKET_barrel":   {"at": [0, 0.10, -0.405], "tol": 0.001, "forward": [0, 0, -1]},
+      "SOCKET_foregrip": {"at": [0, 0.056, -0.295], "tol": 0.001},
+      "SOCKET_sight":    {"at": [0, 0.155, -0.07], "tol": 0.001, "up": [0, 1, 0]},
+      "SOCKET_mag":      {"at": [0, 0.046, -0.14], "tol": 0.001},
+      "SOCKET_stock":    {"at": [0, 0.09, 0.08], "tol": 0.001},
+      "SOCKET_eject":    {"at": [0.035, 0.11, -0.05], "tol": 0.02, "forward": [1, 0, 0]}
+    },
+    "tolerance": 0.01
+  }
+}

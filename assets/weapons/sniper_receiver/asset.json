@@ -1,0 +1,25 @@
+{
+  "name": "sniper_receiver",
+  "kind": "handheld",
+  "brief": "The precision rifle's body, which its parts mount on: long and slim, a round action in a chassis with a bolt handle on the right, a high rail on risers for big scopes, a long free-float handguard with a short braced foregrip under it (the off hand's place), a magwell. Sand body, graphite chassis, ice lights. Barrel, magazine, stock, sight and muzzle device are separate part models (assets/weapons/parts).",
+  "palette": {
+    "paint_primary": "#b9a37a",
+    "paint_secondary": "#353a40",
+    "emissive": "#9fe8ff"
+  },
+  "expect": {
+    "size": {"x": [0.06, 0.09], "y": [0.22, 0.26], "z": [0.68, 0.72]},
+    "parts": ["receiver", "bolt", "grip", "trigger_guard", "handguard", "foregrip"],
+    "colliders": ["COL_body", "COL_barrel", "COL_grip", "COL_foregrip"],
+    "sockets": {
+      "SOCKET_grip":     {"at": [0, 0, 0], "tol": 0.001, "forward": [0, 0, -1], "up": [0, 1, 0]},
+      "SOCKET_barrel":   {"at": [0, 0.10, -0.625], "tol": 0.001, "forward": [0, 0, -1]},
+      "SOCKET_foregrip": {"at": [0, 0.03, -0.40], "tol": 0.001},
+      "SOCKET_sight":    {"at": [0, 0.148, -0.115], "tol": 0.001, "up": [0, 1, 0]},
+      "SOCKET_mag":      {"at": [0, 0.05, -0.13], "tol": 0.001},
+      "SOCKET_stock":    {"at": [0, 0.09, 0.073], "tol": 0.001},
+      "SOCKET_eject":    {"at": [0.022, 0.108, -0.06], "tol": 0.02, "forward": [1, 0, 0]}
+    },
+    "tolerance": 0.01
+  }
+}

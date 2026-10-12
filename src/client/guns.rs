@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 
 use super::pickup_look::WeaponPaint;
-use crate::sim::items::{Barrel, Magazine, Muzzle, Paint, PartVariant, Parts, Rarity, Sight, Stock, Weapon};
+use crate::sim::items::{Barrel, Family, Magazine, Muzzle, Paint, PartVariant, Parts, Rarity, Sight, Stock, Weapon};
 use crate::sim::weapons::GunKind;
 
 /// What a crew gun looks like, as drawn: its frame, its parts, and its
@@ -28,6 +28,8 @@ pub struct GunLook {
     pub frame: GunKind,
     pub parts: Parts,
     pub paint: Option<Paint>,
+    /// A family's emitter replaces the muzzle device.
+    pub family: Family,
 }
 
 impl GunLook {
@@ -37,6 +39,7 @@ impl GunLook {
             frame: look.frame,
             parts: look.parts,
             paint: (weapon.rarity != Rarity::Standard).then_some(look.paint),
+            family: weapon.family,
         }
     }
 
@@ -46,6 +49,7 @@ impl GunLook {
             frame,
             parts: Parts::STANDARD,
             paint: None,
+            family: Family::Ballistic,
         }
     }
 }
@@ -56,6 +60,8 @@ fn frame_tag(frame: GunKind) -> Option<&'static str> {
     match frame {
         GunKind::Smg => Some("smg"),
         GunKind::Rifle => Some("rifle"),
+        GunKind::Shotgun => Some("shotgun"),
+        GunKind::Sniper => Some("sniper"),
         GunKind::GunnerRifle | GunKind::SwarmerSprayer | GunKind::MarksmanRifle | GunKind::TurretCannon => None,
     }
 }
@@ -119,6 +125,20 @@ pub fn part_model(frame: GunKind, part: PartVariant) -> Option<String> {
     let f = frame_tag(frame)?;
     let (slot, variant) = part_names(part);
     let name = format!("{f}_{slot}_{}", variant?);
+    Some(format!("weapons/parts/{name}/{name}.glb"))
+}
+
+/// A family's emitter on a frame (on the barrel's muzzle, in place of a
+/// muzzle device), if it has one: ballistic guns have none.
+pub fn emitter_model(frame: GunKind, family: Family) -> Option<String> {
+    let f = frame_tag(frame)?;
+    let fam = match family {
+        Family::Ballistic => return None,
+        Family::Plasma => "plasma",
+        Family::Arc => "arc",
+        Family::Laser => "laser",
+    };
+    let name = format!("{f}_emitter_{fam}");
     Some(format!("weapons/parts/{name}/{name}.glb"))
 }
 
@@ -275,9 +295,11 @@ pub fn assemble_guns(
             assembly.parts_on = true;
             continue;
         }
-        // The muzzle device, on the barrel once that's in.
+        // The muzzle device (or the family's emitter), on the barrel once
+        // that's in.
         let muzzle = parts.into_iter().find(|p| matches!(p, PartVariant::Muzzle(_)));
-        match muzzle.and_then(|m| part_model(look.frame, m)) {
+        let device = emitter_model(look.frame, look.family).or_else(|| muzzle.and_then(|m| part_model(look.frame, m)));
+        match device {
             None => assembly.done = true,
             Some(path) => {
                 let Some(socket) = assembly.barrel.and_then(|b| find(b, "SOCKET_muzzle")) else { continue };
@@ -321,7 +343,7 @@ mod tests {
             for socket in ["SOCKET_grip", "SOCKET_barrel", "SOCKET_mag", "SOCKET_stock", "SOCKET_sight"] {
                 assert!(has_node(&receiver, socket), "{frame:?} receiver has no {socket}");
             }
-            if frame == GunKind::Rifle {
+            if frame != GunKind::Smg {
                 // Where the off hand braces it (see `viewmodel`).
                 assert!(has_node(&receiver, "SOCKET_foregrip"));
             }
@@ -333,6 +355,12 @@ mod tests {
                 }
             }
             assert!(part_model(frame, PartVariant::Muzzle(Muzzle::Bare)).is_none());
+        }
+        for frame in GunKind::FAMILIES {
+            for family in Family::ROLLED {
+                let path = emitter_model(frame, family).unwrap();
+                gltf_json(&root.join(&path));
+            }
         }
     }
 }

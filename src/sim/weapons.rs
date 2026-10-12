@@ -22,12 +22,17 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::input::TickInput;
+pub use super::items::Family;
 use super::items::{AmmoKind, Inventory, Item, MAX_WEAPON_SLOTS, Perk, Weapon};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GunKind {
     Smg,
     Rifle,
+    /// Crowd control: a cone of heavy pellets.
+    Shotgun,
+    /// Range: two-handed, zooms, its round goes through a body.
+    Sniper,
     /// Robots' guns: weaker than the crew's, since robots come in numbers.
     GunnerRifle,
     SwarmerSprayer,
@@ -57,9 +62,27 @@ pub struct GunStats {
     pub bullet_mass: f32,
     /// Seconds to bring it up in a stance change.
     pub switch: f32,
-    /// What it fires, drawn from the inventory's pool of it.
+    /// What it fires, drawn from the inventory's pool of it (a laser
+    /// draws on none: it runs on heat).
     pub ammo: AmmoKind,
     pub perks: [Option<Perk>; 2],
+    /// How it acts on the world (see `docs/plan-weapons.md`).
+    pub family: Family,
+    /// Pellets a shot (a shotgun's cone of them).
+    pub pellets: u8,
+    /// Bodies a round goes through before it stops.
+    pub pierce: u8,
+    /// Plasma: the blast's radius (m).
+    pub splash: f32,
+    /// Arc: jumps to more targets after the first.
+    pub chain: u8,
+    /// Hitscan range (m): arcs and lasers.
+    pub range: f32,
+    /// Laser: heat a shot adds (of 1, overheated).
+    pub heat: f32,
+    /// How far it zooms (x the view), 0 for not at all; zooming needs the
+    /// other hand free.
+    pub zoom: f32,
 }
 
 impl GunStats {
@@ -69,13 +92,21 @@ impl GunStats {
 }
 
 impl GunKind {
-    /// The frames the crew's guns are built on (what loot rolls).
-    pub const CREW: [GunKind; 2] = [GunKind::Smg, GunKind::Rifle];
+    /// The frames the crew's guns are built on.
+    pub const CREW: [GunKind; 4] = [GunKind::Smg, GunKind::Rifle, GunKind::Shotgun, GunKind::Sniper];
+    /// The first two, as loot rolled them before the others came (a roll's
+    /// frame is drawn from these, so old seeds draw what they did).
+    pub const FIRST: [GunKind; 2] = [GunKind::Smg, GunKind::Rifle];
+    /// The frames a family can be rolled on (the others are ballistic
+    /// archetypes: see `docs/plan-weapons.md`).
+    pub const FAMILIES: [GunKind; 2] = [GunKind::Smg, GunKind::Rifle];
 
     pub fn name(self) -> &'static str {
         match self {
             GunKind::Smg => "SMG",
             GunKind::Rifle => "Rifle",
+            GunKind::Shotgun => "Shotgun",
+            GunKind::Sniper => "Sniper",
             GunKind::GunnerRifle => "Gunner rifle",
             GunKind::SwarmerSprayer => "Sprayer",
             GunKind::MarksmanRifle => "Marksman rifle",
@@ -98,10 +129,31 @@ impl GunKind {
             switch: SWITCH_SECONDS,
             ammo,
             perks: [None; 2],
+            family: Family::Ballistic,
+            pellets: 1,
+            pierce: 0,
+            splash: 0.0,
+            chain: 0,
+            range: 0.0,
+            heat: 0.0,
+            zoom: 0.0,
         };
         match self {
             GunKind::Smg => stats(15.0, 380.0, 9.0, 1.2, 2.0, 40, 1.6, 0.008, AmmoKind::Light),
             GunKind::Rifle => stats(7.5, 800.0, 24.0, 0.35, 2.5, 30, 2.0, 0.012, AmmoKind::Heavy),
+            // Eight heavy pellets a shot: little each, a lot together, and a
+            // shove.
+            GunKind::Shotgun => GunStats {
+                pellets: 8,
+                ..stats(1.6, 420.0, 9.0, 4.0, 5.5, 6, 2.4, 0.03, AmmoKind::Shells)
+            },
+            // Through one body into the next; zooms; from the hip, a wide cone.
+            GunKind::Sniper => GunStats {
+                pierce: 1,
+                zoom: 5.0,
+                switch: 0.6,
+                ..stats(0.8, 1400.0, 90.0, 0.04, 6.0, 5, 2.8, 0.02, AmmoKind::Heavy)
+            },
             GunKind::GunnerRifle => stats(5.0, 450.0, 8.0, 1.0, 1.0, 20, 2.0, 0.01, AmmoKind::Heavy),
             GunKind::SwarmerSprayer => stats(10.0, 300.0, 4.0, 3.0, 3.0, 30, 1.5, 0.005, AmmoKind::Light),
             GunKind::MarksmanRifle => stats(1.5, 900.0, 34.0, 0.05, 0.05, 5, 2.5, 0.02, AmmoKind::Heavy),
@@ -194,7 +246,18 @@ pub struct HandState {
     pub reload_queued: bool,
     /// Shots this hand has fired (for perks that count them).
     pub fired: u32,
+    /// A laser's heat (of 1), and whether it overheated (then it won't
+    /// fire until it's cooled to [`COOLED`]).
+    pub heat: f32,
+    pub overheated: bool,
 }
+
+/// A laser cools this much a second when not firing (of its full heat).
+pub const COOL_RATE: f32 = 0.5;
+/// An overheated laser fires again once it's cooled to this.
+pub const COOLED: f32 = 0.33;
+/// Zoomed, the cone is the braced cone times this.
+pub const ZOOM_STEADY: f32 = 0.3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Loadout {
@@ -209,6 +272,13 @@ pub struct Loadout {
     pub hands: [HandState; 2],
     /// Shots fired so far; seeds each shot's spread.
     pub shots: u32,
+    /// How far the view is zoomed (1: not), this tick.
+    #[serde(default = "unzoomed")]
+    pub zoom: f32,
+}
+
+fn unzoomed() -> f32 {
+    1.0
 }
 
 impl Loadout {
@@ -223,6 +293,7 @@ impl Loadout {
             switch_time: 0.0,
             hands: [HandState::default(); 2],
             shots: 0,
+            zoom: 1.0,
         }
     }
 
@@ -340,6 +411,41 @@ pub struct ShotOut {
     pub bullet_mass: f32,
     /// Tangent of the angle off the crosshair, in view x and y.
     pub deviation: Vec2,
+    /// What it is when it gets there.
+    pub kind: ShotKind,
+}
+
+/// What a shot does, by its gun's family (see `docs/plan-weapons.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ShotKind {
+    /// A bullet, flown; through `pierce` bodies before it stops.
+    Bullet { pierce: u8 },
+    /// A plasma bolt, flown; bursts where it hits, `splash` metres round.
+    Plasma { splash: f32 },
+    /// Instant, out to `range`; jumps to `chain` more targets.
+    Arc { range: f32, chain: u8 },
+    /// Instant, out to `range`: a tick of a beam.
+    Laser { range: f32 },
+}
+
+impl ShotKind {
+    pub fn of(s: &GunStats) -> ShotKind {
+        match s.family {
+            Family::Ballistic => ShotKind::Bullet { pierce: s.pierce },
+            Family::Plasma => ShotKind::Plasma { splash: s.splash },
+            Family::Arc => ShotKind::Arc { range: s.range, chain: s.chain },
+            Family::Laser => ShotKind::Laser { range: s.range },
+        }
+    }
+
+    pub fn family(self) -> Family {
+        match self {
+            ShotKind::Bullet { .. } => Family::Ballistic,
+            ShotKind::Plasma { .. } => Family::Plasma,
+            ShotKind::Arc { .. } => Family::Arc,
+            ShotKind::Laser { .. } => Family::Laser,
+        }
+    }
 }
 
 /// What the hands did this tick.
@@ -474,6 +580,27 @@ impl Loadout {
         let stance = self.stance();
         let full = self.hands_full();
         out.grapple_held = !full && Hand::BOTH.iter().any(|h| stance.slot(*h) == Slot::Grapple);
+        // Lasers cool when they aren't firing (below, a firing hand heats).
+        for hand in Hand::BOTH {
+            let firing = cmd.hand(hand).held && self.weapon(hand).is_some_and(|w| w.stats().heat > 0.0);
+            let state = &mut self.hands[hand.index()];
+            if !firing || state.overheated {
+                state.heat = (state.heat - COOL_RATE * dt).max(0.0);
+            }
+            if state.overheated && state.heat <= COOLED {
+                state.overheated = false;
+            }
+        }
+        // Zoom: a gun that zooms, the other hand free and its button held.
+        self.zoom = 1.0;
+        if self.switching <= 0.0 && !full {
+            for hand in Hand::BOTH {
+                let zoom = self.weapon(hand).map_or(0.0, |w| w.stats().zoom);
+                if zoom > 0.0 && stance.slot(hand.other()) == Slot::Empty && cmd.hand(hand.other()).held {
+                    self.zoom = zoom;
+                }
+            }
+        }
         if self.switching > 0.0 || full {
             self.switching = (self.switching - dt).max(0.0);
             for state in &mut self.hands {
@@ -543,22 +670,36 @@ impl Loadout {
                         self.hands[h].cooldown = (self.hands[h].cooldown - dt).max(0.0);
                         continue;
                     }
+                    let heated = stats.heat > 0.0;
                     while self.hands[h].cooldown <= 1e-5 {
                         let mag = self.gun_mut(i).mag;
-                        if mag == 0 {
+                        // A laser runs on heat; everything else on its mag.
+                        if heated {
+                            if self.hands[h].overheated {
+                                break;
+                            }
+                            let state = &mut self.hands[h];
+                            state.heat += stats.heat;
+                            if state.heat >= 1.0 {
+                                state.heat = 1.0;
+                                state.overheated = true;
+                            }
+                        } else if mag == 0 {
                             self.start_reload(hand);
                             break;
                         }
-                        let last = mag == 1;
+                        let last = !heated && mag == 1;
                         // Every fourth shot of this hand's, but never the
                         // last round (which stays the last word).
-                        let free = stats.has(Perk::Recycler) && self.hands[h].fired % 4 == 3 && !last;
+                        let free = heated || stats.has(Perk::Recycler) && self.hands[h].fired % 4 == 3 && !last;
                         if !free {
                             self.gun_mut(i).mag -= 1;
                         }
                         self.hands[h].fired = self.hands[h].fired.wrapping_add(1);
                         self.hands[h].cooldown += 1.0 / stats.rate;
-                        let cone = if self.braced(hand) {
+                        let cone = if self.zoom > 1.0 {
+                            stats.spread_braced * ZOOM_STEADY
+                        } else if self.braced(hand) {
                             stats.spread_braced
                         } else {
                             stats.spread
@@ -568,15 +709,19 @@ impl Loadout {
                         } else {
                             stats.damage
                         };
-                        out.shots.push(ShotOut {
-                            hand,
-                            gun: gun.frame,
-                            damage,
-                            muzzle_speed: stats.muzzle_speed,
-                            bullet_mass: stats.bullet_mass,
-                            deviation: spread(self.shots, cone.to_radians()),
-                        });
-                        self.shots = self.shots.wrapping_add(1);
+                        // A shotgun's pellets each go their own way in the cone.
+                        for _ in 0..stats.pellets.max(1) {
+                            out.shots.push(ShotOut {
+                                hand,
+                                gun: gun.frame,
+                                damage,
+                                muzzle_speed: stats.muzzle_speed,
+                                bullet_mass: stats.bullet_mass,
+                                deviation: spread(self.shots, cone.to_radians()),
+                                kind: ShotKind::of(&stats),
+                            });
+                            self.shots = self.shots.wrapping_add(1);
+                        }
                     }
                     // Counted down after firing, keeping up to a tick of remainder so
                     // rates that aren't a whole number of ticks average out.
@@ -891,5 +1036,100 @@ mod tests {
             fired += l.tick(&cmd, DT).shots.iter().filter(|s| s.hand == Hand::Main).count();
         }
         assert_eq!(gun.mag - mag(&l, 0), fired as u16 - (fired as u16) / 4, "fired {fired}");
+    }
+
+    /// A loadout with `gun` in the main hand and the off hand empty.
+    fn one_handed(gun: Weapon) -> Loadout {
+        let mut l = Loadout::default();
+        l.inventory.weapons[0] = Some(gun);
+        for kind in AmmoKind::ALL {
+            *l.inventory.ammo_mut(kind) = 500;
+        }
+        l.stances[0] = Stance { main: Slot::Gun(0), off: Slot::Empty };
+        l
+    }
+
+    #[test]
+    fn a_shotgun_fires_its_pellets_for_one_shell() {
+        let mut l = one_handed(Weapon::issue(GunKind::Shotgun));
+        let out = l.tick(&holding(true), DT);
+        assert_eq!(out.shots.len(), 8);
+        assert_eq!(mag(&l, 0), 5);
+        // Each pellet its own way.
+        let mut ways: Vec<_> = out.shots.iter().map(|s| (s.deviation.x.to_bits(), s.deviation.y.to_bits())).collect();
+        ways.dedup();
+        assert_eq!(ways.len(), 8);
+        assert!(out.shots.iter().all(|s| s.kind == ShotKind::Bullet { pierce: 0 }));
+    }
+
+    #[test]
+    fn a_laser_heats_instead_of_spending_and_must_cool_when_it_overheats() {
+        let laser = Weapon::issue(GunKind::Rifle).with_family(Family::Laser);
+        let mut l = one_handed(laser);
+        let pool = l.inventory.ammo(laser.stats().ammo);
+        // A beam: a shot every tick, and about four seconds of it.
+        let mut ticks = 0;
+        while !l.hands[0].overheated {
+            assert_eq!(l.tick(&holding(true), DT).shots.len(), 1, "tick {ticks}");
+            ticks += 1;
+            assert!(ticks < 600, "never overheated");
+        }
+        assert!((230..=250).contains(&ticks), "{ticks}");
+        assert_eq!(l.inventory.ammo(laser.stats().ammo), pool, "a laser spent ammo");
+        // Overheated: nothing, trigger held or not, until it's cooled to
+        // COOLED (from full at COOL_RATE).
+        let wait = ((1.0 - COOLED) / COOL_RATE / DT) as usize;
+        for _ in 0..wait - 2 {
+            assert!(l.tick(&holding(true), DT).shots.is_empty());
+        }
+        let resumed = (0..4).map(|_| l.tick(&holding(true), DT).shots.len()).sum::<usize>();
+        assert!(resumed > 0, "never came back");
+        // Let go, it cools on to nothing.
+        for _ in 0..120 {
+            l.tick(&holding(false), DT);
+        }
+        assert_eq!(l.hands[0].heat, 0.0);
+    }
+
+    #[test]
+    fn zoom_needs_a_gun_that_zooms_and_the_free_hands_button() {
+        let mut cmd = holding(false);
+        cmd.off.held = true;
+        // A sniper, the off hand free: its button zooms.
+        let mut l = one_handed(Weapon::issue(GunKind::Sniper));
+        l.tick(&cmd, DT);
+        assert_eq!(l.zoom, 5.0);
+        l.tick(&holding(false), DT);
+        assert_eq!(l.zoom, 1.0);
+        // The grapple in the off hand: its button is the grapple's.
+        l.stances[0].off = Slot::Grapple;
+        l.tick(&cmd, DT);
+        assert_eq!(l.zoom, 1.0);
+        // An SMG doesn't zoom; a scoped rifle does, less.
+        let mut l = one_handed(Weapon::issue(GunKind::Smg));
+        l.tick(&cmd, DT);
+        assert_eq!(l.zoom, 1.0);
+        let scoped = (0..5000)
+            .map(|s| Weapon::new(GunKind::Rifle, s, Rarity::Rare))
+            .find(|w| w.build().parts.sight == crate::sim::items::Sight::Scope)
+            .expect("no scoped rifle");
+        let mut l = one_handed(scoped);
+        l.tick(&cmd, DT);
+        assert_eq!(l.zoom, 2.5);
+        // Zoomed, the cone is tighter than braced.
+        let zoomed = l.tick(&{ let mut c = cmd.clone(); c.main.held = true; c }, DT).shots;
+        let cone = scoped.stats().spread_braced.to_radians().tan() * ZOOM_STEADY;
+        assert!(zoomed.iter().all(|s| s.deviation.length() <= cone + 1e-6));
+    }
+
+    #[test]
+    fn each_family_shoots_its_own_kind_of_shot() {
+        for family in Family::ROLLED {
+            let gun = Weapon::issue(GunKind::Smg).with_family(family);
+            let mut l = one_handed(gun);
+            let shots = (0..30).flat_map(|_| l.tick(&holding(true), DT).shots).collect::<Vec<_>>();
+            assert!(!shots.is_empty(), "{family:?}");
+            assert!(shots.iter().all(|s| s.kind.family() == family), "{family:?}");
+        }
     }
 }

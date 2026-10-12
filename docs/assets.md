@@ -102,7 +102,10 @@ A crew gun is put together at runtime (`src/client/guns.rs`) from its frame's
 receiver (`assets/weapons/<frame>_receiver`: the body, grip and furniture, with a
 `SOCKET_barrel`, `SOCKET_mag`, `SOCKET_stock` and `SOCKET_sight`) and one part per slot
 (`assets/weapons/parts/<frame>_<slot>_<variant>`), each part's origin at the socket it
-mounts on; a muzzle device mounts on the barrel's `SOCKET_muzzle`. The variants are
+mounts on; a muzzle device mounts on the barrel's `SOCKET_muzzle`, and so does a weapon
+family's emitter (`<frame>_emitter_<family>`: plasma, arc, laser), whose light is the
+family's colour (`FAMILY` in `make_parts.py`) on every frame. A two-handed frame
+(rifle, shotgun, sniper) also has a `SOCKET_foregrip`, where the off hand braces. The variants are
 the part enums in `src/sim/items.rs`; which file is which is in `guns.rs`, and a test
 checks every variant has its model and sockets.
 

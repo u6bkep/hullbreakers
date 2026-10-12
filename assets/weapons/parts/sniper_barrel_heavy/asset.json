@@ -1,0 +1,31 @@
+{
+  "name": "sniper_barrel_heavy",
+  "kind": "weapon_part",
+  "brief": "Sniper barrel, heavy: A thick fluted bull barrel with heat collars.",
+  "palette": {
+    "paint_primary": "#b9a37a"
+  },
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.23
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

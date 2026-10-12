@@ -1,0 +1,18 @@
+{
+  "name": "sniper_mag_standard",
+  "kind": "weapon_part",
+  "brief": "Sniper mag, standard: A short straight box: ten rounds.",
+  "palette": {
+    "emissive": "#9fe8ff"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

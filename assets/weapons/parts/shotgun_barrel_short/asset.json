@@ -1,0 +1,29 @@
+{
+  "name": "shotgun_barrel_short",
+  "kind": "weapon_part",
+  "brief": "Shotgun barrel, short: A stub with a toothed breaching crown.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.05
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

@@ -95,7 +95,7 @@ pub fn dress_crew(
         for hand in 0..2 {
             // A brace shows nothing: the fist is already on the foregrip's
             // side of the rifle.
-            let item = what[hand].filter(|h| *h != Held::Brace);
+            let item = what[hand].filter(|h| !matches!(h, Held::Brace(_)));
             if item == look.showing[hand] {
                 continue;
             }

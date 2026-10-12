@@ -220,7 +220,11 @@ pub fn draw_pickups(
                     ChildOf(entity),
                 ))
                 .id();
-            let length = if weapon.frame == crate::sim::weapons::GunKind::Rifle { 0.8 } else { 0.4 };
+            let length = match weapon.frame {
+                crate::sim::weapons::GunKind::Smg => 0.4,
+                crate::sim::weapons::GunKind::Sniper => 1.1,
+                _ => 0.8,
+            };
             spawn_gun(
                 &mut commands,
                 &mut models,
