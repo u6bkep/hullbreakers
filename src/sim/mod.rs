@@ -141,6 +141,7 @@ impl Plugin for PlayerSimPlugin {
             (
                 combat::update_beams.in_set(SimSystems::Beams),
                 player::player_tick.in_set(SimSystems::Players),
+                progression::tune_to_rank.before(SimSystems::Players),
                 player::pose_player_hulls.after(SimSystems::Players),
             ),
         );
@@ -245,7 +246,7 @@ impl Plugin for SimPlugin {
                     )
                         .chain()
                         .in_set(mission::MissionSystems::Settle),
-                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders)
+                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders, progression::open_slots)
                         .chain()
                         .in_set(mission::MissionSystems::React),
                     (mission::return_when_decided, progression::settle_missions, mission::switch_scenario, mission::arrivals)

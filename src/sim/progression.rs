@@ -18,7 +18,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::items::{self, AmmoKind, Inventory, Item, Place, Rarity, Weapon};
-use super::bots::Robot;
+use super::bots::{BodyTuning, Robot};
+use super::tuning::Tuning;
 use super::mission::{CrewTally, Director, Mission, Phase, ScenarioKind};
 use super::scenarios;
 use super::player::Player;
@@ -226,6 +227,19 @@ fn sanitized(mut file: ProfileFile) -> ProfileFile {
         let pool = inv.ammo_mut(kind);
         *pool = (*pool).min(kind.cap());
     }
+    // As many slots as their rank gives: no more (what's past them goes to
+    // the stash), and no fewer.
+    let open = unlocks(rank(file.profile.xp));
+    inv.slots = (open.weapon_slots as u8, open.pack_slots as u8);
+    let past: Vec<Weapon> = inv
+        .overflow()
+        .into_iter()
+        .filter_map(|i| match i {
+            Item::Weapon(w) => Some(w),
+            _ => None,
+        })
+        .collect();
+    file.profile.stash.extend(past);
     file
 }
 
@@ -280,7 +294,7 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
             }
             _ => false,
         },
-        ProfileOp::TakeIssue(frame) => GunKind::CREW.contains(&frame) && inv.take(Item::Weapon(Weapon::issue(frame))),
+        ProfileOp::TakeIssue(frame) => frames(rank(profile.xp)).contains(&frame) && inv.take(Item::Weapon(Weapon::issue(frame))),
         ProfileOp::Store(place) => match inv.get(place) {
             Some(Item::Weapon(w)) if w.rarity == Rarity::Standard => inv.remove(place).is_some(),
             Some(Item::Weapon(w)) if profile.stash.len() < STASH_CAP => {
@@ -388,6 +402,91 @@ pub fn rank(xp: u32) -> u8 {
 
 pub const MAX_RANK: u8 = 10;
 
+/// What a rank has given (everything the ranks up to it brought).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Unlocks {
+    pub weapon_slots: usize,
+    pub pack_slots: usize,
+    /// Suit health, on top of the crew's.
+    pub health: f32,
+    /// Jetpack thrust and reel speed, as multiples of the crew's.
+    pub thrust: f32,
+    pub reel: f32,
+}
+
+/// What each rank brings, for the screens (paints are listed with their
+/// ranks in [`items::PAINTS`]).
+pub const LADDER: [(u8, &str); 9] = [
+    (2, "Paint: the crew's first paint jobs, at the workbench"),
+    (3, "A fourth weapon slot"),
+    (4, "Two more pack slots"),
+    (5, "Suit plating: +25 health"),
+    (6, "Jetpack: 15% more thrust"),
+    (7, "Winch: reels 25% faster"),
+    (8, "Two more pack slots"),
+    (9, "Suit plating: +25 more health"),
+    (10, "New frames (to come)"),
+];
+
+pub fn unlocks(rank: u8) -> Unlocks {
+    let at = |r: u8| rank >= r;
+    Unlocks {
+        weapon_slots: items::WEAPON_SLOTS + at(3) as usize,
+        pack_slots: items::PACK_SLOTS + 2 * at(4) as usize + 2 * at(8) as usize,
+        health: 25.0 * (at(5) as u8 + at(9) as u8) as f32,
+        thrust: if at(6) { 1.15 } else { 1.0 },
+        reel: if at(7) { 1.25 } else { 1.0 },
+    }
+}
+
+/// The frames a rank can draw from the armory as standard issue. Wave 4's
+/// shotgun and sniper arrive here, rank by rank.
+pub fn frames(_rank: u8) -> &'static [GunKind] {
+    &GunKind::CREW
+}
+
+/// The crew's tuning as a player of `rank` has it: their suit, jetpack and
+/// winch.
+pub fn rank_tuning(base: &Tuning, rank: u8) -> Tuning {
+    let open = unlocks(rank);
+    let mut t = base.clone();
+    t.player_health += open.health;
+    t.thrust_accel *= open.thrust;
+    t.reel_speed *= open.reel;
+    t
+}
+
+/// The rank a player's body was last tuned for.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TunedFor(pub u8);
+
+/// Every peer, before players move: a player with a profile moves by their
+/// rank's tuning (as a [`BodyTuning`]: their suit, jetpack and winch), kept
+/// up with the crew's tuning and their rank.
+pub fn tune_to_rank(
+    base: Res<Tuning>,
+    players: Query<(Entity, &Profile, Option<&TunedFor>), (With<Player>, Without<Robot>)>,
+    mut commands: Commands,
+) {
+    for (entity, profile, tuned) in &players {
+        let r = rank(profile.xp);
+        if tuned != Some(&TunedFor(r)) || base.is_changed() {
+            commands.entity(entity).insert((BodyTuning(rank_tuning(&base, r)), TunedFor(r)));
+        }
+    }
+}
+
+/// Authority: a player's inventory has the slots their rank gives.
+pub fn open_slots(mut players: Query<(&mut Player, &Profile), Changed<Profile>>) {
+    for (mut player, profile) in &mut players {
+        let open = unlocks(rank(profile.xp));
+        let inv = &player.loadout.inventory;
+        if inv.weapon_slots() < open.weapon_slots || inv.pack_slots() < open.pack_slots {
+            player.loadout.inventory.grow(open.weapon_slots, open.pack_slots);
+        }
+    }
+}
+
 /// Authority: at the end of each scenario (when the world it was in goes),
 /// guns of a player's still out in it go back to their stash (or are lost:
 /// see [`RECOVER_UNCLAIMED`]).
@@ -428,6 +527,35 @@ mod tests {
         assert_eq!(lost.salvage, pay_for(ScenarioKind::Boarding).unwrap().lost.0, "a loss got the quick bonus");
         assert!(reward(ScenarioKind::Field, Phase::Won, 1.0, &[], true, "A".into()).is_none());
         assert!(reward(ScenarioKind::Boarding, Phase::Underway, 1.0, &[], true, "A".into()).is_none());
+    }
+
+    #[test]
+    fn ranks_come_with_experience_and_each_brings_something() {
+        assert_eq!(rank(0), 1);
+        assert_eq!(rank(xp_for(2) - 1), 1);
+        assert_eq!(rank(xp_for(2)), 2);
+        assert_eq!(rank(u32::MAX), MAX_RANK);
+        for (at, _) in LADDER {
+            assert!(at > 1 && at <= MAX_RANK);
+        }
+        // Every step of the ladder that's built changes something.
+        let all: Vec<Unlocks> = (1..=MAX_RANK).map(unlocks).collect();
+        assert_ne!(all[2], all[1], "rank 3");
+        assert_eq!(all[2].weapon_slots, 4);
+        assert_eq!(all[9].pack_slots, items::MAX_PACK_SLOTS);
+        assert!(items::PAINTS.iter().all(|p| p.3 <= MAX_RANK));
+    }
+
+    #[test]
+    fn a_file_from_a_higher_rank_doesnt_open_slots_it_hasnt_earned() {
+        let mut file = ProfileFile::fresh();
+        file.carried.slots = (4, 10);
+        let gun = Weapon::new(GunKind::Smg, 3, Rarity::Rare);
+        file.carried.weapons[3] = Some(gun);
+        let file = sanitized(file);
+        assert_eq!(file.carried.slots, (3, 6));
+        assert!(file.carried.weapons[3].is_none());
+        assert_eq!(file.profile.stash, vec![gun], "the fourth gun went missing");
     }
 
     #[test]
@@ -493,6 +621,10 @@ pub struct Reward {
     pub xp: u32,
     /// What it was for ("Win: 300", "Dropped the carrier's shield: 25").
     pub lines: Vec<String>,
+    /// Their rank after it, and what reaching it brought, if it was new
+    /// (from [`LADDER`]).
+    pub rank: u8,
+    pub new_rank: Vec<String>,
 }
 
 /// What a mission pays a crew member: the scenario's pay for how it
@@ -515,7 +647,13 @@ pub fn reward(kind: ScenarioKind, phase: Phase, seconds: f32, credits: &[String]
     }
     let (salvage, xp) = sum(&items);
     let lines = items.iter().map(|((s, x), why)| format!("{why}: {s} salvage, {x} xp")).collect();
-    Some(Reward { name, salvage, xp, lines })
+    Some(Reward {
+        name,
+        salvage,
+        xp,
+        lines,
+        ..default()
+    })
 }
 
 fn capitalized(s: &str) -> String {
@@ -549,10 +687,17 @@ pub fn settle_missions(
         }
         let credits = tally.0.get(&entity).map_or(&[][..], |s| &s.credits[..]);
         let name = name.map_or("?".to_string(), |n| n.to_string());
-        if let Some(r) = reward(mission.kind, mission.phase, seconds, credits, all_home, name) {
+        if let Some(mut r) = reward(mission.kind, mission.phase, seconds, credits, all_home, name) {
+            let before = rank(profile.xp);
             profile.salvage += r.salvage;
             profile.xp += r.xp;
             profile.missions += 1;
+            r.rank = rank(profile.xp);
+            r.new_rank = LADDER
+                .iter()
+                .filter(|(at, _)| *at > before && *at <= r.rank)
+                .map(|(at, what)| format!("Rank {at}: {what}"))
+                .collect();
             rewards.push(r);
         }
     }

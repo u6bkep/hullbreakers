@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use super::LocalPlayer;
 use super::bindings::{Action, Binding, Bindings, Button, KEYBINDS_PATH, Modifier, SLOTS};
 use super::items_hud::{self, AMBER, DIM, INK};
-use crate::sim::items::{AmmoKind, Inventory, Item, ItemOp, PACK_SLOTS, Place, WEAPON_SLOTS};
+use crate::sim::items::{AmmoKind, Inventory, Item, ItemOp, Place};
 use crate::net::ProfileRequests;
 use crate::sim::player::Player;
 use crate::sim::progression::Profile;
@@ -390,16 +390,19 @@ fn inventory_tab(
     }
     let target = |chosen: &Option<Place>, to: Place| chosen.is_some_and(|from| from != to && can_move(inv, from, to));
 
-    let size = egui::vec2(ui.available_width(), ITEMS_HEIGHT);
+    // Taller by a row of cards for each row rank has added.
+    let rows = |n: usize| n.div_ceil(3) as f32;
+    let height = ITEMS_HEIGHT + (rows(inv.weapon_slots()) - 1.0 + rows(inv.pack_slots()) - 2.0).max(0.0) * (CELL.y + 6.0);
+    let size = egui::vec2(ui.available_width(), height);
     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
-        ui.set_min_height(ITEMS_HEIGHT);
+        ui.set_min_height(height);
         // Left: what's carried.
         ui.vertical(|ui| {
             ui.set_width(3.0 * CELL.x + 2.0 * GAP);
             ui.label(egui::RichText::new("Weapon slots").strong());
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
-                for i in 0..WEAPON_SLOTS as u8 {
+                for i in 0..inv.weapon_slots() as u8 {
                     let place = Place::Weapon(i);
                     let in_hand = Hand::BOTH.iter().any(|h| loadout.weapon_slot(*h) == Some(i as usize));
                     let tag = if in_hand { format!("SLOT {} · IN HAND", i + 1) } else { format!("SLOT {}", i + 1) };
@@ -411,7 +414,7 @@ fn inventory_tab(
             ui.label(egui::RichText::new("Pack").strong());
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
-                for i in 0..PACK_SLOTS as u8 {
+                for i in 0..inv.pack_slots() as u8 {
                     let place = Place::Pack(i);
                     let r = cell(ui, CELL, "PACK", inv.get(place), *chosen == Some(place), target(chosen, place));
                     click(inv, place, &r, ops, chosen);
@@ -480,7 +483,7 @@ fn inventory_tab(
         );
     });
     let mut options = vec![Slot::Empty, Slot::Grapple];
-    options.extend((0..WEAPON_SLOTS as u8).map(Slot::Gun));
+    options.extend((0..inv.weapon_slots() as u8).map(Slot::Gun));
     let before = layout.0;
     egui::Grid::new("stances").num_columns(3).spacing([16.0, 3.0]).show(ui, |ui| {
         ui.label("");
@@ -593,14 +596,14 @@ fn details(ui: &mut egui::Ui, player: Option<&Player>, chosen: &mut Option<Place
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         if let Item::Weapon(_) = item {
-            for i in 0..WEAPON_SLOTS as u8 {
+            for i in 0..inv.weapon_slots() as u8 {
                 let to = Place::Weapon(i);
                 if to != place && ui.small_button(format!("To slot {}", i + 1)).clicked() {
                     ask(ops, ItemOp::Move { from: place, to });
                     *chosen = Some(to);
                 }
             }
-            let pack = (0..PACK_SLOTS as u8).map(Place::Pack).find(|p| inv.get(*p).is_none());
+            let pack = (0..inv.pack_slots() as u8).map(Place::Pack).find(|p| inv.get(*p).is_none());
             if let (Place::Weapon(_), Some(to)) = (place, pack)
                 && ui.small_button("To pack").clicked()
             {

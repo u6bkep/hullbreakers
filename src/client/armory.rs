@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 
 use super::events::Presented;
-use super::items_hud::{self, DIM, INK};
+use super::items_hud::{self, DIM};
 use super::menu::{CELL, GAP, Menu, Tab, cell};
 use crate::net::ProfileRequests;
 use crate::sim::events::PlayerEvent;
@@ -109,6 +109,7 @@ pub fn armory_tab(
         *chosen = None;
     }
     let mut ask = |op| requests.0.push(op);
+    super::workbench::progress_strip(ui, profile);
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Standard issue, free:").color(DIM));
         for frame in GunKind::CREW {
@@ -163,7 +164,7 @@ pub fn armory_tab(
                     }
                 }
             }
-            ui.label(egui::RichText::new(format!("{} salvage", profile.salvage)).color(INK));
+
         });
     });
 }

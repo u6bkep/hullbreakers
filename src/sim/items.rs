@@ -1069,10 +1069,14 @@ pub enum Taken {
     Nothing,
 }
 
-/// Weapon slots: what stances point at.
+/// Weapon slots, to start with: what stances point at. Rank adds more,
+/// up to [`MAX_WEAPON_SLOTS`] (see `sim::progression`).
 pub const WEAPON_SLOTS: usize = 3;
-/// Pack slots, for spares and small cargo.
+/// Pack slots, for spares and small cargo, to start with; up to
+/// [`MAX_PACK_SLOTS`].
 pub const PACK_SLOTS: usize = 6;
+pub const MAX_WEAPON_SLOTS: usize = 4;
+pub const MAX_PACK_SLOTS: usize = 10;
 
 /// Where in an inventory an item is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize)]
@@ -1099,25 +1103,56 @@ pub enum ItemOp {
 }
 
 /// What a player carries. See the module docs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Inventory {
-    pub weapons: [Option<Weapon>; WEAPON_SLOTS],
-    pub pack: [Option<Item>; PACK_SLOTS],
+    pub weapons: [Option<Weapon>; MAX_WEAPON_SLOTS],
+    pub pack: [Option<Item>; MAX_PACK_SLOTS],
     /// Rounds in each pool, by [`AmmoKind::index`].
     pub ammo: [u16; AmmoKind::COUNT],
     /// Bulky cargo in both hands, if any.
     pub carrying: Option<CargoKind>,
+    /// How many of the weapon slots and pack slots it has (rank gives
+    /// more).
+    pub slots: (u8, u8),
+}
+
+impl Default for Inventory {
+    fn default() -> Inventory {
+        Inventory {
+            weapons: [None; MAX_WEAPON_SLOTS],
+            pack: [None; MAX_PACK_SLOTS],
+            ammo: [0; AmmoKind::COUNT],
+            carrying: None,
+            slots: (WEAPON_SLOTS as u8, PACK_SLOTS as u8),
+        }
+    }
 }
 
 impl Inventory {
     /// How many weapon slots it has.
     pub fn weapon_slots(&self) -> usize {
-        WEAPON_SLOTS
+        (self.slots.0 as usize).min(MAX_WEAPON_SLOTS)
     }
 
     /// How many pack slots it has.
     pub fn pack_slots(&self) -> usize {
-        PACK_SLOTS
+        (self.slots.1 as usize).min(MAX_PACK_SLOTS)
+    }
+
+    /// Gives it `weapons` weapon slots and `pack` pack slots (no fewer
+    /// than it has). What's past them, if it had more, is returned.
+    pub fn grow(&mut self, weapons: usize, pack: usize) {
+        self.slots.0 = self.slots.0.max(weapons.min(MAX_WEAPON_SLOTS) as u8);
+        self.slots.1 = self.slots.1.max(pack.min(MAX_PACK_SLOTS) as u8);
+    }
+
+    /// Everything outside its slots, taken out (a file from a higher rank,
+    /// say).
+    pub fn overflow(&mut self) -> Vec<Item> {
+        let (w, p) = (self.weapon_slots(), self.pack_slots());
+        let mut out: Vec<Item> = self.weapons[w..].iter_mut().filter_map(Option::take).map(Item::Weapon).collect();
+        out.extend(self.pack[p..].iter_mut().filter_map(Option::take));
+        out
     }
 
     pub fn ammo(&self, kind: AmmoKind) -> u16 {
@@ -1137,10 +1172,10 @@ impl Inventory {
     }
 
     /// Whether `item` can go at `place` (whatever is there now).
-    pub fn fits(place: Place, item: &Item) -> bool {
+    pub fn fits(&self, place: Place, item: &Item) -> bool {
         match place {
-            Place::Weapon(i) => (i as usize) < WEAPON_SLOTS && matches!(item, Item::Weapon(_)),
-            Place::Pack(i) => (i as usize) < PACK_SLOTS && !item.bulky() && !matches!(item, Item::Ammo { .. }),
+            Place::Weapon(i) => (i as usize) < self.weapon_slots() && matches!(item, Item::Weapon(_)),
+            Place::Pack(i) => (i as usize) < self.pack_slots() && !item.bulky() && !matches!(item, Item::Ammo { .. }),
             Place::Hands => item.bulky(),
         }
     }
@@ -1166,7 +1201,7 @@ impl Inventory {
 
     /// Puts `item` at an empty `place` it fits. Whether it did.
     pub fn put_back(&mut self, place: Place, item: Item) -> bool {
-        let ok = self.get(place).is_none() && Self::fits(place, &item);
+        let ok = self.get(place).is_none() && self.fits(place, &item);
         if ok {
             self.put(place, Some(item));
         }
@@ -1184,11 +1219,11 @@ impl Inventory {
     /// go back to `from`. Whether anything moved.
     pub fn move_item(&mut self, from: Place, to: Place) -> bool {
         let Some(moving) = self.get(from) else { return false };
-        if from == to || !Self::fits(to, &moving) {
+        if from == to || !self.fits(to, &moving) {
             return false;
         }
         let there = self.get(to);
-        if there.is_some_and(|t| !Self::fits(from, &t)) {
+        if there.is_some_and(|t| !self.fits(from, &t)) {
             return false;
         }
         self.put(from, there);
@@ -1199,12 +1234,12 @@ impl Inventory {
     /// The first free place `item` fits: a weapon slot, else the pack (or
     /// the hands, for bulky cargo).
     pub fn free_place(&self, item: &Item) -> Option<Place> {
-        let weapons = (0..WEAPON_SLOTS as u8).map(Place::Weapon);
-        let pack = (0..PACK_SLOTS as u8).map(Place::Pack);
+        let weapons = (0..self.weapon_slots() as u8).map(Place::Weapon);
+        let pack = (0..self.pack_slots() as u8).map(Place::Pack);
         weapons
             .chain(pack)
             .chain([Place::Hands])
-            .find(|p| Self::fits(*p, item) && self.get(*p).is_none())
+            .find(|p| self.fits(*p, item) && self.get(*p).is_none())
     }
 
     /// Puts up to `rounds` of `kind` in its pool, as many as fit under its
@@ -1278,7 +1313,11 @@ impl Inventory {
                 items.push(Item::Ammo { kind, rounds });
             }
         }
-        *self = Inventory::default();
+        // The slots it had, it keeps.
+        *self = Inventory {
+            slots: self.slots,
+            ..Inventory::default()
+        };
         items
     }
 }
@@ -1594,8 +1633,14 @@ mod tests {
         for s in 0..(WEAPON_SLOTS + PACK_SLOTS) as u32 {
             assert!(inv.take(Item::Weapon(Weapon::new(GunKind::Smg, s, Rarity::Common))));
         }
-        assert!(inv.weapons.iter().all(Option::is_some) && inv.pack.iter().all(Option::is_some));
+        assert!(inv.weapons[..WEAPON_SLOTS].iter().all(Option::is_some) && inv.pack[..PACK_SLOTS].iter().all(Option::is_some));
         assert!(!inv.take(Item::Weapon(Weapon::issue(GunKind::Rifle))));
+        // More slots, more room.
+        inv.grow(MAX_WEAPON_SLOTS, PACK_SLOTS);
+        assert!(inv.take(Item::Weapon(Weapon::issue(GunKind::Rifle))));
+        assert!(inv.weapons[MAX_WEAPON_SLOTS - 1].is_some());
+        inv.weapons[MAX_WEAPON_SLOTS - 1] = None;
+        inv.slots.0 = WEAPON_SLOTS as u8;
         // Emptied out, it's all there.
         let all = inv.empty_out();
         assert_eq!(all.len(), WEAPON_SLOTS + PACK_SLOTS);

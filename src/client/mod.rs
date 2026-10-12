@@ -18,6 +18,7 @@ pub mod items_hud;
 pub mod menu;
 pub mod pickup_look;
 pub mod profile;
+pub mod progress_hud;
 pub mod render;
 pub mod save;
 pub mod sfx;
@@ -166,6 +167,7 @@ impl Plugin for ClientPlugin {
                     hud::vitals_hud,
                     hud::loadout_hud,
                     items_hud::pickup_card,
+                    progress_hud::progress_notice,
                     gallery::label_exhibits,
                     hud::hit_markers,
                     menu::menu,

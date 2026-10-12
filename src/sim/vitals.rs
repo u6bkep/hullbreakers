@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SimTick;
 use super::events::PlayerEvent;
-use super::bots::Robot;
+use super::bots::{BodyTuning, Robot, tuning_of};
 use super::pickups::{Pickup, left_where};
 use super::player::{DeckSlot, Player};
 use super::ship::HomeShip;
@@ -110,19 +110,20 @@ pub fn apply_damage(
     time: Res<Time>,
     tuning: Res<Tuning>,
     mut damage: MessageReader<Damage>,
-    mut vitals: Query<(&mut Vitals, Has<Robot>)>,
+    mut vitals: Query<(&mut Vitals, Has<Robot>, Option<&BodyTuning>)>,
     mut logs: Query<&mut HitLog>,
 ) {
     let dt = time.delta_secs();
-    // The crew's suits heal; robots don't.
-    for (mut v, robot) in &mut vitals {
+    // The crew's suits heal (to their own most: rank plates them); robots
+    // don't.
+    for (mut v, robot, own) in &mut vitals {
         v.since_hurt += dt;
         if !robot && v.since_hurt > tuning.health_regen_delay {
-            v.health = (v.health + tuning.health_regen_rate * dt).min(tuning.player_health);
+            v.health = (v.health + tuning.health_regen_rate * dt).min(tuning_of(&tuning, own).player_health);
         }
     }
     for hit in damage.read() {
-        let Ok((mut v, _)) = vitals.get_mut(hit.target) else {
+        let Ok((mut v, ..)) = vitals.get_mut(hit.target) else {
             continue;
         };
         // Already dead this tick: no more hits to count.
@@ -146,13 +147,13 @@ pub fn settle_deaths(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
     home: Option<Single<Entity, With<HomeShip>>>,
-    mut players: Query<(Entity, &mut Player, &mut Vitals, &DeckSlot)>,
+    mut players: Query<(Entity, &mut Player, &mut Vitals, &DeckSlot, Option<&BodyTuning>)>,
     mut commands: Commands,
 ) {
     let Some(home) = home else {
         return;
     };
-    for (entity, mut player, mut vitals, slot) in &mut players {
+    for (entity, mut player, mut vitals, slot, own) in &mut players {
         if vitals.health > 0.0 {
             continue;
         }
@@ -164,6 +165,6 @@ pub fn settle_deaths(
         }
         player.events.push(PlayerEvent::Died);
         player.respawn(*home, slot.0);
-        *vitals = Vitals::full(&tuning);
+        *vitals = Vitals::full(tuning_of(&tuning, own));
     }
 }

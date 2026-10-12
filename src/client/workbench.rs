@@ -78,6 +78,9 @@ pub fn progress_strip(ui: &mut egui::Ui, profile: &Profile) {
         ui.label(egui::RichText::new(format!("{} salvage", profile.salvage)).color(AMBER));
         let parts = profile.parts.count_ones();
         ui.label(egui::RichText::new(format!("{parts} parts unlocked")).small().color(DIM));
+        if let Some((at, what)) = progression::LADDER.iter().find(|(at, _)| *at > r) {
+            ui.label(egui::RichText::new(format!("Rank {at}: {what}")).small().color(DIM));
+        }
     });
 }
 

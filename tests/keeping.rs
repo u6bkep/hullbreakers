@@ -271,6 +271,35 @@ fn the_workbench_tunes_refits_repaints_and_scraps() {
 }
 
 #[test]
+fn rank_opens_slots_plates_the_suit_and_strengthens_the_jetpack() {
+    use hullbreakers::sim::bots::BodyTuning;
+    use hullbreakers::sim::progression::xp_for;
+    let mut app = app();
+    let me = armed(&mut app);
+    let base = Tuning::default();
+    ticks(&mut app, 2);
+    assert_eq!(player(&app, me).loadout.inventory.weapon_slots(), 3);
+    assert_eq!(app.world().get::<BodyTuning>(me).unwrap().0.player_health, base.player_health);
+    app.world_mut().get_mut::<Profile>(me).unwrap().xp = xp_for(9);
+    ticks(&mut app, 2);
+    let inv = player(&app, me).loadout.inventory;
+    assert_eq!((inv.weapon_slots(), inv.pack_slots()), (4, 10));
+    let own = app.world().get::<BodyTuning>(me).unwrap().0.clone();
+    assert_eq!(own.player_health, base.player_health + 50.0);
+    assert!(own.thrust_accel > base.thrust_accel && own.reel_speed > base.reel_speed);
+    // A fourth gun goes in the fourth slot; dying and coming back, the suit
+    // is full at its plated health, and the slots are still there.
+    app.world_mut().get_mut::<Player>(me).unwrap().loadout.inventory.take(Item::Weapon(Weapon::issue(GunKind::Smg)));
+    app.world_mut().get_mut::<Player>(me).unwrap().loadout.inventory.take(Item::Weapon(Weapon::issue(GunKind::Rifle)));
+    app.world_mut().get_mut::<Player>(me).unwrap().loadout.inventory.take(Item::Weapon(Weapon::issue(GunKind::Smg)));
+    assert!(player(&app, me).loadout.inventory.weapons[3].is_some());
+    stand_looking_at(&mut app, me, DECK, DECK + Vec3::new(0.0, 0.0, -2.0));
+    kill(&mut app, me);
+    assert_eq!(app.world().get::<Vitals>(me).unwrap().health, base.player_health + 50.0);
+    assert_eq!(player(&app, me).loadout.inventory.weapon_slots(), 4);
+}
+
+#[test]
 fn a_mission_pays_its_crew_when_it_ends() {
     use hullbreakers::sim::mission::{Mission, Phase};
     let mut app = app();

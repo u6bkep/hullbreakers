@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::input::TickInput;
-use super::items::{AmmoKind, Inventory, Item, Perk, WEAPON_SLOTS, Weapon};
+use super::items::{AmmoKind, Inventory, Item, MAX_WEAPON_SLOTS, Perk, Weapon};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GunKind {
@@ -151,7 +151,7 @@ impl Stance {
     /// in both hands at once.
     fn sanitized(self) -> Stance {
         let fit = |slot| match slot {
-            Slot::Gun(i) if i as usize >= WEAPON_SLOTS => Slot::Empty,
+            Slot::Gun(i) if i as usize >= MAX_WEAPON_SLOTS => Slot::Empty,
             slot => slot,
         };
         let (main, off) = (fit(self.main), fit(self.off));

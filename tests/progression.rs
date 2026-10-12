@@ -226,3 +226,41 @@ fn a_missions_pay_is_saved_in_each_crew_members_file() {
     assert_eq!(fa.profile.stash, a.profile.stash, "A's stash changed");
     assert_eq!(fb.carried.weapons[0], b.carried.weapons[0], "B lost its gun");
 }
+
+/// A high-ranked client's own player moves by its rank (a stronger
+/// jetpack) and has its slots, and predicts itself so: no more rollbacks
+/// than the low-ranked one.
+#[test]
+fn a_ranked_players_unlocks_are_predicted() {
+    use hullbreakers::sim::bots::BodyTuning;
+    use hullbreakers::sim::progression::xp_for;
+    use lightyear::prelude::PredictionMetrics;
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (pa, pb, mut a, b) = two_profiles("rank");
+    a.profile.xp = xp_for(9);
+    let mut crew = Crew::start(vec![store_with(&pa, &a), store_with(&pb, &b)]);
+    crew.step(120);
+    let (player_a, _) = crew.local(0).unwrap();
+    assert_eq!(player_a.loadout.inventory.weapon_slots(), 4);
+    assert_eq!(player_a.loadout.inventory.pack_slots(), 10);
+    let tuned = {
+        let world = crew.clients[0].world_mut();
+        world.query_filtered::<&BodyTuning, With<LocalPlayer>>().iter(world).next().map(|t| t.0.player_health)
+    };
+    assert_eq!(tuned, Some(150.0), "client A doesn't know its suit is plated");
+    // Both thrust up off the deck and drift: A by its stronger jetpack.
+    let rollbacks = |app: &App| app.world().resource::<PredictionMetrics>().rollbacks;
+    let before = [rollbacks(&crew.clients[0]), rollbacks(&crew.clients[1])];
+    for client in &mut crew.clients {
+        let mut input = client.world_mut().resource_mut::<hullbreakers::net::LocalInput>();
+        input.0.presses.toggle_boots.press();
+        input.0.movement = Vec3::Y;
+    }
+    crew.step(120);
+    let after = [rollbacks(&crew.clients[0]), rollbacks(&crew.clients[1])];
+    let (ra, rb) = (after[0] - before[0], after[1] - before[1]);
+    let off = |crew: &mut Crew, i| matches!(crew.local(i).unwrap().0.mode, hullbreakers::sim::player::Mode::Eva { .. });
+    assert!(off(&mut crew, 0) && off(&mut crew, 1), "nobody took off");
+    eprintln!("rollbacks in 2 s thrusting: rank 9 {ra}, rank 1 {rb}");
+    assert!(ra <= rb + 2, "the ranked player mispredicts: {ra} vs {rb}");
+}
