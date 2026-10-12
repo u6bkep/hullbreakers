@@ -27,7 +27,7 @@ use crate::sim::asteroids::Asteroid;
 use crate::sim::bots::{Affixes, Condition, Robot, Wrecked};
 use crate::sim::pickups::Pickup;
 use crate::sim::combat::Combatant;
-use crate::sim::vitals::{HitLog, Vitals};
+use crate::sim::vitals::{HitLog, HurtLog, Vitals};
 use crate::sim::flight::Flight;
 use crate::sim::input::PlayerInput;
 use crate::sim::devices::Devices;
@@ -284,6 +284,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Combatant>().replicate();
         app.component::<Vitals>().replicate();
         app.component::<HitLog>().replicate();
+        app.component::<HurtLog>().replicate();
         app.component::<Mission>().replicate();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();

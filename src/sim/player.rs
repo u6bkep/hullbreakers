@@ -415,6 +415,7 @@ pub fn new_player(ship: Entity, index: u32) -> impl Bundle {
         PlayerInput::default(),
         PlayerTelemetry::default(),
         super::vitals::HitLog::default(),
+        super::vitals::HurtLog::default(),
     )
 }
 

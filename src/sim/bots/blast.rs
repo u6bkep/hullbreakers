@@ -96,6 +96,8 @@ pub fn detonate(
                 amount: blast.damage * k,
                 source: if robot { blast.credit } else { None },
                 weak: false,
+                // The victim's arcs point at the blast's centre.
+                from: Some(blast.at),
             });
             let out = (center - blast.at).normalize_or(Vec3::Y);
             player.shove(out * blast.impulse * k / tuning.player_mass, frame.as_ref(), tuning);

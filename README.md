@@ -155,8 +155,29 @@ shootable.
 The F1 panel can spawn a Gunner on our bridge or three Swarmers off our
 port side, for trying out a fight.
 
-Players have suit health (bottom of the screen). It comes back after a few
-seconds unhurt; at zero you respawn aboard the home ship.
+Players have suit health (bottom left). It comes back after a few seconds
+unhurt; at zero you respawn aboard the home ship, and the HUD marks where
+your kit was left.
+
+### The HUD
+
+The HUD is a suit visor projection (design: [docs/hud-style.md](docs/hud-style.md),
+code: `src/client/hud/`). Around a clear centre: the scenario strip at the
+top (the objective, the clock, the scenario's status lines, and in a ship
+fight both hulls and the carrier's shield), the event feed top left, your
+suit (health, regen, boots, assist, speed against the reference body,
+rope) bottom left, and a card per hand with the stances bottom right
+(weapon names and rarity; what's in a pickup in a card by the crosshair).
+In the world it marks our ship and hostile ones, brackets the reference
+body, and marks the scenario's markers (goals, gates, devices, the way
+home) plus the carrier's hangar, the mission wall after a win, the weapons
+locker while you're unarmed aboard, and your dropped kit; off screen
+they're arrows at the edge. Arcs round the centre point toward whatever
+just hurt you (the authority records where each hurt came from), the edge of the
+screen reddens as your health runs low, and dying shows SUIT FAILURE. It
+scales with the window's height. `HULLBREAKERS_SCENARIO=boarding
+HULLBREAKERS_SHOTS_SHIP=hud HULLBREAKERS_SHOTS=dir` screenshots it in each
+of its states.
 
 Co-op is host-authoritative: the host (or server) simulates everything and
 replicates it. Its tuning is authoritative too; each player keeps their own
@@ -348,7 +369,9 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   grapple fire/attach/release, reel whine under load, rope twang, rip-off warning.
 - Rope: grey and sagging when slack, straight pale gold when taut, orange to red
   under load with dashes running in while reeling; load gauge under the crosshair.
-- Crosshair ring + distance when a surface is within grapple range.
+- Crosshair ring + distance when a surface is within grapple range; the
+  interact prompt (key and label) beside the crosshair when a click would
+  press something.
 - Camera shake on impacts and rip-offs, a dip on landing, FOV kick on boost.
 
 ## Tuning

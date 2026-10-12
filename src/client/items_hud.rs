@@ -2,8 +2,8 @@
 //! inventory screen), and the card under the crosshair that says what's in
 //! the pickup you're looking at and how it compares with what you hold.
 //!
-//! The look is kept to a few named colours and sizes here, so a HUD style
-//! can take it over in one place.
+//! The colours are the HUD's tokens (`hud::style`, `docs/hud-style.md`),
+//! named here for what they mean on an item.
 
 use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
@@ -20,23 +20,26 @@ use crate::sim::ship::Control;
 use crate::sim::weapons::{GunStats, Hand};
 use crate::sim::Layer;
 
-pub const INK: egui::Color32 = egui::Color32::from_rgb(200, 225, 235);
-pub const DIM: egui::Color32 = egui::Color32::from_rgb(120, 135, 145);
-pub const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 190, 70);
+use super::hud::style;
+
+pub const INK: egui::Color32 = style::INK;
+pub const DIM: egui::Color32 = style::INK_DIM;
+pub const AMBER: egui::Color32 = style::WARNING;
 /// Stat names in the tables.
-pub const LABEL: egui::Color32 = egui::Color32::from_rgb(150, 165, 175);
+pub const LABEL: egui::Color32 = style::INK_DIM;
 /// The stat tables' label and value columns (px).
 const STAT_LABEL_WIDTH: f32 = 96.0;
 const STAT_VALUE_WIDTH: f32 = 84.0;
-pub const BETTER: egui::Color32 = egui::Color32::from_rgb(110, 220, 120);
-pub const WORSE: egui::Color32 = egui::Color32::from_rgb(255, 110, 90);
-/// Supplies (ammo) and cargo, which have no rarity.
-pub const SUPPLY: egui::Color32 = egui::Color32::from_rgb(90, 220, 150);
-pub const CARGO: egui::Color32 = egui::Color32::from_rgb(110, 200, 255);
+pub const BETTER: egui::Color32 = style::FRIENDLY;
+/// Worse is a caution, not a threat: amber, not red.
+pub const WORSE: egui::Color32 = style::WARNING;
+/// Supplies (ammo) and cargo, which have no rarity: ammo is plain, cargo
+/// is what a mission is about.
+pub const SUPPLY: egui::Color32 = style::INK;
+pub const CARGO: egui::Color32 = style::OBJECTIVE;
 
 pub fn rarity_color(rarity: Rarity) -> egui::Color32 {
-    let [r, g, b] = rarity.color();
-    egui::Color32::from_rgb(r, g, b)
+    super::hud::style::rarity(rarity)
 }
 
 pub fn item_color(item: &Item) -> egui::Color32 {
@@ -147,7 +150,8 @@ pub fn compared_with<'a>(player: &'a Player, weapon: &Weapon) -> Option<&'a Weap
 
 /// The card by the crosshair for the pickup it's on: what's inside, in
 /// rarity colours; for a gun, how it compares with yours; and whether
-/// there's room for it. (The prompt to take it is the HUD's.)
+/// there's room for it. (The prompt to take it is the HUD's.) Drawn to the
+/// HUD's style (`docs/hud-style.md`): a scrim plate under the prompt.
 #[allow(clippy::too_many_arguments)]
 pub fn pickup_card(
     mut contexts: EguiContexts,
@@ -160,6 +164,9 @@ pub fn pickup_card(
     pickups: Query<(&Pickup, &Transform, &Visibility)>,
     menu: Res<super::menu::Menu>,
 ) -> Result {
+    use super::hud::style::{self, FRIENDLY, INK, INK_DIM, MICRO, SMALL, WARNING};
+    use egui::{Align2, pos2, vec2};
+
     let ctx = contexts.ctx_mut()?;
     let Some(player) = player.filter(|_| !menu.open) else { return Ok(()) };
     let (own, player) = *player;
@@ -190,48 +197,97 @@ pub fn pickup_card(
         return Ok(());
     };
 
-    let center = ctx.content_rect().center();
     let mut room = player.loadout.inventory;
     let fits: Vec<bool> = pickup.items.iter().map(|item| room.take_what_fits(*item) != Taken::Nothing).collect();
-    egui::Area::new(egui::Id::new("pickup card"))
-        .fixed_pos(center + egui::vec2(24.0, 22.0))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha(230))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(40)))
-                .corner_radius(4.0)
-                .inner_margin(egui::Margin::symmetric(10, 7))
-                .show(ui, |ui| {
-                    ui.set_max_width(300.0);
-                    for (item, fits) in pickup.items.iter().zip(&fits) {
-                        let text = egui::RichText::new(item.name()).color(item_color(item)).strong();
-                        ui.label(if *fits { text } else { text.strikethrough() });
-                    }
-                    // One gun: what it is, and against yours.
-                    if let [Item::Weapon(weapon)] = pickup.items.as_slice() {
-                        for (line, color) in weapon_lines(weapon) {
-                            ui.label(egui::RichText::new(line).small().color(color));
-                        }
-                        let theirs = compared_with(player, weapon);
-                        if let Some(other) = theirs {
-                            ui.label(egui::RichText::new(format!("vs {}", other.name())).small().color(DIM));
-                        }
-                        stats_table(ui, "pickup stats", &weapon.stats(), theirs.map(|w| w.stats()).as_ref());
-                    }
-                    if fits.iter().any(|f| !f) {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "No room for some of it: drop something ({}) or sort your pack ({})",
-                                bindings.label(Action::DropItem),
-                                bindings.label(Action::Loadout)
-                            ))
-                            .small()
-                            .color(AMBER),
-                        );
-                    }
-                });
-        });
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("pickup card")));
+
+    // Lay it out first (rows of galleys), then the plate under it.
+    enum Row {
+        Text(std::sync::Arc<egui::Galley>, egui::Color32, f32),
+        Stat(std::sync::Arc<egui::Galley>, std::sync::Arc<egui::Galley>, Option<(std::sync::Arc<egui::Galley>, egui::Color32)>),
+        Rule,
+    }
+    let mut rows = Vec::new();
+    for (item, fits) in pickup.items.iter().zip(&fits) {
+        let color = if *fits { item_color(item) } else { INK_DIM };
+        rows.push(Row::Text(style::galley(&painter, item.name(), style::ui(style::BODY), color, 0.0), color, 22.0));
+    }
+    if let [Item::Weapon(weapon)] = pickup.items.as_slice() {
+        for (line, color) in weapon_lines(weapon) {
+            rows.push(Row::Text(style::galley(&painter, line, style::ui(SMALL), color, 0.0), color, 18.0));
+        }
+        let theirs = compared_with(player, weapon);
+        rows.push(Row::Rule);
+        if let Some(other) = theirs {
+            let line = format!("VS {}", other.name().to_uppercase());
+            rows.push(Row::Text(style::galley(&painter, line, style::ui(MICRO), INK_DIM, 1.0), INK_DIM, 18.0));
+        }
+        let against = theirs.map(|w| stat_lines(&w.stats()));
+        for (i, line) in stat_lines(&weapon.stats()).iter().enumerate() {
+            let label = style::galley(&painter, line.label.to_uppercase(), style::ui(MICRO), INK_DIM, 1.0);
+            let value = style::galley(&painter, format!("{:.*}{}", line.decimals, line.value, line.unit), style::num(SMALL), INK, 0.0);
+            let delta = against.as_ref().map(|t| line.value - t[i].value).filter(|d| d.abs() > 0.5 * 10f32.powi(-(line.decimals as i32))).map(|d| {
+                let color = if (d > 0.0) == line.more_is_better { FRIENDLY } else { WARNING };
+                (style::galley(&painter, format!("{:+.*}", line.decimals, d), style::num(SMALL), color, 0.0), color)
+            });
+            rows.push(Row::Stat(label, value, delta));
+        }
+    }
+    if fits.iter().any(|f| !f) {
+        rows.push(Row::Rule);
+        let line = format!(
+            "No room for some of it: drop something ({}) or sort your pack ({})",
+            bindings.label(Action::DropItem),
+            bindings.label(Action::Loadout)
+        );
+        rows.push(Row::Text(style::galley(&painter, line, style::ui(SMALL), WARNING, 0.0), WARNING, 18.0));
+    }
+    const LABEL_W: f32 = 110.0;
+    const VALUE_W: f32 = 80.0;
+    let width = rows
+        .iter()
+        .map(|r| match r {
+            Row::Text(g, ..) => g.size().x,
+            Row::Stat(..) => LABEL_W + VALUE_W + 50.0,
+            Row::Rule => 0.0,
+        })
+        .fold(220.0, f32::max)
+        + 24.0;
+    let height = rows
+        .iter()
+        .map(|r| match r {
+            Row::Text(.., h) => *h,
+            Row::Stat(..) => 17.0,
+            Row::Rule => 9.0,
+        })
+        .sum::<f32>()
+        + 16.0;
+    // Under the interact prompt, clear of the crosshair.
+    let center = ctx.content_rect().center();
+    let plate = egui::Rect::from_min_size(center + vec2(26.0, 24.0), vec2(width, height));
+    let accent = pickup.items.first().map_or(INK_DIM, item_color);
+    style::plate(&painter, plate, accent, 1.0);
+    let x = plate.min.x + 12.0;
+    let mut y = plate.min.y + 8.0;
+    for row in rows {
+        match row {
+            Row::Text(g, color, h) => {
+                painter.galley(pos2(x, y + (h - g.size().y) / 2.0), g, color);
+                y += h;
+            }
+            Row::Stat(label, value, delta) => {
+                painter.galley(pos2(x, y + (17.0 - label.size().y) / 2.0), label, INK_DIM);
+                painter.galley(Align2::RIGHT_TOP.anchor_size(pos2(x + LABEL_W + VALUE_W, y), value.size()).min, value, INK);
+                if let Some((g, color)) = delta {
+                    painter.galley(pos2(x + LABEL_W + VALUE_W + 10.0, y), g, color);
+                }
+                y += 17.0;
+            }
+            Row::Rule => {
+                painter.line_segment([pos2(x, y + 4.0), pos2(plate.max.x - 12.0, y + 4.0)], egui::Stroke::new(style::HAIR, style::INK_FAINT));
+                y += 9.0;
+            }
+        }
+    }
     Ok(())
 }

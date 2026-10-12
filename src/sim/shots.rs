@@ -49,6 +49,8 @@ pub struct Shot {
     pub position: Vec3,
     pub velocity: Vec3,
     pub age: f32,
+    /// Where it was fired from: what its victim is told.
+    pub origin: Vec3,
 }
 
 /// Every bullet in flight.
@@ -82,6 +84,7 @@ pub fn launch_shots(
                     position: origin,
                     velocity,
                     age: 0.0,
+                    origin,
                 });
             }
         }
@@ -136,6 +139,7 @@ pub fn fly_shots(
                 amount: if weak { shot.damage * WEAK_MULTIPLIER } else { shot.damage },
                 source: Some(shot.shooter),
                 weak,
+                from: Some(shot.origin),
             });
         } else if let Some(body) = bodies.body_of_collider(hit.entity) {
             let relative = shot.velocity - bodies.frame(body).map_or(Vec3::ZERO, |f| f.point_velocity(point));
