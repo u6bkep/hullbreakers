@@ -1187,3 +1187,109 @@ fn replicated_changes() {
         eprintln!("PROBE {scenario:?}: {rate:.0} B/s; changes in {frames} frames (non-robot, robot): {v:?}");
     }
 }
+
+/// A measuring tool, not a check (`cargo test --test netplay
+/// robot_smoothness -- --ignored --nocapture`): how smoothly robots move on
+/// a client at 100 ms, against how they move on the server, in the
+/// boarding action. Per robot that's moving: frames it stands still (a
+/// stutter), and the change in its step from one frame to the next (a
+/// jolt), in millimetres. See docs/perf.md (it's noisy: repeat it).
+#[test]
+#[ignore]
+fn robot_smoothness() {
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    use std::collections::HashMap;
+    let (_guard, mut s) = session(100);
+    s.server.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
+    s.step(300);
+    let at = |p: &Player| match p.mode {
+        Mode::Booted { body, feet, .. } => (Some(body), feet),
+        Mode::Eva { position, .. } => (None, position),
+    };
+    let sample = |app: &mut App| -> HashMap<Entity, (Option<Entity>, Vec3)> {
+        let world = app.world_mut();
+        world.query_filtered::<(Entity, &Player), With<Robot>>().iter(world).map(|(e, p)| (e, at(p))).collect()
+    };
+    let mut paths: [HashMap<Entity, Vec<(Option<Entity>, Vec3)>>; 2] = Default::default();
+    for _ in 0..300 {
+        s.step(1);
+        for (i, app) in [&mut s.server, &mut s.client].into_iter().enumerate() {
+            for (e, a) in sample(app) {
+                paths[i].entry(e).or_default().push(a);
+            }
+        }
+    }
+    for (name, paths) in ["server", "client"].iter().zip(&paths) {
+        let (mut moving, mut stalls, mut frames, mut jolt, mut jolts) = (0, 0, 0, 0.0f32, Vec::new());
+        let mut rough = 0.0f32;
+        for path in paths.values() {
+            let steps: Vec<Option<Vec3>> = path.windows(2).map(|w| (w[0].0 == w[1].0).then(|| w[1].1 - w[0].1)).collect();
+            let travelled: f32 = steps.iter().flatten().map(|d| d.length()).sum();
+            if travelled < 0.5 {
+                continue;
+            }
+            moving += 1;
+            let mut worst = 0.0f32;
+            for w in steps.windows(2) {
+                if let (Some(a), Some(b)) = (w[0], w[1]) {
+                    frames += 1;
+                    // Standing still between two steps of motion.
+                    if b.length() < 1e-4 && a.length() > 1e-3 {
+                        stalls += 1;
+                    }
+                    worst = worst.max((b - a).length());
+                    rough += (b - a).length();
+                }
+            }
+            jolt = jolt.max(worst);
+            jolts.push(worst * 1000.0);
+        }
+        jolts.sort_by(f32::total_cmp);
+        let median = jolts.get(jolts.len() / 2).copied().unwrap_or(0.0);
+        eprintln!(
+            "SMOOTH {name}: {moving} robots moving, {stalls} stalls in {frames} frames; mean jolt {:.1} mm, worst {:.1} mm, median robot's worst {median:.1} mm",
+            rough * 1000.0 / frames.max(1) as f32,
+            jolt * 1000.0
+        );
+    }
+}
+
+/// A robot's shots reach a client as it fires them (its tracers and sounds
+/// are drawn from them), each one there, at 100 ms.
+#[test]
+fn a_robots_shots_reach_a_client() {
+    use hullbreakers::sim::bots::{Robot, SpawnRobots};
+    use hullbreakers::sim::events::PlayerEvent;
+    use std::collections::{HashMap, HashSet};
+    let (_guard, mut s) = session(100);
+    s.step(120);
+    // A gunner on our bridge, facing aft at the crew.
+    s.server.world_mut().write_message(SpawnRobots(Robot::Gunner));
+    let shots = |app: &mut App, seen: &mut HashMap<&'static str, HashSet<(u32, u32)>>, side: &'static str| {
+        let world = app.world_mut();
+        for p in world.query_filtered::<&Player, With<Robot>>().iter(world) {
+            for (tick, e) in p.events.iter() {
+                if let PlayerEvent::Fired { origin, .. } = e {
+                    // Where from, to the centimetre, and when: the same shot
+                    // on either side.
+                    let key = ((origin.x * 100.0).round() as i32 as u32 ^ (origin.z * 100.0).round() as i32 as u32, tick);
+                    seen.entry(side).or_default().insert(key);
+                }
+            }
+        }
+    };
+    let mut seen = HashMap::new();
+    for _ in 0..480 {
+        s.step(1);
+        shots(&mut s.server, &mut seen, "server");
+        shots(&mut s.client, &mut seen, "client");
+    }
+    let (server, client) = (seen.remove("server").unwrap_or_default(), seen.remove("client").unwrap_or_default());
+    // The last few may still be on their way.
+    let newest = server.iter().map(|k| k.1).max().unwrap_or(0);
+    let missed = server.iter().filter(|k| newest.wrapping_sub(k.1) > 30 && !client.contains(k)).count();
+    eprintln!("robot shots: server {}, client {}, missed {missed}", server.len(), client.len());
+    assert!(server.len() > 3, "the gunner hardly fired: {}", server.len());
+    assert_eq!(missed, 0, "the client missed {missed} of {} shots", server.len());
+}

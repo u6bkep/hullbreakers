@@ -359,7 +359,10 @@ a breaker reset, the board), a death and the kit (the host tries it first:
 it isn't theirs), a crate, a fight, a hull crawler, the shield console and
 the mission wall (the pay and a rank-up on the debrief), the escort (key,
 gangway, the cell carried, set down, carried home), the derelict's
-devices, a gate, a tow, and the gallery's affixed robots. The script
+devices, a gate, a tow, the gallery's affixed robots, and robots let loose
+on our bridge (gunners, a grappler, a crawler, a turret, a marksman) and a
+limpet's rock, watched by both (`<name>.png` and `host-<name>.png` from one
+capture), to compare how a client draws them. The script
 presses, fires, reels and clicks as the client, screenshots its view (and
 the host's, where it matters) into `<dir>`, and copies both logs and the
 client's profile file there; the host's log has the client's profile and

@@ -4,7 +4,8 @@
 //! putting them where something can be tried (the locker and workbench, a
 //! knocked-out breaker, a crate, a fight, the console, the mission wall,
 //! the escort's cell and devices, the derelict's devices, a gate, a pod,
-//! the zoo) and setting what the step needs (a death, guns, faults). The
+//! the zoo, robots let loose on our bridge to watch, a limpet's rock) and
+//! setting what the step needs (a death, guns, faults, the robots). The
 //! tester drives the client's own input (press, fire, reel, the menus)
 //! from outside, and follows along by `<dir>/step`, which holds the current
 //! step's number and name, and lets the tour go on by writing the step's
@@ -15,7 +16,8 @@
 use bevy::prelude::*;
 
 use super::LocalPlayer;
-use crate::sim::bots::{Affix, Affixes, Robot};
+use crate::sim::asteroids::Asteroid;
+use crate::sim::bots::{Affix, Affixes, Robot, new_robot};
 use crate::sim::devices::Devices;
 use crate::sim::mission::{Director, Mission, ScenarioKind};
 use crate::sim::pickups::{Pickup, PickupKind};
@@ -64,9 +66,12 @@ enum Place {
     Kit,
     /// In EVA by the first pod, roped to it.
     Pod,
-    /// In EVA a few metres in front of the gallery's `kind` with `affix`,
-    /// facing it.
-    Robot { kind: Robot, affix: Affix },
+    /// In EVA a few metres in front of the gallery's `kind` with `affix`
+    /// (and `side` metres to its right), facing it.
+    Robot { kind: Robot, affix: Affix, side: f32 },
+    /// In EVA off the nearest limpet's rock, looking at it, `side` metres
+    /// to the right of straight out from it.
+    Limpet { side: f32 },
     /// Booted on `ship`'s deck (at height `deck`), `back` metres out from
     /// its device `id`, facing it.
     Device { ship: &'static str, id: &'static str, back: f32, deck: f32 },
@@ -90,6 +95,9 @@ enum Do {
     LogProfile,
     /// Sets the chance a carrier hit knocks out our damage-control devices.
     Faults(f32),
+    /// Clears our ship of robots, and lets these loose on its bridge (by
+    /// the console, facing aft), to watch: the crew there are kept alive.
+    Robots(&'static [(Robot, &'static [Affix])]),
 }
 
 struct Step {
@@ -112,6 +120,14 @@ fn steps() -> Vec<Step> {
     let step = |name, scenario, place, action, seconds| Step { name, scenario, place, host: Place::Stay, action, seconds };
     let device = |ship, id, back| Place::Device { ship, id, back, deck: 0.0 };
     let up = upper();
+    let watch = |name, robots| Step {
+        name,
+        scenario: ScenarioKind::Field,
+        place: booted(HOME, Vec3::new(-1.2, 0.01, -2.5), Vec3::NEG_Z, -0.05),
+        host: booted(HOME, Vec3::new(1.2, 0.01, -2.5), Vec3::NEG_Z, -0.05),
+        action: Do::Robots(robots),
+        seconds: 12.0,
+    };
     let mut steps = vec![
         step("field_profile", Field, Place::Stay, Do::LogProfile, 6.0),
         // The armory and workbench in the field (no one shooting).
@@ -167,9 +183,32 @@ fn steps() -> Vec<Step> {
             8.0,
         ),
         step("recovery_tow", Recovery, Place::Pod, Do::Nothing, 10.0),
-        step("gallery_shielded", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Shielded }, Do::Arm, 6.0),
-        step("gallery_armoured", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Armoured }, Do::Arm, 6.0),
-        step("gallery_volatile", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Volatile }, Do::Arm, 6.0),
+        // The zoo's affixed robots, shot by the client, the host beside it.
+        Step {
+            host: Place::Robot { kind: Robot::Gunner, affix: Affix::Shielded, side: 2.5 },
+            ..step("gallery_shielded", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Shielded, side: 0.0 }, Do::Arm, 6.0)
+        },
+        Step {
+            host: Place::Robot { kind: Robot::Gunner, affix: Affix::Armoured, side: 2.5 },
+            ..step("gallery_armoured", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Armoured, side: 0.0 }, Do::Arm, 6.0)
+        },
+        Step {
+            host: Place::Robot { kind: Robot::Gunner, affix: Affix::Volatile, side: 2.5 },
+            ..step("gallery_volatile", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Volatile, side: 0.0 }, Do::Arm, 6.0)
+        },
+        // Robots as a client draws them (they reach it as their views: see
+        // `net::robots`), the host beside it for comparison: let loose on
+        // our bridge, the two of them by the bulkhead facing them.
+        watch("watch_gunners", &[(Robot::Gunner, &[]), (Robot::Gunner, &[])]),
+        watch("watch_grappler", &[(Robot::Grappler, &[])]),
+        watch("watch_crawler", &[(Robot::Crawler, &[])]),
+        watch("watch_turret", &[(Robot::Turret, &[])]),
+        watch("watch_marksman", &[(Robot::Gunner, &[Affix::Marksman])]),
+        // Limpets on their rock, and the grazers about.
+        Step {
+            host: Place::Limpet { side: 2.5 },
+            ..step("field_limpet", Field, Place::Limpet { side: 0.0 }, Do::Nothing, 12.0)
+        },
         // What only the authority decides, on both: a death where they
         // stand (the field's start put them on their deck spots), then a
         // blast off the deck.
@@ -201,6 +240,8 @@ pub fn run_coop_tour(
     mut host: Option<Single<(Entity, &mut Player, &mut Vitals), With<LocalPlayer>>>,
     mut shoves: ResMut<Shoves>,
     mut died_at: Local<Option<Vec3>>,
+    loose: Query<(Entity, &Player), (With<Robot>, Without<LocalPlayer>)>,
+    mut commands: Commands,
 ) {
     let steps = steps();
     let Some(step) = steps.get(tour.next) else {
@@ -262,9 +303,39 @@ pub fn run_coop_tour(
             // At the step's end (once the upload has had time to land).
             Do::LogProfile => {}
             Do::Faults(chance) => tuning.hit_fault_chance = chance,
+            Do::Robots(robots) => {
+                if let Some((home, _)) = places.ships.iter().find(|(.., h)| h.0 == HOME).map(|(e, t, _)| (e, *t)) {
+                    for (robot, p) in &loose {
+                        if p.mode.body() == Some(home) {
+                            commands.entity(robot).despawn();
+                        }
+                    }
+                    for (i, (kind, affixes)) in robots.iter().enumerate() {
+                        let feet = Vec3::new(-1.5 + 3.0 * i as f32, 0.01, -11.0);
+                        let mode = Mode::Booted {
+                            body: home,
+                            feet,
+                            up: Vec3::Y,
+                            velocity: Vec3::ZERO,
+                            orientation: Quat::from_rotation_y(std::f32::consts::PI),
+                            pitch: 0.0,
+                        };
+                        commands.spawn(new_robot(*kind, Affixes::of(affixes), mode, home, feet, &tuning, 900 + tour.next as u32 * 4 + i as u32));
+                    }
+                }
+            }
         }
         let _ = std::fs::write(tour.dir.join("step"), format!("{} {}\n", tour.next, step.name));
         info!("coop tour: {}", step.name);
+    }
+    // Watching robots: the crew are kept alive.
+    if matches!(step.action, Do::Robots(_)) {
+        let half = tuning.player_health * 0.5;
+        for v in [Some(&mut *vitals), host.as_mut().map(|h| &mut *h.2)].into_iter().flatten() {
+            if v.health < half {
+                v.health = half;
+            }
+        }
     }
     // Damage control as the host has it, while it matters.
     if step.name.starts_with("dc_") || step.name == "boarding_faults" {
@@ -316,6 +387,7 @@ pub struct Places<'w, 's> {
     pods: Query<'w, 's, (Entity, &'static Pod, &'static Transform)>,
     robots: Query<'w, 's, (&'static Robot, &'static Affixes, &'static Player), Without<LocalPlayer>>,
     devices: Query<'w, 's, (&'static ShipHull, &'static Devices)>,
+    rocks: Query<'w, 's, &'static Transform, With<Asteroid>>,
 }
 
 /// Puts `player` at `place`.
@@ -417,14 +489,37 @@ fn put(place: Place, player: &mut Player, places: &Places, died_at: Option<Vec3>
                 put(Place::Device { ship: HOME, id, back: 1.1, deck: 0.0 }, player, places, died_at);
             }
         }
-        Place::Robot { kind, affix } => {
+        Place::Limpet { side } => {
+            // The nearest limpet on its rock (to the field's centre).
+            let found = robots
+                .iter()
+                .filter_map(|(k, _, p)| match p.mode {
+                    Mode::Booted { body, feet, .. } if *k == Robot::Limpet => places.rocks.get(body).ok().map(|t| (t.translation, t.transform_point(feet))),
+                    _ => None,
+                })
+                .min_by(|a, b| a.1.length().total_cmp(&b.1.length()));
+            if let Some((rock, at)) = found {
+                let out = (at - rock).normalize_or(Vec3::Z);
+                let right = out.any_orthonormal_vector();
+                let position = at + out * 7.0 + right * side;
+                player.mode = Mode::Eva {
+                    position,
+                    velocity: Vec3::ZERO,
+                    orientation: Transform::from_translation(position).looking_at(at, out.any_orthonormal_vector().cross(out)).rotation,
+                    pitch: 0.0,
+                };
+                player.grapple = None;
+                player.flight_assist = true;
+            }
+        }
+        Place::Robot { kind, affix, side } => {
             // The zoo's robots float in EVA.
             let found = robots.iter().find_map(|(k, a, p)| match p.mode {
                 Mode::Eva { position, .. } if *k == kind && a.has(affix) => Some(position),
                 _ => None,
             });
             if let Some(target) = found {
-                let position = target + Vec3::new(0.0, 0.0, 6.0);
+                let position = target + Vec3::new(side, 0.0, 6.0);
                 player.mode = Mode::Eva {
                     position,
                     velocity: Vec3::ZERO,

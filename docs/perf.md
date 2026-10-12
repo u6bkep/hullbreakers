@@ -125,6 +125,18 @@ second of its event log) when there's a new entry. A remote client builds
 the robot's `Player` from them, so everything that draws, hears or aims at
 robots reads it as before; the host reads the real one.
 
+Checked on a client at 100 ms (2026-10-12): `tools/coop-smoke` with
+`COOP_ONLY=watch_gunners,watch_grappler,watch_crawler,watch_turret,watch_marksman,field_limpet,gallery_shielded,gallery_volatile`
+(host and client views side by side), and in `netplay`: still robots sit
+within 5 mm of the server's, every shot reaches the client's log
+(`a_robots_shots_reach_a_client`). `robot_smoothness` (ignored) measures
+how evenly moving robots step on a client: robots in EVA flying with the
+carrier (27 m/s) step unevenly from frame to frame, by 54-99 mm on a
+450 mm step (mean, over six runs). Before robots went as their views it
+was 48-79 mm (four runs): within the noise, so it isn't the rounding but
+the interpolation's timing, worth a look of its own (relative to the
+carrier, which is drawn on another clock, it may show as a shake).
+
 What's left in co-op is mostly the other crew members: each one's whole
 `Player` (loadout, input cursor, event log) goes every tick, since the log
 counts the tick. Splitting that the same way is harder (their own client

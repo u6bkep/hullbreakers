@@ -103,6 +103,13 @@ shot() { "$H" shot "$OUT/full-$1.png"; python3 -I -c "
 import sys
 from PIL import Image
 Image.open(sys.argv[1]).crop((1280, 0, 2560, 720)).save(sys.argv[2])" "$OUT/full-$1.png" "$OUT/$1.png"; }
+# Both views from one capture: <name>.png (client), host-<name>.png.
+pair() { "$H" shot "$OUT/full-$1.png"; python3 -I -c "
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1])
+im.crop((1280, 0, 2560, 720)).save(sys.argv[2])
+im.crop((0, 0, 1280, 720)).save(sys.argv[3])" "$OUT/full-$1.png" "$OUT/$1.png" "$OUT/host-$1.png"; }
 hostshot() { "$H" shot "$OUT/full-host-$1.png"; python3 -I -c "
 import sys
 from PIL import Image
@@ -161,12 +168,12 @@ wait_step boarding_kit && sleep 1.5 && shot kit_1 && "$H" key f && sleep 1.5 && 
 wait_step boarding_crate && sleep 1.5 && shot crate_1 && "$H" key f && sleep 1.5 && shot crate_2
 if wait_step boarding_fight; then
     sleep 1; "$H" press left
-    for i in 1 2 3; do sleep 0.8; shot fight_$i; done
+    for i in 1 2 3; do sleep 0.8; pair fight_$i; done
     "$H" release left
-    for i in 4 5 6; do sleep 1.2; shot fight_$i; done
+    for i in 4 5 6; do sleep 1.2; pair fight_$i; done
 fi
 if wait_step boarding_crawler; then
-    for i in 1 2 3; do sleep 2; shot crawler_$i; done
+    for i in 1 2 3; do sleep 2; pair crawler_$i; done
 fi
 if wait_step boarding_console; then
     sleep 1.5; shot console_1; "$H" key f
@@ -197,11 +204,21 @@ if wait_step recovery_tow; then
 fi
 for what in shielded armoured volatile; do
     if wait_step gallery_$what; then
-        sleep 1.2; shot ${what}_1; "$H" press left
-        for i in 2 3 4; do sleep 0.6; shot ${what}_$i; done
-        "$H" release left; sleep 1; shot ${what}_5
+        sleep 1.2; pair ${what}_1; "$H" press left
+        for i in 2 3 4; do sleep 0.6; pair ${what}_$i; done
+        "$H" release left; sleep 1; pair ${what}_5
     fi
 done
+# Robots let loose on our bridge, watched by both (the client's are its
+# views of them).
+for what in gunners grappler crawler turret marksman; do
+    if wait_step watch_$what; then
+        for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; pair ${what}_$i; done
+    fi
+done
+if wait_step field_limpet; then
+    for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; pair limpet_$i; done
+fi
 # Authority-only events on both: the death's banner and fade, then the
 # blast's caption (and, in the logs, what each one presented).
 for what in die blast; do
