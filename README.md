@@ -16,7 +16,11 @@ HULLBREAKERS_SCENARIO=boarding cargo run   # host straight into a scenario
 The crew's ship has a **mission wall** on the port side of the bridge: click
 a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
-**asteroid field**, and its button takes you back there. `HULLBREAKERS_SCENARIO=boarding` (or `gallery`) starts in another.
+**asteroid field**, and its button takes you back there.
+`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `gallery`) starts in
+another. When a mission is decided a banner says how; back in the field, the
+**debrief** gives its report, every crew member's score card (time in vacuum,
+longest swing on one rope, presses, deaths, and what they did) and awards.
 
 - **Boarding action**: our ship and an enemy **carrier** duel among rocks,
   the carrier weaving in to about 100 m and back out to 400 m every 60 s.
@@ -28,6 +32,25 @@ world and puts everyone back on the deck. The game starts in the
   clear: it breaks apart and throws boarders into space. Beams shove and
   burn anyone in EVA who crosses them: three hits kill. Lose our ship and
   the crew drifts a while, then returns to the field.
+
+- **Grapple run**: ten gates strung through a cluster of rocks, from just
+  off our stern, out and back past our bow (about 430 m gate to gate). Fly
+  them in order before the clock (4 minutes) runs out; your next gate glows
+  cyan. No enemies: it's the grapple's show (the reel is far faster than the
+  jetpack). The board at the top keeps everyone's progress and times, and
+  the host remembers best times, the crew's and each runner's.
+
+- **Dead ship**: a dark derelict lies 22 m off our stern, its airlock facing
+  our cargo door. Cross over (the suit lamp is your light), pull the
+  reactor's restart in engineering, then route the power to the vault at the
+  bow through three junctions spread across the ship (F turns one to its
+  next way). The **power board** in engineering shows which circuits are
+  live, so one player can read it and call while others turn junctions; lit
+  conduits on the floors and ceilings show where the power runs; doors
+  latch open as power reaches them. The vault opens only when its two keys,
+  on the bridge and in the port room, are turned within 1.5 s of each other
+  (alone, key B holds 5 s: race to key A). Release the data core, and the
+  tripped reactor gives everyone 75 s to get back aboard before it goes.
 
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn
@@ -162,11 +185,21 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   - Time-dependent behaviour (ship wobble, lurch, turret fire, scripted
     flight) derives from `SimTick`. Orders to a drifting ship arrive as
     `ShipCommand` messages.
-  - **Scenarios** (`sim/mission.rs`) are the authority's: button presses are
-    player events (`Pressed`) that the `Director` acts on after the players
-    move; a switch despawns the world, spawns the scenario's, and respawns
-    every player on deck (`Respawned`, a view relocation). `Mission` is
-    replicated for the HUD.
+  - **Scenarios** are the authority's, one module each under
+    `sim/scenarios/` with a common shape: build a world, judge it (systems
+    that run only while it's on), and say when to go back to the field.
+    `sim/mission.rs` is what they share: button presses are player events
+    (`Pressed`) that the `Director` acts on after the players move; a switch
+    despawns the world, spawns the scenario's, and respawns every player on
+    deck (`Respawned`, a view relocation). `Mission` is replicated for the
+    HUD: the objective, a status board, markers (label, place, kind, for an
+    objective-marker list), the banner, the report and the debrief.
+  - **Devices** (`sim/devices.rs`) are placed by designs as data (see
+    [docs/ships.md](docs/ships.md)) and wired by conditions over each other.
+    They're pressed through the same interact path as buttons; the
+    authority applies presses and settles every device once a tick, and the
+    state (`Devices`, on the ship) is replicated. Shut doors are part of
+    the ship's collider on every peer.
   - **Combat** (`sim/combat.rs`): which turrets fire is a function of the
     tick, and where a beam stops is a function of the ships' poses and the
     target's shield, so every peer traces the same `Beams` each tick and a
