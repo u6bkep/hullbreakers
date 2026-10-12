@@ -1,0 +1,19 @@
+{
+  "name": "shotgun_mag_drum",
+  "kind": "weapon_part",
+  "brief": "Shotgun mag, drum: A short neck into a big shell drum.",
+  "palette": {
+    "paint_primary": "#6f7a45",
+    "emissive": "#ffb347"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

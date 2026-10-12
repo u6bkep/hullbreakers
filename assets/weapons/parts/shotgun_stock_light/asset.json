@@ -1,0 +1,16 @@
+{
+  "name": "shotgun_stock_light",
+  "kind": "weapon_part",
+  "brief": "Shotgun stock, light: An end cap with a sling loop: next to no stock.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "stock"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

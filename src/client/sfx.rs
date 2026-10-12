@@ -12,7 +12,7 @@ use bevy::audio::{AudioSinkPlayback, PlaybackMode, Volume};
 use bevy::prelude::*;
 
 use crate::sim::vitals::HitLog;
-use crate::sim::weapons::GunKind;
+use crate::sim::weapons::{Family, GunKind};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
@@ -381,6 +381,17 @@ pub struct Sounds {
     /// Your own gun, through your hand and suit: a thump more than a bang.
     shot_smg: Handle<AudioSource>,
     shot_rifle: Handle<AudioSource>,
+    /// A shotgun's boom: low and long, with a rattle.
+    shot_shotgun: Handle<AudioSource>,
+    /// A sniper's crack: sharp, then a ringing tail.
+    shot_sniper: Handle<AudioSource>,
+    /// A plasma bolt leaving: a falling, hollow whump.
+    shot_plasma: Handle<AudioSource>,
+    /// An arc: a snap of crackle.
+    shot_arc: Handle<AudioSource>,
+    /// A beam: a short, bright hum (played as it fires, a few times a
+    /// second).
+    shot_laser: Handle<AudioSource>,
     /// Your shots landing: a tick, a brighter one on a weak spot, a thump
     /// for a kill. (Feedback, not something heard across space.)
     hit: Handle<AudioSource>,
@@ -476,6 +487,20 @@ pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
             synth.thud(0.16, 45.0, 700.0, 1.0),
             synth.clank(0.1, 400.0, 40.0, 0.45),
         )),
+        shot_shotgun: add(mix(
+            synth.thud(0.32, 18.0, 420.0, 1.0),
+            mix(synth.clank(0.2, 220.0, 22.0, 0.35), synth.crackle(0.12, 0.02, 0.996)),
+        )),
+        shot_sniper: add(mix(
+            synth.thud(0.12, 70.0, 2400.0, 0.9),
+            synth.clank(0.6, 520.0, 6.0, 0.45),
+        )),
+        shot_plasma: add(mix(
+            synth.sweep(0.3, 420.0, 90.0, 0.15, 0.8),
+            synth.thud(0.22, 22.0, 300.0, 0.6),
+        )),
+        shot_arc: add(mix(synth.crackle(0.18, 0.08, 0.993), synth.sweep(0.12, 2600.0, 1400.0, 0.3, 0.35))),
+        shot_laser: add(mix(synth.beep(0.14, 1320.0, 0.35), synth.sweep(0.14, 2600.0, 2500.0, 0.2, 0.25))),
         hit: add(synth.clank(0.05, 1900.0, 90.0, 0.4)),
         hit_weak: add(mix(
             synth.clank(0.09, 2600.0, 45.0, 0.5),
@@ -683,6 +708,9 @@ pub fn play_event_sounds(
     sounds: Res<Sounds>,
     mut combat: ResMut<CombatAudio>,
     rocks: Query<(), With<Asteroid>>,
+    time: Res<Time>,
+    mut last_laser: Local<f32>,
+    mut last_boom: Local<f32>,
 ) {
     let mut rng = rand::rng();
     for Presented(event) in events.read() {
@@ -767,10 +795,29 @@ pub fn play_event_sounds(
             // Something set down; and the pack refusing more.
             PlayerEvent::Dropped(_) => play(&mut commands, &sounds.land_hull, 0.35, pitch * 1.4),
             PlayerEvent::InventoryFull | PlayerEvent::NotYours => play(&mut commands, &sounds.click_off, 0.8, pitch * 0.7),
-            PlayerEvent::Fired { gun, .. } => {
-                let sound = match gun {
-                    GunKind::Smg | GunKind::SwarmerSprayer => &sounds.shot_smg,
-                    GunKind::Rifle | GunKind::GunnerRifle | GunKind::MarksmanRifle | GunKind::TurretCannon => &sounds.shot_rifle,
+            PlayerEvent::Fired { gun, kind, .. } => {
+                let sound = match (kind.family(), gun) {
+                    (Family::Plasma, _) => &sounds.shot_plasma,
+                    (Family::Arc, _) => &sounds.shot_arc,
+                    (Family::Laser, _) => {
+                        // A beam fires every tick: its hum a few times a second.
+                        if time.elapsed_secs() - *last_laser < 0.12 {
+                            continue;
+                        }
+                        *last_laser = time.elapsed_secs();
+                        &sounds.shot_laser
+                    }
+                    (_, GunKind::Shotgun) => {
+                        // Eight pellets, one boom.
+                        if time.elapsed_secs() - *last_boom < 0.05 {
+                            continue;
+                        }
+                        *last_boom = time.elapsed_secs();
+                        &sounds.shot_shotgun
+                    }
+                    (_, GunKind::Sniper) => &sounds.shot_sniper,
+                    (_, GunKind::Smg | GunKind::SwarmerSprayer) => &sounds.shot_smg,
+                    (_, GunKind::Rifle | GunKind::GunnerRifle | GunKind::MarksmanRifle | GunKind::TurretCannon) => &sounds.shot_rifle,
                 };
                 play(&mut commands, sound, 0.7, pitch);
             }

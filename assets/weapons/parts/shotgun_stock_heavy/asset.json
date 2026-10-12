@@ -1,0 +1,19 @@
+{
+  "name": "shotgun_stock_heavy",
+  "kind": "weapon_part",
+  "brief": "Shotgun stock, heavy: Deep and solid, a shell holder on its side, a thick pad.",
+  "palette": {
+    "paint_primary": "#6f7a45",
+    "paint_secondary": "#2b2d2f"
+  },
+  "expect": {
+    "parts": [
+      "stock"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

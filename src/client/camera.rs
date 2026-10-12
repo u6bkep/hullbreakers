@@ -205,6 +205,9 @@ pub struct CameraFx {
     fov_kick: f32,
     /// 0..1 black overlay, fading out after a hard cut.
     fade: f32,
+    /// How far the view is zoomed, eased toward the loadout's zoom (0 or 1:
+    /// not).
+    pub zoom: f32,
 }
 
 impl CameraFx {
@@ -378,8 +381,11 @@ pub fn update_camera(
     cam_transform.translation = eye;
     cam_transform.rotation = rotation;
     let fov = (tuning.fov_deg + fx.fov_kick).to_radians();
+    // Zoom narrows the world's view (not the hands'), quickly.
+    let zoom_target = player.loadout.zoom.max(1.0);
+    fx.zoom = fx.zoom.max(1.0) + (zoom_target - fx.zoom.max(1.0)) * (1.0 - (-dt * 14.0).exp());
     if let Projection::Perspective(p) = &mut *projection {
-        p.fov = fov;
+        p.fov = 2.0 * ((fov / 2.0).tan() / fx.zoom).atan();
     }
     for mut projection in &mut view_model {
         if let Projection::Perspective(p) = &mut *projection {

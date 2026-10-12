@@ -1,0 +1,19 @@
+{
+  "name": "sniper_stock_standard",
+  "kind": "weapon_part",
+  "brief": "Sniper stock, standard: A chassis stock: cheek riser, butt pad, a rear grip spur.",
+  "palette": {
+    "paint_primary": "#b9a37a",
+    "paint_secondary": "#353a40"
+  },
+  "expect": {
+    "parts": [
+      "stock"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

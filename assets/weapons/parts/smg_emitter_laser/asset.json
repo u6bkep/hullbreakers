@@ -1,0 +1,19 @@
+{
+  "name": "smg_emitter_laser",
+  "kind": "weapon_part",
+  "brief": "SMG emitter, laser: A finned lens housing, its lens glowing at the front.",
+  "palette": {
+    "paint_primary": "#c46c2c",
+    "emissive": "#ff3a2a"
+  },
+  "expect": {
+    "parts": [
+      "emitter"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

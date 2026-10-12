@@ -1,0 +1,19 @@
+{
+  "name": "rifle_emitter_plasma",
+  "kind": "weapon_part",
+  "brief": "Rifle emitter, plasma: A magnetic coil can: stacked rings round a glowing chamber.",
+  "palette": {
+    "paint_primary": "#d6cfba",
+    "emissive": "#b8ff6a"
+  },
+  "expect": {
+    "parts": [
+      "emitter"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

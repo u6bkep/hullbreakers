@@ -1,0 +1,19 @@
+{
+  "name": "rifle_emitter_laser",
+  "kind": "weapon_part",
+  "brief": "Rifle emitter, laser: A finned lens housing, its lens glowing at the front.",
+  "palette": {
+    "paint_primary": "#d6cfba",
+    "emissive": "#ff3a2a"
+  },
+  "expect": {
+    "parts": [
+      "emitter"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

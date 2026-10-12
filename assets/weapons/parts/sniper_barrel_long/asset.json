@@ -1,0 +1,31 @@
+{
+  "name": "sniper_barrel_long",
+  "kind": "weapon_part",
+  "brief": "Sniper barrel, long: Longer still, fluted, with a thread guard.",
+  "palette": {
+    "paint_primary": "#b9a37a"
+  },
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.36
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

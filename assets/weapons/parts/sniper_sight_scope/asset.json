@@ -1,0 +1,19 @@
+{
+  "name": "sniper_sight_scope",
+  "kind": "weapon_part",
+  "brief": "Sniper sight, scope: A long scope, a big objective bell, tall turrets.",
+  "palette": {
+    "paint_primary": "#b9a37a",
+    "emissive": "#9fe8ff"
+  },
+  "expect": {
+    "parts": [
+      "sight"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

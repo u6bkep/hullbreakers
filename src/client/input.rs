@@ -163,7 +163,9 @@ pub fn read_input(
             cmd.presses.stance.press();
         }
     }
-    cmd.add_look(motion.delta * tuning.mouse_sensitivity);
+    // Zoomed, the view is narrower and look slows to match.
+    let zoom = player.as_deref().map_or(1.0, |(_, p)| p.loadout.zoom.max(1.0));
+    cmd.add_look(motion.delta * tuning.mouse_sensitivity / zoom);
     let presses = &mut cmd.presses;
     for (action, counter) in [
         (Action::Jump, &mut presses.jump),

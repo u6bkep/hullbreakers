@@ -344,7 +344,8 @@ pub(super) fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<
     };
     painter.galley(inner.left_top() + egui::vec2(0.0, 11.0), name, color);
     let detail = match item {
-        Item::Weapon(w) => format!("{} · {}/{}", w.frame.name(), w.mag, w.stats().mag),
+        Item::Weapon(w) if w.stats().heat > 0.0 => format!("{} · beam", w.kind_name()),
+        Item::Weapon(w) => format!("{} · {}/{}", w.kind_name(), w.mag, w.stats().mag),
         Item::Ammo { .. } => String::new(),
         Item::Cargo(c) if c.bulky() => "bulky: both hands".into(),
         Item::Cargo(_) => "cargo".into(),

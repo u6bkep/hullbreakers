@@ -147,12 +147,16 @@ impl Rarity {
 pub enum AmmoKind {
     /// SMG rounds.
     Light,
-    /// Rifle rounds.
+    /// Rifle and sniper rounds.
     Heavy,
+    /// Shotgun shells.
+    Shells,
+    /// Energy cells: plasma and arc guns.
+    Cells,
 }
 
 impl AmmoKind {
-    pub const ALL: [AmmoKind; 2] = [AmmoKind::Light, AmmoKind::Heavy];
+    pub const ALL: [AmmoKind; 4] = [AmmoKind::Light, AmmoKind::Heavy, AmmoKind::Shells, AmmoKind::Cells];
     pub const COUNT: usize = Self::ALL.len();
 
     pub fn index(self) -> usize {
@@ -163,6 +167,8 @@ impl AmmoKind {
         match self {
             AmmoKind::Light => "Light rounds",
             AmmoKind::Heavy => "Heavy rounds",
+            AmmoKind::Shells => "Shells",
+            AmmoKind::Cells => "Energy cells",
         }
     }
 
@@ -171,6 +177,8 @@ impl AmmoKind {
         match self {
             AmmoKind::Light => 400,
             AmmoKind::Heavy => 200,
+            AmmoKind::Shells => 60,
+            AmmoKind::Cells => 240,
         }
     }
 
@@ -179,6 +187,91 @@ impl AmmoKind {
         match self {
             AmmoKind::Light => 60,
             AmmoKind::Heavy => 30,
+            AmmoKind::Shells => 12,
+            AmmoKind::Cells => 40,
+        }
+    }
+}
+
+/// Of loot that's a gun, how much is one of the frames that came later.
+const NEW_FRAME_CHANCE: u32 = 35;
+/// Of SMGs and rifles found, how many are of a family other than ballistic.
+const FAMILY_CHANCE: u32 = 35;
+
+/// How a gun acts on the world: what it fires and what that does when it
+/// gets there (see `docs/plan-weapons.md`). Rolled on the SMG and rifle
+/// frames; the others are ballistic.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize)]
+pub enum Family {
+    /// Bullets at real speeds.
+    #[default]
+    Ballistic,
+    /// Slow, heavy bolts that burst: splash and a shove.
+    Plasma,
+    /// Instant and short; jumps between nearby targets in sight of each other.
+    Arc,
+    /// A continuous beam; heat instead of ammo.
+    Laser,
+}
+
+impl Family {
+    pub const ROLLED: [Family; 3] = [Family::Plasma, Family::Arc, Family::Laser];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Family::Ballistic => "Ballistic",
+            Family::Plasma => "Plasma",
+            Family::Arc => "Arc",
+            Family::Laser => "Laser",
+        }
+    }
+
+    /// What it does differently, for the screens.
+    pub fn effect(self) -> &'static str {
+        match self {
+            Family::Ballistic => "Bullets",
+            Family::Plasma => "Slow bolts that burst: splash and a shove; cells",
+            Family::Arc => "Short and instant; jumps to two more targets in sight; cells",
+            Family::Laser => "A beam while held; heat, not ammo",
+        }
+    }
+
+    /// A frame's stats for this family (after its parts and rolls).
+    fn apply(self, s: GunStats) -> GunStats {
+        match self {
+            Family::Ballistic => s,
+            Family::Plasma => GunStats {
+                muzzle_speed: s.muzzle_speed * 0.12,
+                bullet_mass: s.bullet_mass * 6.0 / 0.12,
+                damage: s.damage * 1.6,
+                rate: s.rate * 0.5,
+                splash: 2.5,
+                ammo: AmmoKind::Cells,
+                ..s
+            },
+            Family::Arc => GunStats {
+                damage: s.damage * 0.9,
+                rate: s.rate * 0.6,
+                chain: 2,
+                range: 35.0,
+                bullet_mass: 0.0,
+                spread: s.spread_braced,
+                ammo: AmmoKind::Cells,
+                ..s
+            },
+            Family::Laser => GunStats {
+                // A beam: a hit every tick it's held.
+                rate: crate::sim::TICK_HZ as f32,
+                damage: s.damage * s.rate / crate::sim::TICK_HZ as f32 * 0.8,
+                spread: 0.0,
+                spread_braced: 0.0,
+                range: 400.0,
+                bullet_mass: 0.0,
+                // Full in about four seconds of beam.
+                heat: 1.0 / (4.0 * crate::sim::TICK_HZ as f32),
+                mag: 0,
+                ..s
+            },
         }
     }
 }
@@ -239,13 +332,20 @@ impl Maker {
     /// What it calls its models: the word between its name and the
     /// epithet, from a mark `n` (1–6).
     fn model(self, frame: GunKind, n: u32) -> String {
-        let rifle = frame == GunKind::Rifle;
+        // Each frame its own line (the SMG's is what any other frame had
+        // before it had its own).
+        let line = |smg, rifle, shotgun, sniper| match frame {
+            GunKind::Rifle => rifle,
+            GunKind::Shotgun => shotgun,
+            GunKind::Sniper => sniper,
+            _ => smg,
+        };
         match self {
             Maker::Issue => String::new(),
             // Precise, numbered, German-sounding.
-            Maker::Kessler => format!("{}{n}", if rifle { "KG-" } else { "MP-" }),
+            Maker::Kessler => format!("{}{n}", line("MP-", "KG-", "FL-", "ZG-")),
             // Industrial: a series number.
-            Maker::Brakk => format!("{}{}0", if rifle { "Ram " } else { "Grind " }, n + 1),
+            Maker::Brakk => format!("{}{}0", line("Grind ", "Ram ", "Maul ", "Lance "), n + 1),
             // Sleek: a type.
             Maker::Hoshi => format!("Type {}", ["I", "II", "III", "IV", "V", "VI"][(n as usize - 1).min(5)]),
             // Rebuilt: how many times.
@@ -742,6 +842,10 @@ pub struct Weapon {
     /// Parts and paint the workbench has fitted.
     #[serde(default)]
     pub refit: Refit,
+    /// How it acts on the world (ballistic, for every gun from before
+    /// families).
+    #[serde(default)]
+    pub family: Family,
 }
 
 /// What the workbench has fitted to a gun, by slot (in [`SLOTS`] order):
@@ -878,15 +982,42 @@ impl Weapon {
             mag: 0,
             tune: 0,
             refit: Refit::default(),
+            family: Family::Ballistic,
         };
         w.mag = w.stats().mag;
         w
     }
 
     /// A gun rolled from `seed`: a crew frame, a rarity by `luck` (0–100).
+    ///
+    /// The frame and rarity are drawn as they were before the shotgun and
+    /// sniper came; new salts decide whether it's one of those instead, and
+    /// (an SMG or rifle) its family.
     pub fn roll(seed: u32, luck: u32) -> Weapon {
-        let frame = GunKind::CREW[(draw(seed, 101) % GunKind::CREW.len() as u32) as usize];
-        Weapon::new(frame, draw(seed, 102), Rarity::roll(draw(seed, 103), luck))
+        let mut frame = GunKind::FIRST[(draw(seed, 101) % GunKind::FIRST.len() as u32) as usize];
+        if draw(seed, 104) % 100 < NEW_FRAME_CHANCE {
+            frame = [GunKind::Shotgun, GunKind::Sniper][(draw(seed, 105) % 2) as usize];
+        }
+        let mut w = Weapon::new(frame, draw(seed, 102), Rarity::roll(draw(seed, 103), luck));
+        if GunKind::FAMILIES.contains(&frame) && draw(seed, 106) % 100 < FAMILY_CHANCE {
+            w = w.with_family(Family::ROLLED[(draw(seed, 107) % Family::ROLLED.len() as u32) as usize]);
+        }
+        w
+    }
+
+    /// The same gun of another family, its mag full.
+    pub fn with_family(self, family: Family) -> Weapon {
+        let mut w = Weapon { family, ..self };
+        w.mag = w.stats().mag;
+        w
+    }
+
+    /// What kind of gun it is: "Plasma rifle", "Sniper".
+    pub fn kind_name(&self) -> String {
+        match self.family {
+            Family::Ballistic => self.frame.name().to_string(),
+            f => format!("{} {}", f.name(), self.frame.name().to_lowercase()),
+        }
     }
 
     /// The rarity it was found at, before any tuning.
@@ -896,7 +1027,8 @@ impl Weapon {
 
     /// Whether two are the same gun (whatever is in their mags).
     pub fn same_gun(&self, other: &Weapon) -> bool {
-        (self.frame, self.seed, self.rarity, self.tune, self.refit) == (other.frame, other.seed, other.rarity, other.tune, other.refit)
+        (self.frame, self.seed, self.rarity, self.tune, self.refit, self.family)
+            == (other.frame, other.seed, other.rarity, other.tune, other.refit, other.family)
     }
 
     /// Its maker, parts and perks.
@@ -956,6 +1088,20 @@ impl Weapon {
     /// Its stats: the frame's base, changed by its maker, parts, rarity and
     /// perks. A standard-issue gun has the frame's base stats exactly.
     pub fn stats(&self) -> GunStats {
+        let mut stats = self.rolled_stats();
+        // A scope zooms a rifle, and zooms a sniper further.
+        if self.rarity != Rarity::Standard && self.build().parts.sight == Sight::Scope {
+            stats.zoom = match self.frame {
+                GunKind::Rifle => 2.5,
+                GunKind::Sniper => 6.0,
+                _ => stats.zoom,
+            };
+        }
+        GunStats { family: self.family, ..self.family.apply(stats) }
+    }
+
+    /// Its stats as a ballistic gun: frame, maker, parts, rarity, perks.
+    fn rolled_stats(&self) -> GunStats {
         let base = self.frame.base();
         if self.rarity == Rarity::Standard {
             return base;
@@ -1107,7 +1253,9 @@ pub enum ItemOp {
 pub struct Inventory {
     pub weapons: [Option<Weapon>; MAX_WEAPON_SLOTS],
     pub pack: [Option<Item>; MAX_PACK_SLOTS],
-    /// Rounds in each pool, by [`AmmoKind::index`].
+    /// Rounds in each pool, by [`AmmoKind::index`]. (A save from before a
+    /// kind of ammo existed reads with none of it.)
+    #[serde(with = "pools")]
     pub ammo: [u16; AmmoKind::COUNT],
     /// Bulky cargo in both hands, if any.
     pub carrying: Option<CargoKind>,
@@ -1336,6 +1484,44 @@ impl Inventory {
     }
 }
 
+/// Ammo pools as saved and sent: a tuple of every kind, read back padded
+/// with zeros if it's from when there were fewer kinds.
+mod pools {
+    use super::AmmoKind;
+    use serde::de::{SeqAccess, Visitor};
+    use serde::ser::SerializeTuple;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(ammo: &[u16; AmmoKind::COUNT], s: S) -> Result<S::Ok, S::Error> {
+        let mut t = s.serialize_tuple(AmmoKind::COUNT)?;
+        for a in ammo {
+            t.serialize_element(a)?;
+        }
+        t.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u16; AmmoKind::COUNT], D::Error> {
+        struct Pools;
+        impl<'de> Visitor<'de> for Pools {
+            type Value = [u16; AmmoKind::COUNT];
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "up to {} ammo pools", AmmoKind::COUNT)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut out = [0; AmmoKind::COUNT];
+                for slot in &mut out {
+                    match seq.next_element()? {
+                        Some(v) => *slot = v,
+                        None => break,
+                    }
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_tuple(AmmoKind::COUNT, Pools)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Loot.
 
@@ -1344,7 +1530,8 @@ impl Inventory {
 pub fn robot_loot(seed: u32, toughness: f32) -> Vec<Item> {
     let tough = (toughness.clamp(0.0, 200.0) as u32).min(200);
     let mut items = Vec::new();
-    let kind = AmmoKind::ALL[(draw(seed, 1) % 2) as usize];
+    // Rounds and heavy rounds two times in six each; shells and cells one.
+    let kind = AmmoKind::ALL[[0, 0, 1, 1, 2, 3][(draw(seed, 1) % 6) as usize]];
     let rounds = kind.box_rounds() / 2 + (draw(seed, 2) % (kind.box_rounds() as u32 / 2 + 1)) as u16;
     items.push(Item::Ammo { kind, rounds });
     // A Swarmer (30) drops a gun one time in ten; a Gunner (120) one in four.
@@ -1570,7 +1757,7 @@ mod tests {
                 s.perks
             )
         };
-        let rolls: Vec<String> = GunKind::CREW
+        let rolls: Vec<String> = GunKind::FIRST
             .into_iter()
             .flat_map(|frame| ROLLED.into_iter().enumerate().map(move |(i, r)| Weapon::new(frame, 1000 + i as u32 * 7919, r)))
             .map(signature)
@@ -1590,6 +1777,60 @@ mod tests {
         Kessler KG-2 Watcher|30.720|5.925|30|2.000|0.220|2.425|960.0|0.440|[None, None]
         Hoshi Type III Howler|28.080|8.175|23|1.300|0.325|2.200|1000.0|0.420|[Some(Hardened), None]
         Hoshi Type IV Frenzy|26.880|10.275|65|2.900|0.378|2.025|1000.0|0.420|[Some(HotLoads), Some(Overclocked)]
+    ";
+
+    /// The same for wave 4's frames and families, as they were when they
+    /// came: the shotgun and sniper by rarity, and each family on an SMG
+    /// and a rifle.
+    #[test]
+    fn wave_4_guns_stay_the_guns_they_were() {
+        let signature = |w: Weapon| {
+            let s = w.stats();
+            format!(
+                "{}|{:?}|{:.3}|{:.3}|{}|{:.3}|{:.3}|{:.1}|{}|{}|{:.1}|{:.4}|{:?}",
+                w.name(),
+                w.family,
+                s.damage,
+                s.rate,
+                s.mag,
+                s.spread_braced,
+                s.spread,
+                s.muzzle_speed,
+                s.pellets,
+                s.pierce,
+                s.zoom,
+                s.heat,
+                s.perks
+            )
+        };
+        let frames = [GunKind::Shotgun, GunKind::Sniper]
+            .into_iter()
+            .flat_map(|frame| ROLLED.into_iter().enumerate().map(move |(i, r)| Weapon::new(frame, 2000 + i as u32 * 7919, r)));
+        let families = Family::ROLLED
+            .into_iter()
+            .flat_map(|f| GunKind::FAMILIES.into_iter().map(move |frame| Weapon::new(frame, 3000 + f as u32, Rarity::Rare).with_family(f)));
+        let rolls: Vec<String> = frames.chain(families).map(signature).collect();
+        let pinned: Vec<String> = PINNED_WAVE_4.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+        if rolls != pinned {
+            panic!("generation changed; now:\n{}", rolls.join("\n"));
+        }
+    }
+
+    const PINNED_WAVE_4: &str = "
+        Hoshi Type I Steady|Ballistic|8.190|1.968|12|3.280|8.470|336.0|8|0|0.0|0.0000|[None, None]
+        Kessler FL-2 Glance|Ballistic|9.360|1.824|6|3.960|4.565|378.0|8|0|0.0|0.0000|[None, None]
+        Hoshi Type V Glance|Ballistic|11.340|1.728|5|4.600|6.820|567.0|8|0|0.0|0.0000|[Some(HotLoads), None]
+        Kessler FL-6 Spike|Ballistic|14.670|1.472|8|2.240|5.775|420.0|8|0|0.0|0.0000|[Some(Overclocked), Some(Hardened)]
+        Hoshi Type I Steady|Ballistic|81.900|0.984|10|0.033|9.240|1120.0|1|1|6.0|0.0000|[None, None]
+        Kessler ZG-2 Glance|Ballistic|93.600|0.912|5|0.040|4.980|1260.0|1|1|5.0|0.0000|[None, None]
+        Hoshi Type V Glance|Ballistic|113.400|0.864|4|0.046|7.440|1890.0|1|1|5.0|0.0000|[Some(HotLoads), None]
+        Kessler ZG-6 Spike|Ballistic|146.700|0.736|7|0.022|6.300|1400.0|1|1|6.0|0.0000|[Some(Overclocked), Some(Hardened)]
+        Hoshi Type V Hotfoot|Plasma|14.400|9.450|30|0.984|3.080|50.2|1|0|0.0|0.0000|[Some(HotLoads), None]
+        Hoshi Type V Hotfoot|Plasma|38.400|4.725|23|0.287|3.850|105.6|1|0|2.5|0.0000|[Some(HotLoads), None]
+        Brakk Grind 50 Knuckle|Arc|11.745|6.570|80|1.200|1.200|361.0|1|0|0.0|0.0000|[Some(Quickload), None]
+        Brakk Ram 50 Maul|Arc|31.320|3.285|60|0.350|0.350|760.0|1|0|0.0|0.0000|[Some(Quickload), None]
+        Corvid Scrap #3 Scorcher|Laser|1.958|60.000|0|0.000|0.000|551.0|1|0|0.0|0.0042|[Some(HotLoads), None]
+        Corvid Scrap #3 Scorcher|Laser|2.611|60.000|0|0.000|0.000|1160.0|1|0|0.0|0.0042|[Some(HotLoads), None]
     ";
 
     #[test]
@@ -1671,5 +1912,82 @@ mod tests {
         let (swarmer, gunner) = (guns(30.0), guns(120.0));
         assert!(swarmer < gunner && gunner < 400, "{swarmer} {gunner}");
         assert!((0..100).all(|s| robot_loot(s, 30.0).iter().any(|i| matches!(i, Item::Ammo { .. }))));
+    }
+
+    #[test]
+    fn a_roll_is_the_same_from_the_same_seed_and_only_crew_frames_roll() {
+        let mut frames = std::collections::HashSet::new();
+        let mut families = std::collections::HashSet::new();
+        for seed in 0..3000 {
+            let w = Weapon::roll(seed, 50);
+            assert_eq!(w, Weapon::roll(seed, 50));
+            assert!(GunKind::CREW.contains(&w.frame), "{w:?}");
+            // Families only on the frames that take them.
+            assert!(w.family == Family::Ballistic || GunKind::FAMILIES.contains(&w.frame), "{w:?}");
+            assert_eq!(w.mag, w.stats().mag);
+            frames.insert(w.frame);
+            families.insert(w.family);
+        }
+        assert_eq!(frames.len(), GunKind::CREW.len());
+        assert_eq!(families.len(), 1 + Family::ROLLED.len());
+    }
+
+    #[test]
+    fn a_seeds_old_draws_still_make_its_frame_and_gun() {
+        // A roll that stays ballistic and among the first frames is the gun
+        // it always was: the same draws, in the same order.
+        for seed in 0..500 {
+            let w = Weapon::roll(seed, 30);
+            if w.family == Family::Ballistic && GunKind::FIRST.contains(&w.frame) {
+                let old = GunKind::FIRST[(draw(seed, 101) % 2) as usize];
+                assert_eq!(w, Weapon::new(old, draw(seed, 102), Rarity::roll(draw(seed, 103), 30)));
+            }
+        }
+    }
+
+    #[test]
+    fn a_family_changes_how_a_gun_shoots_not_what_it_is() {
+        let rifle = Weapon::new(GunKind::Rifle, 77, Rarity::Rare);
+        for family in Family::ROLLED {
+            let w = rifle.with_family(family);
+            assert_eq!((w.name(), w.build().parts, w.build().perks), (rifle.name(), rifle.build().parts, rifle.build().perks));
+            assert_eq!(w.stats().family, family);
+            assert!(!w.same_gun(&rifle));
+            assert!(w.kind_name().starts_with(family.name()));
+        }
+        let (plasma, arc, laser) = (rifle.with_family(Family::Plasma).stats(), rifle.with_family(Family::Arc).stats(), rifle.with_family(Family::Laser).stats());
+        let base = rifle.stats();
+        assert!(plasma.muzzle_speed < base.muzzle_speed * 0.2 && plasma.splash > 0.0 && plasma.ammo == AmmoKind::Cells);
+        assert!(arc.chain > 0 && arc.range > 0.0 && arc.ammo == AmmoKind::Cells);
+        assert!(laser.heat > 0.0 && laser.mag == 0);
+    }
+
+    #[test]
+    fn a_save_from_before_shells_and_cells_reads_its_two_pools() {
+        let mut inv = Inventory::default();
+        *inv.ammo_mut(AmmoKind::Light) = 120;
+        *inv.ammo_mut(AmmoKind::Heavy) = 45;
+        let now = ron::to_string(&inv).unwrap();
+        assert!(now.contains("ammo:(120,45,0,0)"), "{now}");
+        let old = now.replace("ammo:(120,45,0,0)", "ammo:(120,45)");
+        let read: Inventory = ron::from_str(&old).unwrap();
+        assert_eq!(read, inv);
+        // And a gun saved before families is ballistic.
+        let gun = Weapon::new(GunKind::Smg, 5, Rarity::Common);
+        let saved = ron::to_string(&gun).unwrap().replace(",family:Ballistic", "");
+        assert!(!saved.contains("family"), "{saved}");
+        assert_eq!(ron::from_str::<Weapon>(&saved).unwrap(), gun);
+    }
+
+    #[test]
+    fn robots_drop_every_kind_of_ammo() {
+        let kinds: std::collections::HashSet<AmmoKind> = (0..200)
+            .flat_map(|s| robot_loot(s, 30.0))
+            .filter_map(|i| match i {
+                Item::Ammo { kind, .. } => Some(kind),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds.len(), AmmoKind::COUNT);
     }
 }

@@ -132,13 +132,14 @@ game it runs its own. Mission cargo (a data core) stays in its mission.
 - **Rank** comes with experience from missions, and each brings something you
   can feel: paints (2, 5, 7, 9), a fourth weapon slot (3), two more pack
   slots (4, 8), suit plating, +25 health (5, 9), a stronger jetpack (6), a
-  faster winch (7), and new frames to come (10).
+  faster winch (7), and new frames at the armory as standard issue: the
+  shotgun (4) and the sniper (10). Any frame can be found at any rank.
 
 ### Weapons, loot and the inventory
 
-Guns are items, Borderlands-style: each is a **frame** (SMG or rifle), a
-**maker**, five **parts** and a **rarity**, all rolled from a seed, so two
-guns of a kind play differently. Every part trades one thing for another
+Guns are items, Borderlands-style: each is a **frame** (SMG, rifle,
+shotgun or sniper), a **maker**, five **parts** and a **rarity**, all rolled
+from a seed, so two guns of a kind play differently. Every part trades one thing for another
 (a long barrel: faster, tighter shots but a slower rate; a drum: twice the
 mag, a much slower reload; a light stock: quick to switch to, wild
 unbraced). Makers lean their guns their own way: Kessler (precise, slower),
@@ -155,6 +156,29 @@ is two taped together, a compensator is ported, a scope has a big objective
 bell), in its maker's paint, in your hands, your crewmates' and on pickups.
 The model gallery has a wall of every part and two rows of rolled guns.
 
+The frames have their own jobs. The **SMG** sprays; the **rifle** reaches
+(and with a scope zooms x2.5). The **shotgun** fires eight pellets a shell,
+for crowds: little each, a lot together, and a shove that sends a floating
+robot (or crewmate) tumbling. The **sniper** is two-handed: from the hip its
+cone is wide, braced it's a needle, its round goes through one body into the
+next, and it **zooms** x5 (x6 with a scope): hold the other hand's button
+with that hand free (so stow the grapple, as stance 3 does for slot 2). Zoomed, look slows
+to match and the cone tightens further; the crosshair grows a ring and the
+card says so. SMGs and rifles also come in **families** besides bullets:
+- **Plasma**: slow, heavy, glowing green bolts that burst where they land,
+  hurting and shoving everything within a couple of metres that the burst can
+  see (round a corner, not through a hull). Half the rate, more damage.
+- **Arc**: instant and short (35 m), a blue crackle that jumps from what it
+  hits to the two nearest other targets within 7 m in clear sight, weaker
+  with each jump. Hulls and decks stop a jump; it finds no weak spots and
+  pushes nothing.
+- **Laser**: a red beam, hitting every tick it's held, out to 400 m, with no
+  cone and no ammo: it **heats** instead (the card's bar), about four seconds
+  of beam to overheat, then it won't fire until it's cooled to a third.
+Plasma and arc guns use **cells**, shotguns **shells**: two more ammo kinds
+(the locker fills them; robots drop them). Each frame and family sounds and
+streaks its own way.
+
 Robots drop things when destroyed (mostly ammo, sometimes a gun, better from
 tougher robots), and the enemy carrier has **loot crates** aboard, better
 the deeper in they are (the best on the bridge). A pickup glows in the
@@ -164,15 +188,17 @@ take everything that fits.
 
 You carry three **weapon slots** (four from rank 3; the stances use these, by number), a
 **pack** of six (up to ten with rank) for spares and small cargo, **ammo** by kind (light rounds
-for SMGs, heavy for rifles; a reload draws from it), and bulky **cargo**
+for SMGs, heavy for rifles and snipers, shells for shotguns, cells for plasma
+and arc guns; a reload draws from it), and bulky **cargo**
 such as a power cell, which takes both hands: whoever carries it can't
 shoot or grapple, so the team escorts them. G puts down what's in hand
 (cargo first, else the main hand's gun). The **inventory** (I) shows it all:
 click an item, then a slot to move it there (or swap); right-click drops
 it; the panel beside compares the chosen gun with yours.
 
-Each hand holds one item and a stance (1-4) sets what's in each; a one-handed
-gun with the other hand empty is braced and shoots tighter. Bullets fly at realistic speeds and keep the
+Each hand holds one item and a stance (1-4) sets what's in each; a gun with
+the other hand empty is braced and shoots tighter (two-handed guns, the
+rifle, shotgun and sniper, are held by the foregrip). Bullets fly at realistic speeds and keep the
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's
 hand works its rope; stow it and the rope holds its length.
 
@@ -311,7 +337,7 @@ client, screenshots its view into `<dir>`, and copies both logs there.
 | X (hold)     | —                | brake relative to last body touched/grappled |
 | F            | press the button, or take what's in the pickup, under the crosshair (within reach) ||
 | G            | put down what's in hand (cargo, else the main hand's gun) ||
-| LMB / RMB    | use the main / off hand's item (gun: fire; grapple: fire or let go) ||
+| LMB / RMB    | use the main / off hand's item (gun: fire; grapple: fire or let go); an empty hand's button zooms the other hand's gun, if it zooms (sniper, scoped rifle) ||
 | Ctrl+LMB / Ctrl+RMB (hold) | that hand's alternate: for the grapple, reel in ||
 | Alt+LMB / Alt+RMB (hold)   | that hand's second alternate: for the grapple, pay out ||
 | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple ||

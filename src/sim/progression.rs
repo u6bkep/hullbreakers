@@ -521,16 +521,17 @@ pub struct Unlocks {
 
 /// What each rank brings, for the screens (paints are listed with their
 /// ranks in [`items::PAINTS`]).
-pub const LADDER: [(u8, &str); 9] = [
+pub const LADDER: [(u8, &str); 10] = [
     (2, "Paint: the crew's first paint jobs, at the workbench"),
     (3, "A fourth weapon slot"),
     (4, "Two more pack slots"),
+    (4, "The shotgun, as standard issue at the armory"),
     (5, "Suit plating: +25 health"),
     (6, "Jetpack: 15% more thrust"),
     (7, "Winch: reels 25% faster"),
     (8, "Two more pack slots"),
     (9, "Suit plating: +25 more health"),
-    (10, "New frames (to come)"),
+    (10, "The sniper, as standard issue at the armory"),
 ];
 
 pub fn unlocks(rank: u8) -> Unlocks {
@@ -544,10 +545,15 @@ pub fn unlocks(rank: u8) -> Unlocks {
     }
 }
 
-/// The frames a rank can draw from the armory as standard issue. Wave 4's
-/// shotgun and sniper arrive here, rank by rank.
-pub fn frames(_rank: u8) -> &'static [GunKind] {
-    &GunKind::CREW
+/// The frames a rank can draw from the armory as standard issue: the SMG
+/// and rifle from the start, the shotgun at rank 4, the sniper at rank 10
+/// (see [`LADDER`]). Any frame can be found at any rank.
+pub fn frames(rank: u8) -> &'static [GunKind] {
+    match rank {
+        ..4 => &GunKind::CREW[..2],
+        4..10 => &GunKind::CREW[..3],
+        _ => &GunKind::CREW,
+    }
 }
 
 /// The crew's tuning as a player of `rank` has it: their suit, jetpack and

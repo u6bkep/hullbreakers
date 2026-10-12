@@ -347,6 +347,62 @@ fn shooting_is_predicted() {
     assert!(firing.max(switching).max(rifle) <= 0.5, "shooting mispredicted");
 }
 
+/// Wave 4's guns are predicted player state like the others: a laser's
+/// heat, a sniper's zoom (the off hand's button, that hand empty) and a
+/// shotgun's pellets need no correcting.
+#[test]
+fn new_guns_are_predicted() {
+    use hullbreakers::sim::events::PlayerEvent;
+    use hullbreakers::sim::items::{Family, Weapon};
+    use hullbreakers::sim::weapons::{GunKind, Slot};
+    let (_guard, mut s) = session(100);
+    s.step(60);
+    // The same kit in both copies: a laser SMG in slot 1, a sniper in
+    // slot 2 (stance 3 holds it with the off hand empty), a shotgun in 3.
+    for world in [s.server.world_mut(), s.client.world_mut()] {
+        for mut p in world.query::<&mut Player>().iter_mut(world) {
+            p.loadout.restock();
+            p.loadout.inventory.weapons[0] = Some(Weapon::issue(GunKind::Smg).with_family(Family::Laser));
+            p.loadout.inventory.weapons[1] = Some(Weapon::issue(GunKind::Sniper));
+            p.loadout.inventory.weapons[2] = Some(Weapon::issue(GunKind::Shotgun));
+            p.loadout.stances[3].main = Slot::Gun(2);
+        }
+    }
+    s.step(60);
+    s.input().0.stance = 0;
+    s.input().0.presses.stance.press();
+    s.input().0.main.held = true;
+    // Long enough to overheat and cool.
+    let laser = s.rollback_rate(400);
+    s.input().0.main.held = false;
+    s.input().0.stance = 2;
+    s.input().0.presses.stance.press();
+    s.step(60);
+    s.input().0.off.held = true;
+    s.step(10);
+    let zoom = s.local_player().unwrap().loadout.zoom;
+    s.input().0.main.held = true;
+    let sniper = s.rollback_rate(120);
+    s.input().0.main.held = false;
+    s.input().0.off.held = false;
+    s.input().0.stance = 3;
+    s.input().0.presses.stance.press();
+    s.step(60);
+    s.input().0.main.held = true;
+    let shotgun = s.rollback_rate(120);
+    let fired = s
+        .local_player()
+        .unwrap()
+        .events
+        .iter()
+        .filter(|(_, e)| matches!(e, PlayerEvent::Fired { .. }))
+        .count();
+    eprintln!("new guns: laser {laser:.2} / sniper {sniper:.2} / shotgun {shotgun:.2} rollbacks/s; zoom {zoom}; {fired} shots in the log");
+    assert_eq!(zoom, 5.0, "the sniper didn't zoom");
+    assert!(fired > 0, "never fired");
+    assert!(laser.max(sniper).max(shotgun) <= 0.5, "mispredicted");
+}
+
 /// The carrier's robots reach a client as interpolated players with their
 /// kind and health, and having them about doesn't upset the client's
 /// prediction of itself.
