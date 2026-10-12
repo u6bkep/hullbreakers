@@ -619,7 +619,8 @@ pub fn run_devices(
 }
 
 /// Applies `player`'s presses of `ship`'s devices, at the ticks `when`
-/// accepts, to `states` (unsettled). Full hands can't work a switch.
+/// accepts, to `states` (unsettled). (Full hands press nothing: see
+/// `player_tick`.)
 fn apply_presses(
     design: &super::design::ShipDesign,
     ship: Entity,
@@ -628,9 +629,6 @@ fn apply_presses(
     crew: usize,
     when: impl Fn(u32) -> bool,
 ) {
-    if player.loadout.hands_full() {
-        return;
-    }
     for (at, event) in player.events.iter() {
         if let PlayerEvent::Pressed {
             body,

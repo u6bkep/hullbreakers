@@ -381,11 +381,13 @@ pub fn note_owned(add: On<Add, Pickup>, pickups: Query<&Pickup>, mut profiles: Q
 /// the hull, where nothing would stay put. Nor does a creature (a limpet).
 pub fn drop_robot_loot(
     tick: Res<SimTick>,
-    robots: Query<(Entity, &Robot, &Player, &Vitals, &BodyTuning), Without<Wrecked>>,
+    robots: Query<(Entity, &Robot, &Player, &Vitals, &BodyTuning, Option<&super::bots::Brain>), Without<Wrecked>>,
     mut commands: Commands,
 ) {
-    for (entity, kind, player, vitals, tuning) in &robots {
-        if vitals.health > 0.0 || kind.gait() == Gait::Mount || kind.fauna() {
+    for (entity, kind, player, vitals, tuning, brain) in &robots {
+        // Turrets and fauna carry nothing; nor do the gallery's dormant
+        // robots on show (or killing them would be a free armory).
+        if vitals.health > 0.0 || kind.gait() == Gait::Mount || kind.fauna() || brain.is_some_and(|b| b.dormant) {
             continue;
         }
         let bits = entity.to_bits();

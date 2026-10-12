@@ -214,8 +214,10 @@ fn the_inventory_screen_moves_and_drops_through_the_input() {
     );
 }
 
+/// Their own gear in one case, theirs to come back for; mission cargo in
+/// another, anyone's.
 #[test]
-fn the_dead_leave_everything_they_carried_in_one_case() {
+fn the_dead_leave_their_kit_in_one_case_and_cargo_in_another() {
     let mut app = app();
     let looted = Weapon::new(GunKind::Rifle, 4, Rarity::Uncommon);
     set_player(&mut app, |p| {
@@ -233,15 +235,20 @@ fn the_dead_leave_everything_they_carried_in_one_case() {
     ticks(&mut app, 2);
     assert_eq!(player(&mut app).loadout.inventory, Default::default(), "respawned carrying");
     let cases = pickups(&mut app);
-    assert_eq!(cases.len(), 1);
-    let items = &cases[0].1.items;
+    assert_eq!(cases.len(), 2);
+    let (kit, cargo): (Vec<_>, Vec<_>) = cases.iter().partition(|c| c.1.owner_only);
+    assert_eq!((kit.len(), cargo.len()), (1, 1), "one case of kit (owner only), one of cargo");
+    let items = &kit[0].1.items;
     let count = |f: fn(&Item) -> bool| items.iter().filter(|i| f(i)).count();
     assert_eq!(count(|i| matches!(i, Item::Weapon(_))), 3);
     assert!(items.contains(&Item::Weapon(looted)));
-    assert!(items.contains(&Item::Cargo(CargoKind::DataCore)) && items.contains(&Item::Cargo(CargoKind::PowerCell)));
+    assert_eq!(count(|i| matches!(i, Item::Cargo(_))), 0);
     for kind in AmmoKind::ALL {
         assert!(items.contains(&Item::Ammo { kind, rounds: carried.ammo(kind) }));
     }
+    let cargo = &cargo[0].1;
+    assert!(cargo.owner.is_none());
+    assert!(cargo.items.contains(&Item::Cargo(CargoKind::DataCore)) && cargo.items.contains(&Item::Cargo(CargoKind::PowerCell)));
 }
 
 #[test]
