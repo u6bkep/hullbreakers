@@ -190,13 +190,16 @@ pub fn menu(
     // The world, dimmed behind it.
     ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("menu shade")))
         .rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha(140));
+    // The controls list takes the screen's height, less the window around it.
+    let list_height = (ctx.content_rect().height() - 48.0 - 200.0).max(160.0);
     let menu = &mut *menu;
     egui::Window::new("Hullbreakers")
         // Pinned at the top, so nothing moves when what's in it grows.
         .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
         .collapsible(false)
-        .resizable(false)
-        .fixed_size([600.0, 0.0])
+        .resizable([false, false])
+        .min_width(600.0)
+        .max_width(600.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut menu.tab, Tab::Loadout, egui::RichText::new("Loadout").size(16.0));
@@ -213,7 +216,7 @@ pub fn menu(
             ui.separator();
             match menu.tab {
                 Tab::Loadout => loadout_tab(ui, &mut layout, player.as_deref().map(|p| &p.loadout), &bindings, &mut menu.status),
-                Tab::Controls => controls_tab(ui, menu, &mut bindings),
+                Tab::Controls => controls_tab(ui, menu, &mut bindings, list_height),
             }
             if !menu.status.is_empty() {
                 ui.separator();
@@ -329,7 +332,7 @@ fn loadout_tab(
     }
 }
 
-fn controls_tab(ui: &mut egui::Ui, menu: &mut Menu, bindings: &mut Bindings) {
+fn controls_tab(ui: &mut egui::Ui, menu: &mut Menu, bindings: &mut Bindings, height: f32) {
     ui.label(
         egui::RichText::new(
             "Click a binding, then press the key, button or chord (e.g. Ctrl+LMB). \
@@ -340,7 +343,11 @@ fn controls_tab(ui: &mut egui::Ui, menu: &mut Menu, bindings: &mut Bindings) {
     );
     ui.add_space(4.0);
     let mut changed = false;
-    egui::ScrollArea::vertical().max_height(420.0).auto_shrink([false, false]).show(ui, |ui| {
+    egui::ScrollArea::vertical()
+        .min_scrolled_height(height)
+        .max_height(height)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
         let mut group = "";
         for action in Action::ALL {
             if action.group() != group {
