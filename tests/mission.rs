@@ -173,6 +173,8 @@ fn standing_on_a_manoeuvring_ship_holds() {
 #[test]
 fn the_carrier_hits_us_slowly() {
     let mut app = app();
+    // Through our shield, with nothing knocked out.
+    app.world_mut().resource_mut::<Tuning>().hit_fault_chance = 0.0;
     start_boarding(&mut app);
     ticks(&mut app, 20 * 60);
     let home = home(&mut app);
@@ -1012,3 +1014,148 @@ fn two_ropes_tow_the_lifeboat_faster_than_one() {
     eprintln!("lifeboat after 2 s of towing: {alone:.2} m/s alone, {together:.2} m/s with two");
     assert!(together > alone * 1.6, "alone {alone:.2}, two {together:.2}");
 }
+
+// ---------------------------------------------------------------------------
+// Damage control: the boarding action's other front
+
+fn knocked_out(app: &mut App, ship: Entity) -> Vec<String> {
+    let hull = app.world().get::<ShipHull>(ship).unwrap().design();
+    let devices = app.world().get::<Devices>(ship).unwrap().clone();
+    hull.devices
+        .iter()
+        .enumerate()
+        .filter(|(i, d)| d.fault && d.displaced(&devices.0[*i]))
+        .map(|(_, d)| d.id.clone())
+        .collect()
+}
+
+fn our_beams(app: &mut App, ship: Entity) -> usize {
+    app.world().resource::<Beams>().0.iter().filter(|b| b.shooter == ship).count()
+}
+
+/// Every hit does damage here: it knocks out the nearest breaker or the
+/// main bus, the board and a marker say so, and resetting it is credited.
+#[test]
+fn a_hit_knocks_out_our_power_and_someone_resets_it() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Tuning>().hit_fault_chance = 1.0;
+    start_boarding(&mut app);
+    let ship = home(&mut app);
+    let mut waited = 0;
+    while knocked_out(&mut app, ship).is_empty() {
+        assert!(waited < 20 * 60, "no hit knocked anything out in 20 s");
+        ticks(&mut app, 1);
+        waited += 1;
+    }
+    let out = knocked_out(&mut app, ship);
+    ticks(&mut app, 1);
+    let m = mission(&mut app);
+    assert!(m.status.iter().any(|l| l.starts_with("DAMAGE:")), "{:?}", m.status);
+    assert!(m.markers.iter().any(|mk| mk.label.starts_with("Reset: ")), "{:?}", m.markers);
+    assert_eq!(m.result_of("faults"), Some(1.0));
+    // Put it right (a junction may need more than one turn).
+    let id = out[0].clone();
+    for _ in 0..3 {
+        if !knocked_out(&mut app, ship).contains(&id) {
+            break;
+        }
+        press_device(&mut app, ship, &id);
+    }
+    assert!(!knocked_out(&mut app, ship).contains(&id), "{id} still out");
+    let m = mission(&mut app);
+    assert!(m.report.iter().any(|l| l.starts_with("Player 1 reset the")), "{:?}", m.report);
+    assert!(m.result_of("repairs").is_some_and(|r| r >= 1.0));
+}
+
+/// No power to the turret breaker, no beams from our turrets; reset it and
+/// they fire again.
+#[test]
+fn our_turrets_need_power() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Tuning>().hit_fault_chance = 0.0;
+    start_boarding(&mut app);
+    let ship = home(&mut app);
+    let breaker = design(HOME).device("turret_breaker");
+    app.world_mut().get_mut::<Devices>(ship).unwrap().0[breaker].set = 0;
+    // (Devices settle after this tick's beams.)
+    ticks(&mut app, 1);
+    let mut fired = 0;
+    for _ in 0..7 * 60 {
+        ticks(&mut app, 1);
+        fired += our_beams(&mut app, ship);
+    }
+    assert_eq!(fired, 0, "our turrets fired without power");
+    press_device(&mut app, ship, "turret_breaker");
+    let mut fired = 0;
+    for _ in 0..7 * 60 {
+        ticks(&mut app, 1);
+        fired += our_beams(&mut app, ship);
+    }
+    assert!(fired > 0, "our turrets never fired again");
+}
+
+/// Our shield is its emitter: trip its breaker and the hull goes in
+/// `home_exposed_seconds`.
+#[test]
+fn without_power_our_shield_drops() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Tuning>().hit_fault_chance = 0.0;
+    start_boarding(&mut app);
+    let ship = home(&mut app);
+    let breaker = design(HOME).device("shield_breaker");
+    app.world_mut().get_mut::<Devices>(ship).unwrap().0[breaker].set = 0;
+    ticks(&mut app, 2);
+    assert!(!app.world().get::<Combatant>(ship).unwrap().shield);
+    let before = app.world().get::<Combatant>(ship).unwrap().integrity;
+    ticks(&mut app, 12 * 60);
+    let lost = before - app.world().get::<Combatant>(ship).unwrap().integrity;
+    let t = Tuning::default();
+    let expected = 12.0 / t.home_exposed_seconds;
+    assert!((lost - expected).abs() < 0.04, "lost {lost:.3} of the hull in 12 s, expected {expected:.3}");
+}
+
+/// Alone, off our ship for two and a half minutes (boarding, say), at the
+/// default chance of damage: our ship is still there to come back to.
+#[test]
+fn alone_the_ship_holds_while_you_board() {
+    let mut app = app();
+    start_boarding(&mut app);
+    let ship = home(&mut app);
+    float(&mut app, Vec3::new(0.0, 500.0, 0.0));
+    ticks(&mut app, 150 * 60);
+    let ours = app.world().get::<Combatant>(ship).map(|c| c.integrity).unwrap_or(0.0);
+    let faults = mission(&mut app).result_of("faults").unwrap_or(0.0);
+    eprintln!("alone for 150 s: hull at {ours:.2}, {faults} hits knocked something out");
+    assert!(ours > 0.15, "hull at {ours:.2} after 150 s alone");
+}
+
+/// The more of the crew at home, the more goes wrong there: knocked-out
+/// devices over two minutes, with someone aboard and with nobody (put
+/// right as soon as they're knocked, so every hit can count).
+#[test]
+fn hits_do_more_damage_with_crew_at_home() {
+    let faults = |aboard: bool| {
+        let mut app = app();
+        app.world_mut().resource_mut::<Tuning>().hit_fault_chance = 0.1;
+        start_boarding(&mut app);
+        let ship = home(&mut app);
+        if aboard {
+            stand(&mut app, ship, Vec3::new(0.0, 0.01, 8.0), Vec3::NEG_Z);
+        } else {
+            float(&mut app, Vec3::new(0.0, 500.0, 0.0));
+        }
+        let hull = app.world().get::<ShipHull>(ship).unwrap().design();
+        for _ in 0..120 * 60 {
+            ticks(&mut app, 1);
+            let mut devices = app.world_mut().get_mut::<Devices>(ship).unwrap();
+            for (i, d) in hull.devices.iter().enumerate() {
+                devices.0[i].set = d.start;
+            }
+        }
+        mission(&mut app).result_of("faults").unwrap_or(0.0)
+    };
+    let (away, home) = (faults(false), faults(true));
+    eprintln!("hits that knocked something out in 120 s: {away} with nobody aboard, {home} with one aboard");
+    assert!(home > away, "{home} with crew at home, {away} without");
+}
+

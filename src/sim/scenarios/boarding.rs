@@ -3,17 +3,34 @@
 //! to win is to cross over, fight through it to its bridge and drop the
 //! shield, then get clear before it breaks apart. Lose our ship, and the
 //! crew drifts a while, then it's back to the field.
+//!
+//! Meanwhile the carrier's hits knock our ship's power about (damage
+//! control): a beam landing on us can trip the breaker or knock the main
+//! bus junction nearest where it lands (`fault` devices in our ship's
+//! design), so our turrets or our shield drop until someone goes aft and
+//! puts it right, reading the power board on the bridge. Without our
+//! shield the hull goes in `home_exposed_seconds`; without our turrets the
+//! carrier never goes down, even with its shield off. The chance a hit
+//! does damage is `hit_fault_chance`, plus twice that for each crew member
+//! aboard our ship: the more of you at home, the more there is to do there,
+//! and a ship left empty (a lone boarder) is rarely knocked about.
+//!
+//! Results: `shield_dropped`, `faults` (hits that knocked something out)
+//! and `repairs` (those put right).
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 use super::{Scenario, Stage};
 use crate::sim::bodies::{Bodies, PreviousVelocity};
 use crate::sim::bots::{self, Robot};
-use crate::sim::combat::Combatant;
+use crate::sim::combat::{self, Beams, Combatant};
+use crate::sim::devices::Devices;
 use crate::sim::design::ShipDesign;
 use crate::sim::flight::{Duel, Flight, Path};
-use crate::sim::mission::{CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, break_up, presses};
+use crate::sim::mission::{Staged, CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, break_up, presses};
 use crate::sim::player::Player;
 use crate::sim::ship::{self, ControlAction, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
@@ -25,7 +42,7 @@ pub static SCENARIO: Scenario = Scenario {
     label: "Boarding action",
     build,
     arrive: None,
-    systems: |app| super::judge(app, ScenarioKind::Boarding, (drop_shields, settle_battle, show).chain()),
+    systems: |app| super::judge(app, ScenarioKind::Boarding, (drop_shields, settle_battle, damage_control, show).chain()),
     // Won, the crew picks what's next; lost, they drift a while first.
     return_after: |phase, tuning| (phase == Phase::Lost).then_some(tuning.wreck_return_seconds),
     homecoming: true,
@@ -122,8 +139,9 @@ fn build(stage: &mut Stage) -> Entity {
         integrity: 1.0,
         shield: true,
         shielded_seconds: tuning.home_survival_seconds,
-        exposed_seconds: tuning.home_survival_seconds,
+        exposed_seconds: tuning.home_exposed_seconds,
     });
+    commands.spawn((Name::new("Damage control"), Staged, Damage::default()));
     if stage.robots {
         bots::crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick, BOARDING_THREAT);
     }
@@ -205,10 +223,103 @@ fn settle_battle(
     }
 }
 
+/// What the carrier's hits have knocked out aboard our ship.
+#[derive(Component, Default)]
+struct Damage {
+    /// Devices knocked out of their setting, by index, and when.
+    knocked: Vec<(u16, u32)>,
+    faults: u32,
+    repairs: u32,
+}
+
+/// Our ship's power, under fire: new hits from the carrier may knock out
+/// the nearest `fault` device; whatever's put back is a repair; our shield
+/// holds only while its emitter has power.
+#[allow(clippy::too_many_arguments)]
+fn damage_control(
+    tick: Res<SimTick>,
+    tuning: Res<Tuning>,
+    beams: Res<Beams>,
+    bodies: Bodies,
+    damage: Option<Single<&mut Damage>>,
+    mut homes: Query<(Entity, &ShipHull, &mut Devices, &mut Combatant), With<HomeShip>>,
+    players: Query<(Entity, &Player, Option<&Name>), Without<Robot>>,
+    mission: Single<&mut Mission>,
+    mut tally: ResMut<CrewTally>,
+) {
+    let (Some(damage), Ok((home, hull, mut devices, mut ours))) = (damage, homes.single_mut()) else {
+        return;
+    };
+    let mut damage = damage.into_inner();
+    let mut mission = mission.into_inner();
+    let design = hull.design();
+    let started = mission.started;
+    let since = |t: u32| crate::sim::mission::clock(t.wrapping_sub(started) as f32 / TICK_HZ as f32);
+    // A hit just begun: a beam on us, from a turret whose beam starts this
+    // tick (turrets take turns, so there's often one beam on us throughout).
+    let starting = (0..combat::TURRETS).any(|i| combat::beam_start(i, tick.0) == Some(tick.0));
+    let new_hit = beams.0.iter().find(|b| b.target == home && starting).map(|b| b.to);
+    if let (Some(at), Some(frame), Phase::Underway) = (new_hit, bodies.frame(home), mission.phase) {
+        let mut rng = ChaCha8Rng::seed_from_u64(tick.0 as u64 ^ 0xda4a_6e);
+        // More of the crew at home, more goes wrong there (the other
+        // front): the base chance, plus twice it for each of them aboard.
+        let aboard = players.iter().filter(|(_, p, _)| p.mode.body() == Some(home)).count() as f32;
+        let chance = (tuning.hit_fault_chance * (1.0 + 2.0 * aboard)).min(0.9);
+        if rng.random::<f32>() < chance {
+            let local = frame.point_to_local(at);
+            let nearest = design
+                .devices
+                .iter()
+                .enumerate()
+                .filter(|(i, d)| d.fault && !d.displaced(&devices.0[*i]))
+                .min_by(|a, b| a.1.at.distance(local).total_cmp(&b.1.at.distance(local)));
+            if let Some((i, device)) = nearest
+                && device.knock(&mut devices.0[i], rng.random())
+            {
+                damage.knocked.push((i as u16, tick.0));
+                damage.faults += 1;
+                mission.report.push(format!("A hit at {} knocked out the {}.", since(tick.0), device.label.to_lowercase()));
+                mission.result("faults", damage.faults as f32);
+            }
+        }
+    }
+    // Put right: back in its starting setting.
+    let pressed: Vec<_> = presses(tick.0, players.iter().map(|(e, p, _)| (e, p))).collect();
+    let knocked = std::mem::take(&mut damage.knocked);
+    for (i, at) in knocked {
+        let device = &design.devices[i as usize];
+        if device.displaced(&devices.0[i as usize]) {
+            damage.knocked.push((i, at));
+            continue;
+        }
+        damage.repairs += 1;
+        mission.result("repairs", damage.repairs as f32);
+        let fixers: Vec<Entity> = pressed
+            .iter()
+            .filter(|(_, body, action)| *body == home && *action == ControlAction::Device(i))
+            .map(|(who, ..)| *who)
+            .collect();
+        for who in &fixers {
+            tally.credit(*who, format!("reset the {}", device.label.to_lowercase()));
+        }
+        let by = fixers.iter().filter_map(|w| players.get(*w).ok()).filter_map(|(_, _, n)| n).map(|n| n.to_string()).collect::<Vec<_>>();
+        if !by.is_empty() {
+            mission.report.push(format!("{} reset the {} at {}.", by.join(" and "), device.label.to_lowercase(), since(tick.0)));
+        }
+    }
+    // Our shield is its emitter.
+    let shield = devices.live(design, "shield") || design.device_index("shield").is_none();
+    if ours.shield != shield {
+        ours.shield = shield;
+    }
+}
+
 /// The objective and markers for the HUD.
 fn show(
     mission: Single<&mut Mission>,
     ships: Query<(Entity, &Combatant, &ShipHull, Has<HomeShip>)>,
+    damage: Option<Single<&Damage>>,
+    tick: Res<SimTick>,
     marked: MarkedBodies,
 ) {
     let mut mission = mission.into_inner();
@@ -233,5 +344,22 @@ fn show(
         }
         _ => {}
     }
-    Mission::show(&mut mission, objective.into(), Vec::new(), markers);
+    // Damage aboard: on the board, and where to fix it.
+    let mut status = Vec::new();
+    if let (Some(damage), Some(home)) = (damage, home)
+        && mission.phase == Phase::Underway
+    {
+        let design = ShipHull::new(ship::HOME).design();
+        for &(i, at) in &damage.knocked {
+            let device = &design.devices[i as usize];
+            let ago = tick.0.wrapping_sub(at) / TICK_HZ as u32;
+            status.push(format!("DAMAGE: {} knocked out {ago} s ago", device.label));
+            if let Some(h) = marked.id(home) {
+                let mut marker = Marker::device(h, design, &device.id, MarkerKind::Device);
+                marker.label = format!("Reset: {}", device.label);
+                markers.push(marker);
+            }
+        }
+    }
+    Mission::show(&mut mission, objective.into(), status, markers);
 }

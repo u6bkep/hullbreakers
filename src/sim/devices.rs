@@ -64,6 +64,11 @@ pub struct DeviceFile {
     /// How it starts: a lever 1 (thrown) or 0, a junction on this way.
     #[serde(default)]
     pub start: u8,
+    /// A hit on the ship near it can knock it out of its setting (a lever
+    /// thrown back, a junction turned to another way); see
+    /// [`Device::knock`].
+    #[serde(default)]
+    pub fault: bool,
 }
 
 fn up() -> Vec3 {
@@ -199,12 +204,36 @@ pub struct Device {
     pub face: Vec3,
     pub power: Logic,
     pub start: u8,
+    /// Whether hits can knock it (see [`Device::knock`]).
+    pub fault: bool,
 }
 
 /// How thick a gate's frame is (m), and how deep.
 pub const GATE_FRAME: f32 = 0.5;
 
 impl Device {
+    /// Whether it's out of the setting it starts in (knocked, or worked).
+    pub fn displaced(&self, state: &DeviceState) -> bool {
+        state.set != self.start
+    }
+
+    /// A hit knocks it out of its starting setting: a lever is thrown the
+    /// other way, a junction turned to another of its ways (`roll` picks
+    /// which). Whether it moved.
+    pub fn knock(&self, state: &mut DeviceState, roll: u32) -> bool {
+        match self.kind {
+            DeviceKind::Lever if state.set == self.start => {
+                state.set ^= 1;
+                true
+            }
+            DeviceKind::Junction { ways } if ways > 1 && state.set == self.start => {
+                state.set = (self.start + 1 + (roll % (ways as u32 - 1)) as u8) % ways;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Whether a player presses it.
     pub fn pressable(&self) -> bool {
         matches!(
@@ -321,6 +350,7 @@ pub fn place(
         face: (turn * file.face).normalize_or(Vec3::Y),
         power: Logic::Never,
         start: file.start,
+        fault: file.fault,
     };
     (device, rows)
 }
