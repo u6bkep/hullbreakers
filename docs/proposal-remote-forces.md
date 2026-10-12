@@ -110,6 +110,35 @@ re-simulation applies again.
 - The highest cost for the least certain gain; it's what the ratified
   deferral was protecting against.
 
+## Option A, built (2026-10-12)
+
+- **Blending.** Corrections now blend out on their own, apart from view
+  relocations. They use a critically damped spring (`client::camera::blend_out`):
+  - it starts from rest, so nothing jumps the frame a correction lands;
+  - its time grows with the correction's size, from `smooth_time` (0.12 s)
+    up to 0.35 s.
+- **Felt reaction** (`client::push_feel`), started as the client learns of
+  the push:
+  - for a correction over 15 cm: a head kick the way you were pushed (it
+    eases in over about 4 frames), shake, and a thump;
+  - for a new entry in your `HurtLog`: the same, away from where the hit
+    came from.
+- **Measured** with the drawn eye's path replayed through both blends (the
+  `measure_*` tests). The corrections themselves are unchanged, by design.
+  Worst per-frame jerk, i.e. one frame's step against the last:
+
+| Push | Old blend | New blend | Floor (the new velocity's own step) |
+|---|---|---|---|
+| Shotgun shell | 0.107 m | 0.053 m | 0.042 m |
+| Blast (11 m/s) | 0.48 m | 0.21 m | 0.19 m |
+| Rope yank | 0.53 m | 0.22 m | – |
+
+- **The cost:** the drawn eye now trails where you are for about 0.6 s after
+  a big correction (up to about 1.4 m behind, for a blast), rather than
+  catching up in 0.3 s with a lurch.
+- **Frame sequence:** `docs/remote-forces-a.png`, plotted from the CSVs
+  the measurements write to `target/remote-forces/`.
+
 ## Recommendation
 
 1. **A now.** It's cheap and fixes how kicks feel, which is most of their

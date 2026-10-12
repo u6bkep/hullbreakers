@@ -723,11 +723,74 @@ fn a_death_where_you_stand_reaches_the_client() {
 // the client's own input costs it today. Run with
 // `cargo test --test netplay measure_ -- --ignored --nocapture`.
 
+/// The camera's view of the client's player through corrections, under two
+/// blend rules: the old one (exponential, a fixed `smooth_time`) and the
+/// new one (`camera::blend_out`: size-scaled, critically damped). Tracks the worst per-frame jerk of the drawn eye:
+/// how far one frame's step differs from the last frame's.
+#[derive(Default)]
+struct Views {
+    offsets: [Vec3; 2],
+    rate: Vec3,
+    /// Per frame: the predicted eye, and where each rule draws it.
+    path: Vec<[Vec3; 3]>,
+    last: [Option<Vec3>; 2],
+    step: [Option<Vec3>; 2],
+    jerk: [f32; 2],
+}
+
+impl Views {
+    /// Writes the path to `target/remote-forces/<name>.csv` (frame, then
+    /// x, y, z of the predicted eye, the old rule's drawn eye, the new
+    /// rule's), for plotting.
+    fn save(&self, name: &str) {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/remote-forces");
+        let _ = std::fs::create_dir_all(&dir);
+        let mut csv = String::from("frame,eye_x,eye_y,eye_z,old_x,old_y,old_z,new_x,new_y,new_z\n");
+        for (i, row) in self.path.iter().enumerate() {
+            let [a, b, c] = row;
+            csv += &format!("{i},{},{},{},{},{},{},{},{},{}\n", a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+        }
+        let _ = std::fs::write(dir.join(format!("{name}.csv")), csv);
+    }
+
+    fn frame(&mut self, eye: Vec3, correction: Vec3, dt: f32, smooth_time: f32) {
+        for k in 0..2 {
+            let offset = self.offsets[k] + correction;
+            self.offsets[k] = if k == 0 {
+                offset * (-dt / smooth_time).exp()
+            } else {
+                let (o, r) = hullbreakers::client::camera::blend_out(offset, self.rate, dt, smooth_time);
+                self.rate = r;
+                o
+            };
+            let drawn = eye + self.offsets[k];
+            if let Some(last) = self.last[k] {
+                let step = drawn - last;
+                if let Some(before) = self.step[k] {
+                    self.jerk[k] = self.jerk[k].max(step.distance(before));
+                }
+                self.step[k] = Some(step);
+            }
+            self.last[k] = Some(drawn);
+        }
+        self.path.push([eye, eye + self.offsets[0], eye + self.offsets[1]]);
+    }
+}
+
 /// Over `frames` frames: the rollbacks, and how far the client's predicted
 /// player jumped from its own straight-line flight on rollback frames (the
-/// correction the camera has to blend over), worst and summed.
-fn watch_corrections(s: &mut Session, frames: usize) -> (u32, f32, f32) {
+/// correction the camera has to blend over), worst and summed. `views`
+/// follows what the camera draws.
+fn watch_corrections_drawn(s: &mut Session, frames: usize, views: &mut Views) -> (u32, f32, f32) {
+    use hullbreakers::client::ViewCorrection;
     let dt = FRAME.as_secs_f32();
+    let smooth_time = s.client.world().resource::<hullbreakers::sim::tuning::Tuning>().smooth_time;
+    if !s.client.world().contains_resource::<ViewCorrection>() {
+        s.client.world_mut().insert_resource(ViewCorrection {
+            position: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+        });
+    }
     let (mut worst, mut total) = (0.0f32, 0.0f32);
     let before = s.rollbacks();
     for _ in 0..frames {
@@ -737,15 +800,20 @@ fn watch_corrections(s: &mut Session, frames: usize) -> (u32, f32, f32) {
         };
         let r0 = s.rollbacks();
         s.step(1);
-        if s.rollbacks() > r0
-            && let Some(Mode::Eva { position, .. }) = s.local_player().map(|p| p.mode)
-        {
+        let correction = std::mem::replace(&mut s.client.world_mut().resource_mut::<ViewCorrection>().position, Vec3::ZERO);
+        let Some(Mode::Eva { position, .. }) = s.local_player().map(|p| p.mode) else { continue };
+        views.frame(position, correction, dt, smooth_time);
+        if s.rollbacks() > r0 {
             let jump = position.distance(p0 + v0 * dt);
             worst = worst.max(jump);
             total += jump;
         }
     }
     (s.rollbacks() - before, worst, total)
+}
+
+fn watch_corrections(s: &mut Session, frames: usize) -> (u32, f32, f32) {
+    watch_corrections_drawn(s, frames, &mut Views::default())
 }
 
 /// Floating still, assist off, 40 m off our ship's beam.
@@ -764,12 +832,17 @@ fn measure_kick(impulse: f32, what: &str) {
     let mass = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().player_mass;
     let tuning = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().clone();
     s.server_player().shove(Vec3::X * impulse / mass, None, &tuning);
-    let (rollbacks, worst, total) = watch_corrections(&mut s, 120);
+    let mut views = Views::default();
+    let (rollbacks, worst, total) = watch_corrections_drawn(&mut s, 120, &mut views);
     eprintln!(
-        "{what}: {impulse} N s ({:.1} m/s): {rollbacks} rollbacks in 2 s (quiet before: {}), worst correction {worst:.2} m, summed {total:.2} m",
+        "{what}: {impulse} N s ({:.1} m/s): {rollbacks} rollbacks in 2 s (quiet before: {}), worst correction {worst:.2} m, summed {total:.2} m; \
+         drawn eye's worst jerk {:.3} m/frame with the old blend, {:.3} with the new one",
         impulse / mass,
-        quiet.0
+        quiet.0,
+        views.jerk[0],
+        views.jerk[1]
     );
+    views.save(&what.replace([' ', ','], "_"));
 }
 
 #[test]
@@ -818,18 +891,27 @@ fn measure_rope(robot_mass_scale: f32, what: &str) {
     });
     let before = s.rollbacks();
     let (mut worst, mut total) = (0.0f32, 0.0f32);
+    let mut views = Views::default();
     for _ in 0..30 {
         if let Some(g) = &mut s.server.world_mut().get_mut::<Player>(robot).unwrap().grapple {
             g.length = (g.length - 0.25).max(4.0);
         }
-        let (_, w, t) = watch_corrections(&mut s, 1);
+        let (_, w, t) = watch_corrections_drawn(&mut s, 1, &mut views);
         worst = worst.max(w);
         total += t;
     }
-    let (_, w, t) = watch_corrections(&mut s, 150);
+    let (_, w, t) = watch_corrections_drawn(&mut s, 150, &mut views);
     worst = worst.max(w);
     total += t;
-    eprintln!("{what}: {} rollbacks in 3 s (quiet before: {}), worst correction {worst:.2} m, summed {total:.2} m", s.rollbacks() - before, quiet.0);
+    eprintln!(
+        "{what}: {} rollbacks in 3 s (quiet before: {}), worst correction {worst:.2} m, summed {total:.2} m; \
+         drawn eye's worst jerk {:.3} m/frame with the old blend, {:.3} with the new one",
+        s.rollbacks() - before,
+        quiet.0,
+        views.jerk[0],
+        views.jerk[1]
+    );
+    views.save("rope_yank");
 }
 
 #[test]

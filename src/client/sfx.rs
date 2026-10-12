@@ -450,6 +450,13 @@ pub struct AudioState {
     cable_speed: f32,
 }
 
+impl Sounds {
+    /// A hull's clank, through your suit: what a blow sounds like too.
+    pub fn impact(&self) -> &Handle<AudioSource> {
+        &self.impact
+    }
+}
+
 pub fn setup_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
     let mut synth = Synth {
         rng: ChaCha8Rng::seed_from_u64(3),
