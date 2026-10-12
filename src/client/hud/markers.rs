@@ -82,10 +82,16 @@ fn edge_mark(painter: &egui::Painter, labels: &mut Labels, screen: Rect, dir: eg
     style::edge_arrow(painter, tip, dir, 13.0, color);
     let align = style::inward(dir);
     let g = style::galley(painter, format!("{}  {range}", name.to_uppercase()), style::ui(MICRO + 1.0), color, 1.0);
-    // On a side edge, step down; on the top or bottom, step across.
+    // On a side edge, step up or down; on the top or bottom, across; either
+    // way toward the middle of the edge, so labels stay on screen.
     let inner = screen.shrink(EDGE + 6.0);
     let side = tip.x <= inner.min.x || tip.x >= inner.max.x;
-    let step = if side { vec2(0.0, g.size().y + 3.0) } else { vec2(g.size().x + 12.0, 0.0) };
+    let toward = screen.center() - tip;
+    let step = if side {
+        vec2(0.0, (g.size().y + 3.0).copysign(toward.y))
+    } else {
+        vec2((g.size().x + 12.0).copysign(toward.x), 0.0)
+    };
     let mut rect = align.anchor_size(tip - dir * 20.0, g.size());
     for _ in 0..6 {
         if labels.free(rect.expand(1.0)) {

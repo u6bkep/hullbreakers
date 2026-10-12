@@ -39,6 +39,47 @@ it.
   round-trip with the user. Pattern to watch: egui's sizing is implicit and
   layout-pass dependent, so every non-trivial window needs a screenshot to
   check.
+- 2026-10-12. The HUD wanted letter-spaced caps labels. `Painter::text`
+  has no letter spacing; every spaced label goes through a `LayoutJob`
+  with `extra_letter_spacing` (`style::galley` in `src/client/hud/style.rs`).
+  Cost: minutes; one more helper every element has to remember to use.
+- 2026-10-12. Scaling the HUD with the window (`Context::set_zoom_factor`)
+  silently breaks anything that places egui shapes from a Bevy projection:
+  `Camera::world_to_viewport` gives logical pixels and egui wants points,
+  which differ by the zoom. Every world marker goes through
+  `hud::Projector`, which divides it out. Cost: designed for up front; it
+  would have put every marker in the wrong place at any height but 1080.
+- 2026-10-12. Egui's tessellation is a real share of the HUD's cost:
+  `process_output_system` (which tessellates) went from 0.047 to 0.150 ms
+  a frame with the new HUD (traced release build, boarding at 1080p),
+  against 0.098 ms for all the HUD's own systems. Segmented bars were
+  turned into one mesh each (plain quads, no feathering) on the theory
+  that dozens of anti-aliased rects were the cost; it didn't measurably
+  move the number, so the cost is spread over text, plates and strokes.
+  Not chased further: the whole HUD is about 0.2 ms over the old one.
+
+## HUD (our subsystem: what it can read)
+
+- 2026-10-12. The damage-direction indicator was specified "from the hit
+  log", but `HitLog` records the hits a player *dealt* (for hit markers);
+  nothing records where a player's own damage came from. The HUD infers it
+  client-side: robots' `Fired` events are in their replicated logs, beams
+  are traced on every peer, and when your health drops the hostile shot
+  whose line passed within 2.5 m of you (or the beam you were caught in)
+  is taken as the source (`src/client/hud/vitals.rs`). Cost: an hour, and
+  a heuristic: two robots firing at once can be confused. A sim-side
+  record (the source of the last hurt on `Vitals`) would make it exact.
+- 2026-10-12. The interact prompt tested the camera's rendered eye
+  against the ship's physics pose. On a flying ship those are a tick
+  apart, enough to name the neighbouring button (seen: aiming at
+  Boarding action, prompted Model gallery). It now asks the sim's view and
+  poses, as the press does (`hud/reticle.rs`). Cost: half an hour; any
+  HUD element that mixes rendered and sim poses on a moving ship has the
+  same trap.
+- 2026-10-12. A pickup gets its `Transform` from the renderer a frame
+  after it appears, so `Query<(Entity, &Transform), Added<Pickup>>` never
+  matches it (the kit marker missed every death). Query `Added<Pickup>`
+  alone and look the transform up later. Cost: one screenshot round.
 
 ## Bevy rendering
 

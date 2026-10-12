@@ -12,7 +12,8 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::sim::player::{Grapple, Mode, Player};
 use crate::sim::vitals::Vitals;
-use crate::sim::mission::CARRIER;
+use crate::sim::SimTick;
+use crate::sim::mission::{CARRIER, Mission, Phase};
 use crate::sim::ship::{HOME, ShipHull};
 
 #[derive(Resource)]
@@ -206,13 +207,20 @@ fn hud_vantages() -> Vec<(&'static str, Vantage)> {
         ("hud_carrier_console", booted(Vec3::new(0.0, upper + 0.01, -25.6), Vec3::NEG_Z, -0.38)),
         ("hud_carrier_dead", booted(Vec3::new(0.0, upper + 0.01, 10.0), Vec3::NEG_Z, 0.0)),
         ("hud_respawned", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        // The fight lost (by fiat): the banner, then back to the field
+        // after the drift, and the debrief.
+        ("hud_lost", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_lost_2", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_lost_3", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_lost_4", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_debrief", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
     ]
 }
 
 /// The state each HUD shot is in, set as the player arrives.
 fn hud_state(name: &str, player: &mut Player, vitals: Option<&mut Vitals>) {
     let loadout = &mut player.loadout;
-    if name != "hud_respawned" {
+    if !name.starts_with("hud_respawned") && !name.starts_with("hud_lost") && name != "hud_debrief" {
         loadout.arm_fully();
     }
     let Some(vitals) = vitals else { return };
@@ -250,6 +258,8 @@ pub fn run_shot_script(
     mut player: Single<&mut Player, With<super::LocalPlayer>>,
     mut vitals: Option<Single<&mut Vitals, With<super::LocalPlayer>>>,
     ships: Query<(Entity, &Transform, &ShipHull)>,
+    mut missions: Query<&mut Mission>,
+    tick: Res<SimTick>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let shots = vantages();
@@ -351,6 +361,12 @@ pub fn run_shot_script(
     player.flight_assist = false;
     if hud_tour() {
         hud_state(shots[script.next].0, &mut player, vitals.as_mut().map(|v| &mut ***v));
+        if shots[script.next].0 == "hud_lost"
+            && let Ok(mut mission) = missions.single_mut()
+        {
+            mission.phase = Phase::Lost;
+            mission.ended = Some(tick.0);
+        }
     }
     script.next += 1;
 }

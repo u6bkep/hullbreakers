@@ -191,27 +191,33 @@ pub fn glow_line(painter: &Painter, points: Vec<Pos2>, color: Color32, width: f3
 /// A bar of `segments` cells, `value` (0..1) of it filled in `color`, and
 /// up to `trail` (what was just lost) in white.
 pub fn seg_bar(painter: &Painter, rect: Rect, segments: usize, value: f32, trail: f32, color: Color32) {
+    // One mesh of plain quads, edges on whole pixels: a bar is up to
+    // fifty cells, and as separate rect shapes each is tessellated with
+    // anti-aliased (feathered) edges it doesn't need.
+    let ppp = painter.pixels_per_point();
+    let snap = |x: f32| (x * ppp).round() / ppp;
+    let (top, bottom) = (snap(rect.min.y), snap(rect.max.y).max(snap(rect.min.y) + 1.0 / ppp));
     let gap = if segments > 1 { (rect.width() / segments as f32 * 0.18).clamp(1.0, 3.0) } else { 0.0 };
     let cell = (rect.width() - gap * (segments as f32 - 1.0)) / segments as f32;
     let value = value.clamp(0.0, 1.0) * segments as f32;
     let trail = trail.clamp(0.0, 1.0) * segments as f32;
+    let lost_color = Color32::from_white_alpha(200);
+    let mut mesh = egui::Mesh::default();
+    let mut quad = |x0: f32, x1: f32, c: Color32| {
+        let (x0, x1) = (snap(x0), snap(x1));
+        if x1 > x0 {
+            mesh.add_colored_rect(Rect::from_min_max(pos2(x0, top), pos2(x1, bottom)), c);
+        }
+    };
     for i in 0..segments {
         let x = rect.min.x + i as f32 * (cell + gap);
-        let full = Rect::from_min_size(pos2(x, rect.min.y), vec2(cell, rect.height()));
-        painter.rect_filled(full, 0.0, INK_FAINT);
         let lit = (value - i as f32).clamp(0.0, 1.0);
-        if lit > 0.0 {
-            painter.rect_filled(Rect::from_min_size(full.min, vec2(cell * lit, rect.height())), 0.0, color);
-        }
-        let lost = (trail - i as f32).clamp(0.0, 1.0);
-        if lost > lit {
-            painter.rect_filled(
-                Rect::from_min_max(pos2(x + cell * lit, rect.min.y), pos2(x + cell * lost, rect.max.y)),
-                0.0,
-                Color32::from_white_alpha(200),
-            );
-        }
+        let lost = (trail - i as f32).clamp(0.0, 1.0).max(lit);
+        quad(x, x + cell * lit, color);
+        quad(x + cell * lit, x + cell * lost, lost_color);
+        quad(x + cell * lost, x + cell, INK_FAINT);
     }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// Four L-corners round `rect`.

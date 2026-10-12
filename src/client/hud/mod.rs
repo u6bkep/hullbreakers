@@ -71,8 +71,10 @@ pub struct HudMemory {
     pub now: f32,
     /// Where the eye was last frame, in the world.
     pub last_eye: Option<Vec3>,
-    /// When and where you last died.
-    pub died: Option<(f32, Vec3)>,
+    /// Your last death.
+    pub died: Option<vitals::Death>,
+    /// Whether you carry a weapon (as of last frame).
+    pub armed: bool,
     /// The case your kit was left in, once it's been seen.
     pub kit: Option<Entity>,
     /// World direction toward each recent hit's source, and when.

@@ -126,7 +126,8 @@ Reference frame 1920x1080 points; margins `EDGE` = 24 pt.
 - **Centre** (a circle of 12% of the height round the crosshair): only the
   crosshair, hit markers, the grapple ring and rope gauge, and the
   interact prompt to the right of it. Nothing else may live here.
-- **Damage arcs** sit on a ring at 26% of the height.
+- **Damage arcs** sit on a ring at 26% of the height, read as a compass in
+  the view's own plane: ahead is the top of the ring, behind the bottom.
 - **Top centre**: the mission strip (objective, timer, the ships' bars).
   Banners and the debrief below it, in the upper third.
 - **Top left**: the event feed (what your boots and rope just did).
@@ -138,10 +139,17 @@ Reference frame 1920x1080 points; margins `EDGE` = 24 pt.
   vignette.
 
 World markers can be anywhere but fade out as they cross the centre
-circle, so they never sit on the crosshair.
+circle, so they never sit on the crosshair. Their labels sit on a small
+scrim and never overlap: marks draw most important first (objectives,
+the reference body, ships), and a later label that would land on an
+earlier one is dropped (in the world) or stepped along the edge (off
+screen).
 
 ## Adding an element
 
 Pick its zone, use the tokens and painters, give it a scrim if it has
 more than one line, check it over black space and over the lit hull at
-1280x720 and 1920x1080, and keep the HUD's frame cost under 0.3 ms.
+1280x720 and 1920x1080 (`HULLBREAKERS_SHOTS_SHIP=hud` tours the HUD's
+states), and keep its frame cost down: the whole HUD measured about
+0.2 ms a frame over egui's own (see the commit that added it). Bars are
+one mesh each; prefer that over many small shapes.

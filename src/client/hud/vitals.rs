@@ -18,10 +18,9 @@ use egui::{Align2, Rect, Stroke, pos2, vec2};
 use super::style::{self, BOLD, EDGE, HOSTILE, INK, INK_DIM, MICRO, SUIT, WARNING};
 use super::{CameraView, HudMemory, Projector, view};
 use crate::client::LocalPlayer;
-use crate::client::events::Presented;
 use crate::sim::bots::Robot;
 use crate::sim::combat::Beams;
-use crate::sim::events::PlayerEvent;
+use crate::sim::events::{EventLog, LOG_TICKS, PlayerEvent};
 use crate::sim::pickups::Pickup;
 use crate::sim::player::Player;
 use crate::sim::tuning::Tuning;
@@ -38,6 +37,10 @@ const ARC_SECONDS: f32 = 1.2;
 /// How far a shot's line may pass from you and still be the one that hit.
 const SHOT_MISS: f32 = 2.5;
 
+/// How long a drop in health waits for the shot that caused it (s): on a
+/// client, robots' shots arrive interpolated, after the damage.
+const PENDING_SECONDS: f32 = 0.3;
+
 /// A hostile shot seen in flight: where from, which way, when.
 struct SeenShot {
     origin: Vec3,
@@ -48,128 +51,199 @@ struct SeenShot {
 /// Where recent damage came from, for the arcs.
 #[derive(Default)]
 pub struct Threats {
-    /// Robots' newest presented shot tick.
+    /// Robots' newest read event tick.
     read: HashMap<Entity, u32>,
+    /// Your own deaths and beam hits already seen, by tick.
+    own_seen: Vec<(u32, bool)>,
+    /// Whether your log has been seen at all.
+    own_started: bool,
     shots: Vec<SeenShot>,
     /// When a beam last caught you.
     beam_hit: Option<f32>,
+    /// Drops in health not yet put down to a source: where you were, when.
+    pending: Vec<(Vec3, f32)>,
     /// World direction toward each recent hit's source, and when.
     arcs: Vec<(Vec3, f32)>,
     last_health: Option<f32>,
 }
 
-/// Reads robots' shots and your health each frame; a drop in health finds
-/// its source. Also keeps the eye's last position and notices the case
-/// your kit was left in.
+/// The events in `log` after `cursor`, moving the cursor on. A log seen for
+/// the first time only sets the cursor: what's already in it is history.
+fn read_new(log: &EventLog, cursor: &mut Option<u32>) -> Vec<(u32, PlayerEvent)> {
+    let first = cursor.is_none();
+    let last = *cursor;
+    let mut new = Vec::new();
+    for (tick, event) in log.iter() {
+        if last.is_some_and(|l| tick.wrapping_sub(l) as i32 <= 0) {
+            continue;
+        }
+        *cursor = Some(cursor.map_or(tick, |n| if tick.wrapping_sub(n) as i32 > 0 { tick } else { n }));
+        if !first {
+            new.push((tick, event));
+        }
+    }
+    if cursor.is_none() {
+        // An empty log: start from where it is.
+        *cursor = Some(log.tick());
+    }
+    new
+}
+
+/// Reads robots' shots, your own events and your health each frame; a drop
+/// in health finds its source. Also notices dying, and the case your kit
+/// was left in.
+///
+/// Your deaths are read straight from your log, not as presented events:
+/// presentation drops what arrives late, and a death (which only the
+/// authority decides) reaches a laggy client late.
 pub fn track_threats(
     mut memory: ResMut<HudMemory>,
     mut threats: Local<Threats>,
     robots: Query<(Entity, &Player), With<Robot>>,
-    me: Option<Single<&Vitals, With<LocalPlayer>>>,
+    me: Option<Single<(&Player, &Vitals), With<LocalPlayer>>>,
     beams: Option<Res<Beams>>,
-    mut presented: MessageReader<Presented>,
     camera: CameraView,
-    new_cases: Query<Entity, Added<Pickup>>,
-    // Cases get their transform a frame after they arrive.
-    cases: Query<&Transform, With<Pickup>>,
-    mut waiting: Local<Vec<Entity>>,
+    cases: Query<(Entity, &Pickup, &Transform)>,
 ) {
     let now = memory.now;
     let eye = camera.1.translation;
     // Your body is a little below your eye.
     let body = eye - camera.1.rotation * Vec3::Y * 0.5;
 
+    let threats = &mut *threats;
     for (entity, robot) in &robots {
-        let last = threats.read.get(&entity).copied();
-        let mut newest = last;
-        for (tick, event) in robot.events.iter() {
-            if last.is_some_and(|l| tick.wrapping_sub(l) as i32 <= 0) {
-                continue;
-            }
-            newest = Some(newest.map_or(tick, |n: u32| if tick.wrapping_sub(n) as i32 > 0 { tick } else { n }));
+        let mut cursor = threats.read.get(&entity).copied();
+        for (_, event) in read_new(&robot.events, &mut cursor) {
             if let PlayerEvent::Fired { origin, velocity, .. } = event
                 && let Some(dir) = velocity.try_normalize()
             {
                 threats.shots.push(SeenShot { origin, dir, at: now });
             }
         }
-        if let Some(n) = newest {
-            threats.read.insert(entity, n);
+        if let Some(c) = cursor {
+            threats.read.insert(entity, c);
         }
     }
     threats.read.retain(|e, _| robots.contains(*e));
     threats.shots.retain(|s| now - s.at < 1.5);
 
-    for Presented(event) in presented.read() {
+    let Some(me) = me else {
+        return;
+    };
+    let (player, vitals) = *me;
+    // Your own log is rewritten under prediction: a death the authority
+    // decided turns up at a tick already passed. Each is taken once,
+    // however late (a re-timed copy within a few ticks is the same one).
+    let log_now = player.events.tick();
+    threats.own_seen.retain(|(t, _)| log_now.wrapping_sub(*t) <= LOG_TICKS);
+    let started = std::mem::replace(&mut threats.own_started, true);
+    let mut own = Vec::new();
+    for (tick, event) in player.events.iter() {
+        let died = match event {
+            PlayerEvent::Died => true,
+            PlayerEvent::BeamHit => false,
+            _ => continue,
+        };
+        if threats.own_seen.iter().any(|&(t, d)| d == died && (tick.wrapping_sub(t) as i32).unsigned_abs() <= 3) {
+            continue;
+        }
+        threats.own_seen.push((tick, died));
+        if started {
+            own.push((tick, event));
+        }
+    }
+    for (tick, event) in own {
         match event {
             PlayerEvent::BeamHit => threats.beam_hit = Some(now),
             PlayerEvent::Died => {
-                if let Some(at) = memory.last_eye {
-                    memory.died = Some((now, at));
+                if let Some(place) = memory.last_eye {
+                    memory.died = Some(Death {
+                        at: now,
+                        place,
+                        tick,
+                        carried: memory.armed,
+                    });
                     memory.kit = None;
                 }
             }
             _ => {}
         }
     }
+    // As of before this frame's events: dying empties your hands.
+    memory.armed = view::armed(player);
 
-    if let Some(vitals) = me {
-        let hurt = threats.last_health.is_some_and(|before| vitals.health < before - 0.01);
-        threats.last_health = Some(vitals.health);
-        if hurt {
-            let shot = threats
-                .shots
+    // A drop in health waits a moment for the shot that caused it.
+    if threats.last_health.is_some_and(|before| vitals.health < before - 0.01) {
+        threats.pending.push((body, now));
+    }
+    threats.last_health = Some(vitals.health);
+    let (shots, beam_hit) = (&threats.shots, threats.beam_hit);
+    let mut found = Vec::new();
+    threats.pending.retain(|&(at, when)| {
+        let shot = shots
+            .iter()
+            .filter_map(|s| {
+                let along = (at - s.origin).dot(s.dir);
+                let miss = (at - (s.origin + s.dir * along)).length();
+                (along > 0.0 && miss < SHOT_MISS).then_some((miss, s.origin))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, origin)| origin);
+        let beam = || {
+            beam_hit.filter(|hit| (hit - when).abs() < 0.5)?;
+            beams
+                .as_ref()?
+                .0
                 .iter()
-                .filter_map(|s| {
-                    let along = (body - s.origin).dot(s.dir);
-                    let miss = (body - (s.origin + s.dir * along)).length();
-                    (along > 0.0 && miss < SHOT_MISS).then_some((miss, s.origin))
+                .map(|b| {
+                    let d = (b.to - b.from).normalize_or_zero();
+                    let along = (at - b.from).dot(d).clamp(0.0, b.from.distance(b.to));
+                    ((at - (b.from + d * along)).length(), b.from)
                 })
                 .min_by(|a, b| a.0.total_cmp(&b.0))
-                .map(|(_, origin)| origin);
-            let beam = || {
-                threats.beam_hit.filter(|at| now - at < 0.5)?;
-                beams?
-                    .0
-                    .iter()
-                    .map(|b| {
-                        let d = (b.to - b.from).normalize_or_zero();
-                        let along = (body - b.from).dot(d).clamp(0.0, b.from.distance(b.to));
-                        ((body - (b.from + d * along)).length(), b.from)
-                    })
-                    .min_by(|a, b| a.0.total_cmp(&b.0))
-                    .map(|(_, from)| from)
-            };
-            if let Some(source) = shot.or_else(beam)
-                && let Some(dir) = (source - body).try_normalize()
-            {
-                threats.arcs.push((dir, now));
+                .map(|(_, from)| from)
+        };
+        match shot.or_else(beam).and_then(|source| (source - at).try_normalize()) {
+            Some(dir) => {
+                found.push(dir);
+                false
             }
+            None => now - when < PENDING_SECONDS,
         }
-    }
+    });
+    threats.arcs.extend(found.into_iter().map(|dir| (dir, now)));
     threats.arcs.retain(|(_, at)| now - at < ARC_SECONDS);
     memory.arcs.clone_from(&threats.arcs);
 
-    // The first case to turn up near where you died holds your kit.
-    if let Some((at, place)) = memory.died
+    // Your kit is in the case left on the tick you died, where you fell.
+    if let Some(death) = memory.died
+        && death.carried
         && memory.kit.is_none()
-        && now - at < 5.0
+        && now - death.at < 5.0
     {
-        waiting.extend(new_cases.iter());
-        let found = waiting
+        memory.kit = cases
             .iter()
-            .filter_map(|&e| cases.get(e).ok().map(|t| (e, t.translation.distance(place))))
-            .filter(|(_, d)| *d < 6.0)
+            .filter_map(|(e, case, t)| {
+                let d = t.translation.distance(death.place);
+                ((case.since.wrapping_sub(death.tick) as i32).abs() <= 2 && d < 8.0).then_some((e, d))
+            })
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(e, _)| e);
-        if found.is_some() {
-            memory.kit = found;
-            waiting.clear();
-        }
-    } else {
-        waiting.clear();
     }
     memory.last_eye = Some(eye);
+}
+
+/// Your last death.
+#[derive(Clone, Copy, Debug)]
+pub struct Death {
+    /// HUD time.
+    pub at: f32,
+    /// Where your eye was.
+    pub place: Vec3,
+    /// The sim tick.
+    pub tick: u32,
+    /// Whether you had anything to leave behind.
+    pub carried: bool,
 }
 
 /// The health block, its regen, the low-health edge, the flash of being
@@ -183,6 +257,7 @@ pub fn vitals_hud(
     camera: CameraView,
     // What the bar shows (eased), and the white trail of what was lost.
     mut shown: Local<Option<(f32, f32)>>,
+    mut last: Local<Option<f32>>,
     mut trail_hold: Local<f32>,
     mut flash: Local<f32>,
 ) -> Result {
@@ -194,11 +269,12 @@ pub fn vitals_hud(
     let now = memory.now;
     let fraction = (vitals.health / tuning.player_health).clamp(0.0, 1.0);
     let (bar, trail) = shown.get_or_insert((fraction, fraction));
-    if fraction < *bar - 0.001 {
+    if last.is_some_and(|before| fraction < before - 0.001) {
         *flash = 1.0;
         *trail_hold = 0.35;
         *trail = trail.max(*bar);
     }
+    *last = Some(fraction);
     *bar = style::ease(*bar, fraction, dt, style::EASE);
     *trail_hold -= dt;
     if *trail_hold <= 0.0 {
@@ -308,24 +384,13 @@ pub fn vitals_hud(
 const DEATH_SECONDS: f32 = 3.5;
 
 /// Dying: the view goes dark and red, SUIT FAILURE, and where your kit is.
-pub fn death_overlay(
-    mut contexts: EguiContexts,
-    memory: Res<HudMemory>,
-    player: Option<Single<&Player, With<LocalPlayer>>>,
-    mut carried: Local<bool>,
-) -> Result {
+pub fn death_overlay(mut contexts: EguiContexts, memory: Res<HudMemory>) -> Result {
     let ctx = contexts.ctx_mut()?;
-    let Some((at, _)) = memory.died else {
-        if let Some(p) = player {
-            *carried = view::armed(&p);
-        }
+    let Some(death) = memory.died else {
         return Ok(());
     };
-    let age = memory.now - at;
+    let age = memory.now - death.at;
     if age > DEATH_SECONDS {
-        if let Some(p) = player {
-            *carried = view::armed(&p);
-        }
         return Ok(());
     }
     let screen = ctx.content_rect();
@@ -337,7 +402,7 @@ pub fn death_overlay(
     let alpha = style::appear(age, DEATH_SECONDS);
     let c = pos2(screen.center().x, screen.min.y + screen.height() * 0.36);
     super::mission::banner(&painter, c, "SUIT FAILURE", HOSTILE, alpha);
-    let line = if *carried {
+    let line = if death.carried {
         "Respawning aboard. Your kit is where you fell."
     } else {
         "Respawning aboard."
