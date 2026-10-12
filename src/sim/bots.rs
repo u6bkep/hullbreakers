@@ -45,7 +45,7 @@ use super::player::{Mode, Player, PlayerTelemetry, PreviousMode, capsule};
 use super::shots::Team;
 use super::tuning::Tuning;
 use super::vitals::Vitals;
-use super::weapons::{Gun, GunKind, Loadout, STANCES, Slot, Stance};
+use super::weapons::{GunKind, Loadout, STANCES, Slot, Stance};
 use super::{Layer, SimTick, TICK_HZ};
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -382,24 +382,18 @@ impl MapEntities for Brain {
 /// `index` varies its timing.
 pub fn new_robot(kind: Robot, affixes: Affixes, mode: Mode, home: Entity, post: Vec3, base: &Tuning, index: u32) -> impl Bundle {
     let tuning = body_tuning(kind, affixes, base);
-    let (guns, slot) = match kind.gun(affixes) {
-        Some(gun) => (
-            vec![Gun {
-                reserve: u16::MAX,
-                ..Gun::full(gun)
-            }],
-            Slot::Gun(0),
-        ),
-        None => (Vec::new(), Slot::Grapple),
-    };
-    let loadout = Loadout {
-        guns,
-        current: 0,
-        stances: [Stance {
-            main: slot,
-            off: Slot::Empty,
-        }; STANCES],
-        ..Loadout::default()
+    let loadout = match kind.gun(affixes) {
+        Some(gun) => Loadout::robot(gun),
+        None => {
+            // The grappler's harpoon is its grapple, in its main hand.
+            let mut l = Loadout::base();
+            l.stances = [Stance {
+                main: Slot::Grapple,
+                off: Slot::Empty,
+            }; STANCES];
+            l.current = 0;
+            l
+        }
     };
     let state = affixes::State::fresh(affixes, &tuning);
     (
@@ -632,7 +626,7 @@ pub fn think(
         if let Some((at, velocity)) = aiming {
             let mut aim_at = at;
             if mind.lead
-                && let Some(speed) = me.loadout.guns.first().map(|g| g.kind.stats().muzzle_speed)
+                && let Some(speed) = me.loadout.inventory.weapons[0].map(|w| w.stats().muzzle_speed)
             {
                 // The shell keeps the shooter's velocity: lead by the
                 // target's motion relative to ours.

@@ -96,6 +96,7 @@ pub fn spawn_tracers(
                 gun,
                 origin,
                 velocity,
+                ..
             } = event
             else {
                 continue;

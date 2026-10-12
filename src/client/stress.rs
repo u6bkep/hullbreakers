@@ -92,7 +92,7 @@ fn set_up_firefight(
     }
     state.started = true;
     let home = *home;
-    player.loadout.arm_fully();
+    player.loadout.restock();
     // Stance 1: SMG in the main hand, grapple in the other.
     player.loadout.current = 0;
     player.boots_on = true;
@@ -147,10 +147,8 @@ fn sustain_firefight(
         v.health = 1.0e6;
     }
     if let Some(player) = player.as_mut() {
-        for gun in &mut player.loadout.guns {
-            if gun.carried {
-                gun.reserve = gun.reserve.max(500);
-            }
+        for kind in crate::sim::items::AmmoKind::ALL {
+            *player.loadout.inventory.ammo_mut(kind) = kind.cap();
         }
     }
 }

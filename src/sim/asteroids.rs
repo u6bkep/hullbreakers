@@ -210,6 +210,20 @@ pub fn spawn_battlefield(
     }
 }
 
+/// Rocks at rest, slowly turning, at the given places (centre, radius),
+/// shaped and turned from `seed`. Not part of a field: nothing recycles
+/// them.
+pub fn spawn_rocks(commands: &mut Commands, seed: u64, rocks: &[(Vec3, f32)]) {
+    let mut field = FieldRng {
+        rng: ChaCha8Rng::seed_from_u64(seed),
+        next: 0,
+    };
+    for &(position, radius) in rocks {
+        let angular = random_unit(&mut field.rng) * field.rng.random_range(0.0..0.08);
+        spawn_rock(commands, &mut field, radius, position, Vec3::ZERO, angular);
+    }
+}
+
 fn spawn_rock(
     commands: &mut Commands,
     field: &mut FieldRng,

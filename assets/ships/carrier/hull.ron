@@ -103,5 +103,12 @@ Module(
         "objective": (0.0, 3.8, -27.0),
         // A point on the upper deck's floor.
         "upper_deck": (0.0, 3.3, 0.0),
+        // Loot crates, on the floor (see `pickups::stock_ship`): the deeper
+        // in, the better what's in them.
+        "loot_hangar": (4.8, 0.0, 21.8),
+        "loot_lower": (4.5, 0.0, 3.0),
+        "loot_forward": (3.5, 0.0, -27.5),
+        "loot_upper": (4.5, 3.3, -16.0),
+        "loot_bridge": (4.5, 3.3, -28.5),
     },
 )

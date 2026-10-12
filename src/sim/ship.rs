@@ -57,6 +57,9 @@ pub enum ControlAction {
     DisableShields,
     /// Take a full set of guns and ammo.
     Armory,
+    /// Work one of the ship's devices (an index into its design's; see
+    /// [`super::devices`]).
+    Device(u16),
 }
 
 impl ControlAction {
@@ -67,6 +70,7 @@ impl ControlAction {
             ControlAction::Lurch => "Lurch (DO NOT PRESS)",
             ControlAction::DisableShields => "Disable shields",
             ControlAction::Armory => "Weapons locker",
+            ControlAction::Device(_) => "Device",
         }
     }
 }
@@ -77,6 +81,8 @@ impl ControlAction {
 pub struct Control {
     pub action: ControlAction,
     pub half_size: Vec3,
+    /// What it says (a device's own name, for a device).
+    pub label: &'static str,
 }
 
 /// A laser turret fitted to a ship (see [`super::combat`]).
@@ -127,6 +133,26 @@ pub fn drifting_home_ship() -> impl Bundle {
     )
 }
 
+/// A ship or site set at rest in the world (a derelict, a course of
+/// gates): a static body that only scenarios move (by replacing it).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Site;
+
+/// A site built to design `id`, at rest at `position`, turned `rotation`.
+pub fn site(name: &str, id: &str, position: Vec3, rotation: Quat) -> impl Bundle {
+    (
+        Name::new(name.to_string()),
+        Site,
+        ShipHull::new(id),
+        RigidBody::Static,
+        PreviousVelocity::default(),
+        Position(position),
+        Rotation(rotation),
+        LinearVelocity::ZERO,
+        AngularVelocity::ZERO,
+    )
+}
+
 /// Gives a new [`ShipHull`] its collider and visual parts.
 ///
 /// The ship's collision is one compound collider on the body entity itself.
@@ -135,15 +161,17 @@ pub fn drifting_home_ship() -> impl Bundle {
 /// player controller, which runs after the step.
 pub fn build_hull(add: On<Add, ShipHull>, hulls: Query<&ShipHull>, mut commands: Commands) {
     let ship = hulls.get(add.entity).expect("just added").design();
-    let collider = Collider::compound(
-        ship.boxes
-            .iter()
-            .map(|b| (b.center, b.rotation, Collider::cuboid(b.size.x, b.size.y, b.size.z)))
-            .collect(),
-    );
+    // Doors start shut, until the ship's device state says otherwise (see
+    // `devices::fit_doors`).
+    let closed = super::devices::closed_doors(ship, None);
+    let collider = ship_collider(ship, &closed);
     commands
         .entity(add.entity)
         .insert((BodyInertia::immovable(&collider), collider, Visibility::default()))
+        .insert(super::devices::DoorsBuilt(closed))
+        // The authority's device state, as the design starts it (a client's
+        // is replaced by the authority's as it arrives).
+        .insert_if_new(super::devices::Devices::new(ship))
         // A replicated hull may not have its pose yet.
         .insert_if_new(Transform::default())
         .with_children(|parent| {
@@ -156,9 +184,17 @@ pub fn build_hull(add: On<Add, ShipHull>, hulls: Query<&ShipHull>, mut commands:
                 ));
             }
             for &(action, center, half_size) in &ship.controls {
+                let label = match action {
+                    ControlAction::Device(i) => ship.devices[i as usize].label.as_str(),
+                    _ => action.label(),
+                };
                 parent.spawn((
-                    Name::new(action.label()),
-                    Control { action, half_size },
+                    Name::new(label),
+                    Control {
+                        action,
+                        half_size,
+                        label,
+                    },
                     Transform::from_translation(center),
                 ));
             }
@@ -170,6 +206,22 @@ pub fn build_hull(add: On<Add, ShipHull>, hulls: Query<&ShipHull>, mut commands:
                 ));
             }
         });
+}
+
+/// A ship's collider: its boxes, and the doors marked `closed` (by device
+/// index).
+pub fn ship_collider(ship: &ShipDesign, closed: &[bool]) -> Collider {
+    let doors = ship.devices.iter().zip(closed).filter(|(_, c)| **c).filter_map(|(d, _)| match d.kind {
+        super::devices::DeviceKind::Door { size, .. } => Some((d.at, Quat::IDENTITY, Collider::cuboid(size.x, size.y, size.z))),
+        _ => None,
+    });
+    Collider::compound(
+        ship.boxes
+            .iter()
+            .map(|b| (b.center, b.rotation, Collider::cuboid(b.size.x, b.size.y, b.size.z)))
+            .chain(doors)
+            .collect(),
+    )
 }
 
 /// Drives drifting ships: a slow roll, a gentle yaw wobble, and an

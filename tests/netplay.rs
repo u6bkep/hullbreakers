@@ -320,7 +320,7 @@ fn shooting_is_predicted() {
     // own simulation, which on a client is its prediction; so both copies.)
     for world in [s.server.world_mut(), s.client.world_mut()] {
         for mut p in world.query::<&mut Player>().iter_mut(world) {
-            p.loadout.arm_fully();
+            p.loadout.restock();
         }
     }
     s.step(60);
@@ -371,4 +371,98 @@ fn robots_reach_clients() {
     assert!(server > 0, "no robots on the server");
     assert_eq!(client, server, "client sees {client} of {server} robots");
     assert!(rate <= 0.5, "robots upset prediction: {rate:.1}/s");
+}
+
+/// A site's devices reach clients: the derelict, where the server has it,
+/// its device state as the server has it, and its doors open in the
+/// client's collider once the server opens them; the mission's objective
+/// follows.
+#[test]
+fn devices_reach_clients() {
+    use hullbreakers::sim::devices::{Devices, DoorsBuilt};
+    use hullbreakers::sim::mission::{Director, Mission, ScenarioKind};
+    use hullbreakers::sim::ship::ShipHull;
+    let (_guard, mut s) = session(100);
+    s.server
+        .world_mut()
+        .resource_mut::<Director>()
+        .start(ScenarioKind::DeadShip);
+    s.step(180);
+    let derelict = |app: &mut App| {
+        let world = app.world_mut();
+        world
+            .query::<(&ShipHull, &Position, &Devices, &DoorsBuilt)>()
+            .iter(world)
+            .find(|(h, ..)| h.0 == "derelict")
+            .map(|(_, p, d, b)| (p.0, d.clone(), b.clone()))
+    };
+    let (server_at, _, _) = derelict(&mut s.server).expect("no derelict on the server");
+    let (client_at, _, doors) = derelict(&mut s.client).expect("no derelict on the client");
+    assert!(server_at.distance(client_at) < 0.01, "server {server_at}, client {client_at}");
+    assert!(doors.0.iter().filter(|&&shut| shut).count() == 3, "{doors:?}");
+    // The server's crew pulls the reactor and turns junction A to the
+    // port door.
+    {
+        let world = s.server.world_mut();
+        let (hull, mut devices) = world.query::<(&ShipHull, &mut Devices)>().iter_mut(world).find(|(h, _)| h.0 == "derelict").unwrap();
+        let design = hull.design();
+        devices.0[design.device("reactor")].set = 1;
+        devices.0[design.device("j1")].set = 1;
+    }
+    s.step(60);
+    let (_, server_devices, _) = derelict(&mut s.server).unwrap();
+    let (_, client_devices, doors) = derelict(&mut s.client).unwrap();
+    assert_eq!(client_devices, server_devices);
+    let design = hullbreakers::sim::design::design("derelict");
+    assert!(!doors.0[design.device("port_door")], "the port door is still shut on the client");
+    assert!(doors.0[design.device("bulkhead")]);
+    let world = s.client.world_mut();
+    let objective = world.query::<&Mission>().single(world).unwrap().objective.clone();
+    assert!(objective.starts_with("Route power"), "{objective}");
+}
+
+/// Putting a gun down and taking it back, on a client: the inventory is
+/// predicted, the pickup is the authority's, and the two agree.
+#[test]
+fn dropping_and_taking_back_is_predicted() {
+    use hullbreakers::sim::pickups::Pickup;
+    use hullbreakers::sim::tuning::Tuning;
+    let (_guard, mut s) = session(100);
+    s.step(60);
+    for world in [s.server.world_mut(), s.client.world_mut()] {
+        for mut p in world.query::<&mut Player>().iter_mut(world) {
+            p.loadout.restock();
+        }
+    }
+    s.input().0.stance = 0;
+    s.input().0.presses.stance.press();
+    s.step(60);
+    let gun = s.local_player().unwrap().loadout.inventory.weapons[0].expect("armed");
+    s.input().0.presses.drop.press();
+    let dropping = s.rollback_rate(120);
+    let pickups = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<&Pickup>().iter(world).cloned().collect::<Vec<_>>()
+    };
+    let (on_server, on_client) = (pickups(&mut s.server), pickups(&mut s.client));
+    assert_eq!(s.local_player().unwrap().loadout.inventory.weapons[0], None, "still holding it");
+    assert_eq!(s.server_player().loadout.inventory.weapons[0], None, "the server says still holding it");
+    assert_eq!(on_server.len(), 1, "nothing left on the server");
+    assert_eq!(on_client.len(), 1, "the client never saw it put down");
+    // Look down at it and take it.
+    let tuning = s.client.world().resource::<Tuning>().clone();
+    let Mode::Booted { feet, up, pitch, .. } = s.local_player().unwrap().mode else {
+        panic!("not on the deck");
+    };
+    let look = on_client[0].at - (feet + up * tuning.eye_height);
+    let wanted = look.y.atan2(Vec2::new(look.x, look.z).length());
+    s.input().0.add_look(Vec2::new(0.0, pitch - wanted));
+    s.step(10);
+    s.input().0.presses.interact.press();
+    let taking = s.rollback_rate(120);
+    eprintln!("dropping {dropping:.2}, taking {taking:.2} rollbacks/s");
+    assert_eq!(s.local_player().unwrap().loadout.inventory.weapons[0], Some(gun), "didn't take it back");
+    assert_eq!(s.server_player().loadout.inventory.weapons[0], Some(gun));
+    assert!(pickups(&mut s.server).is_empty() && pickups(&mut s.client).is_empty(), "it's still lying there");
+    assert!(dropping.max(taking) <= 0.5, "items mispredicted");
 }

@@ -67,7 +67,7 @@ fn float_shooter(app: &mut App) -> Entity {
     let mut player = app.world_mut().get_mut::<Player>(me).unwrap();
     player.flight_assist = false;
     // Armed, SMG in hand, as from the weapons locker.
-    player.loadout.arm_fully();
+    player.loadout.restock();
     player.loadout.current = 0;
     me
 }

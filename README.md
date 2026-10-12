@@ -16,7 +16,11 @@ HULLBREAKERS_SCENARIO=boarding cargo run   # host straight into a scenario
 The crew's ship has a **mission wall** on the port side of the bridge: click
 a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
-**asteroid field**, and its button takes you back there. `HULLBREAKERS_SCENARIO=boarding` (or `gallery`) starts in another.
+**asteroid field**, and its button takes you back there.
+`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `gallery`) starts in
+another. When a mission is decided a banner says how; back in the field, the
+**debrief** gives its report, every crew member's score card (time in vacuum,
+longest swing on one rope, presses, deaths, and what they did) and awards.
 
 - **Boarding action**: our ship and an enemy **carrier** duel among rocks,
   the carrier weaving in to about 100 m and back out to 400 m every 60 s.
@@ -29,6 +33,26 @@ world and puts everyone back on the deck. The game starts in the
   burn anyone in EVA who crosses them: three hits kill. Lose our ship and
   the crew drifts a while, then returns to the field.
 
+- **Grapple run**: ten gates strung through a cluster of rocks, from just
+  off our stern, out and back past our bow (about 430 m gate to gate). Fly
+  them in order before the clock (4 minutes) runs out; your next gate glows
+  cyan. No enemies: it's the grapple's show (the reel is far faster than the
+  jetpack). The board at the top keeps everyone's progress and times, and
+  the host remembers best times, the crew's and each runner's.
+
+- **Dead ship**: a dark derelict lies 22 m off our stern, its airlock facing
+  our cargo door. Cross over (the suit lamp is your light), pull the
+  reactor's restart in engineering, then route the power to the vault at the
+  bow through three junctions spread across the ship (F turns one to its
+  next way). The **power board** in engineering shows which circuits are
+  live, so one player can read it and call while others turn junctions; lit
+  conduits on the floors and ceilings show where the power runs; doors
+  latch open as power reaches them. The vault opens only when its two keys,
+  on the bridge and in the port room, are turned within 1.5 s of each other
+  (alone, key B holds 5 s: race to key A). Release the data core's clamp,
+  take the core off its cradle (it goes in your pack), and get it and
+  everyone back aboard in the 75 s before the tripped reactor goes.
+
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn
   as small axes (red +X, green +Y, blue forward), with every robot model's
@@ -38,13 +62,45 @@ world and puts everyone back on the deck. The game starts in the
 
 You start (and respawn) with the base kit: your suit and its grapple. Guns
 are in the **weapons locker** on the starboard wall of our ship's aft hold
-(press it with F for an SMG and a rifle, full; again to top up). Die, and
-what you carried stays where you fell, in a glowing case on the deck (or
-drifting on, if you were in EVA): look at it and press F to take it back.
+(press it with F): it issues a standard SMG and rifle if you have none of
+that kind, and fills your ammo and mags. Die, and everything you carried
+stays where you fell, in one glowing case on the deck (or drifting on, if
+you were in EVA): look at it and press F to take it back.
 
-Armed, players carry an SMG and a rifle. Each hand holds one item and a stance
-(1-4) sets what's in each; a one-handed gun with the other hand empty is
-braced and shoots tighter. Bullets fly at realistic speeds and keep the
+### Weapons, loot and the inventory
+
+Guns are items, Borderlands-style: each is a **frame** (SMG or rifle), a
+**maker**, five **parts** and a **rarity**, all rolled from a seed, so two
+guns of a kind play differently. Every part trades one thing for another
+(a long barrel: faster, tighter shots but a slower rate; a drum: twice the
+mag, a much slower reload; a light stock: quick to switch to, wild
+unbraced). Makers lean their guns their own way: Kessler (precise, slower),
+Brakk (heavy, crude), Hoshi (fast and light), Corvid (deep mags, loose).
+Rarity runs Standard issue (grey), Common (white), Uncommon (green), Rare
+(blue, one perk) and Exotic (orange, two perks); perks are things like
+Recycler (every fourth shot is free) and Last word (the last round in the
+mag hits three times as hard). A gun's name is its maker, the maker's model
+(rarer guns have higher marks) and a word for one of its parts or perks:
+"Kessler KG-3 Longshot", "Hoshi Type II Hornet", "Corvid Scrap #4 Miser".
+
+Robots drop things when destroyed (mostly ammo, sometimes a gun, better from
+tougher robots), and the enemy carrier has **loot crates** aboard, better
+the deeper in they are (the best on the bridge). A pickup glows in the
+colour of the best thing in it, with its best gun turning on the lid; look
+at it for what's inside and how it compares with your guns, and press F to
+take everything that fits.
+
+You carry three **weapon slots** (the stances use these, by number), a
+**pack** of six for spares and small cargo, **ammo** by kind (light rounds
+for SMGs, heavy for rifles; a reload draws from it), and bulky **cargo**
+such as a power cell, which takes both hands: whoever carries it can't
+shoot or grapple, so the team escorts them. G puts down what's in hand
+(cargo first, else the main hand's gun). The **inventory** (I) shows it all:
+click an item, then a slot to move it there (or swap); right-click drops
+it; the panel beside compares the chosen gun with yours.
+
+Each hand holds one item and a stance (1-4) sets what's in each; a one-handed
+gun with the other hand empty is braced and shoots tighter. Bullets fly at realistic speeds and keep the
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's
 hand works its rope; stow it and the rope holds its length.
 
@@ -143,20 +199,23 @@ client's title is `Hullbreakers — HOST:PORT`.
 | V            | toggle flight assist (on by default) ||
 | T            | set reference body (what assist/brake match) to the one under the crosshair ||
 | X (hold)     | —                | brake relative to last body touched/grappled |
-| F            | press the button under the crosshair (within reach) ||
+| F            | press the button, or take what's in the pickup, under the crosshair (within reach) ||
+| G            | put down what's in hand (cargo, else the main hand's gun) ||
 | LMB / RMB    | use the main / off hand's item (gun: fire; grapple: fire or let go) ||
 | Ctrl+LMB / Ctrl+RMB (hold) | that hand's alternate: for the grapple, reel in ||
 | Alt+LMB / Alt+RMB (hold)   | that hand's second alternate: for the grapple, pay out ||
 | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple ||
-| R            | reload (main hand first; a dry gun reloads itself) ||
-| 1-4          | stance: by default SMG + grapple, rifle + grapple, rifle braced, grapple alone ||
-| I            | the menu, on your loadout           ||
+| R            | reload from your ammo (main hand first; a dry gun reloads itself) ||
+| 1-4          | stance: by default weapon slot 1 + grapple, slot 2 + grapple, slot 2 braced, grapple alone ||
+| I            | the menu, on your inventory         ||
 | Escape       | the menu (frees the mouse)          ||
 | F1           | tuning panel (frees the mouse)      ||
 | L            | debug: ship lurches forward         ||
+| K            | debug (host): a loot crate at your feet ||
 
-The menu (Escape) has two pages. **Loadout** shows what you carry and lets you
-choose what each stance puts in each hand; that's saved to `stances.ron`.
+The menu (Escape) has two pages. **Inventory** shows what you carry, lets you
+sort and drop it, and lets you choose which weapon slot (or the grapple) each
+stance puts in each hand; the stances are saved to `stances.ron`.
 **Controls** remaps every action: click a binding and press the key, button or
 chord you want. Right-click clears a binding. The game goes on while the menu
 is open.
@@ -192,11 +251,21 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   - Time-dependent behaviour (ship wobble, lurch, turret fire, scripted
     flight) derives from `SimTick`. Orders to a drifting ship arrive as
     `ShipCommand` messages.
-  - **Scenarios** (`sim/mission.rs`) are the authority's: button presses are
-    player events (`Pressed`) that the `Director` acts on after the players
-    move; a switch despawns the world, spawns the scenario's, and respawns
-    every player on deck (`Respawned`, a view relocation). `Mission` is
-    replicated for the HUD.
+  - **Scenarios** are the authority's, one module each under
+    `sim/scenarios/` with a common shape: build a world, judge it (systems
+    that run only while it's on), and say when to go back to the field.
+    `sim/mission.rs` is what they share: button presses are player events
+    (`Pressed`) that the `Director` acts on after the players move; a switch
+    despawns the world, spawns the scenario's, and respawns every player on
+    deck (`Respawned`, a view relocation). `Mission` is replicated for the
+    HUD: the objective, a status board, markers (label, place, kind, for an
+    objective-marker list), the banner, the report and the debrief.
+  - **Devices** (`sim/devices.rs`) are placed by designs as data (see
+    [docs/ships.md](docs/ships.md)) and wired by conditions over each other.
+    They're pressed through the same interact path as buttons; the
+    authority applies presses and settles every device once a tick, and the
+    state (`Devices`, on the ship) is replicated. Shut doors are part of
+    the ship's collider on every peer.
   - **Combat** (`sim/combat.rs`): which turrets fire is a function of the
     tick, and where a beam stops is a function of the ships' poses and the
     target's shield, so every peer traces the same `Beams` each tick and a

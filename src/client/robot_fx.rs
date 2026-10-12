@@ -967,7 +967,7 @@ fn animate_blasts(
 /// variations can be told apart.
 fn label_zoo(
     mut contexts: bevy_egui::EguiContexts,
-    gallery: Query<(), With<crate::sim::mission::GalleryAnchor>>,
+    gallery: Query<(), With<crate::sim::scenarios::gallery::GalleryAnchor>>,
     camera: Single<(&Camera, &GlobalTransform), With<PlayerCamera>>,
     looks: Query<(&RobotLook, &GlobalTransform)>,
     names: Query<&Name>,

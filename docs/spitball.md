@@ -37,12 +37,17 @@ These are the hooks to keep leaning on.
 - **Boarding action**: *taken; see the first scenario.*
 - **Asteroid ring race.** Grapple your way across an asteroid ring to the far
   side. Could be a race between players, against a timer, or against the
-  ring's own rotation.
+  ring's own rotation. *Partly taken: the grapple run (gates through a
+  cluster, against the clock, with a board). Still open: a ring that turns,
+  racing each other.*
 - **Wrangling.** Lasso ore-rich rocks and haul them into the ship's intake.
   Big rocks need several ropes. A side objective: bring one in with no
   impacts. *See the wrangling playtest notes below before building this.*
 - **Dead ship.** Stop a tumbling derelict's spin (rope it to a heavy rock, or
-  bolt on thrusters), then board it and pull its cores.
+  bolt on thrusters), then board it and pull its cores. *Taken, without the
+  spin: the dead ship scenario (a dark derelict, power routed through
+  junctions read off a board elsewhere, a two-key vault). Still open: the
+  tumble, and carrying the core home (wave 4).*
 - **Hot core.** Rope-escort an unstable reactor core home. It detonates above
   some impact speed.
 - **Ride the stream.** Surf the asteroid stream to reach something at its
@@ -88,9 +93,12 @@ live (decided 2026-10-10).
   get shuffled around to power ship components. The user thinks this idea can
   be pushed much further. Directions to explore:
   - Power routing that is physical: the pieces are real objects in the ship,
-    carried or roped around, rather than a 2D panel.
+    carried or roped around, rather than a 2D panel. *(Half taken: the
+    devices layer routes power through junctions in the ship, wired as data.
+    Carried pieces wait for cargo.)*
   - Panels spread across the ship, so one player reads the state while
-    another acts, talking through the hull.
+    another acts, talking through the hull. *(Taken: the dead ship's power
+    board.)*
   - On a boarding action, the enemy's panel is the lock: re-route their power
     to drop the shield rather than pressing one button.
   - On our own ship, a hit knocks pieces loose and someone has to fix it mid
@@ -137,7 +145,7 @@ live (decided 2026-10-10).
 - A sticky-note "DO NOT PRESS" on a button that does something harmless.
 - A hull counter: "days since last decompression: 0".
 - A crew score card at the end of a mission: who pressed the button, longest
-  swing, time in vacuum.
+  swing, time in vacuum. *Taken: the debrief's crew cards and awards.*
 
 ## Playtest notes
 

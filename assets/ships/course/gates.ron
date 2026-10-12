@@ -1,0 +1,18 @@
+// The course's gates, in the order they're flown: each a 7 m square
+// opening in a frame (structure, so it can be grappled), facing the way
+// through it, from the gate before to the gate after. About 430 m, gate to
+// gate. The course's origin is the first gate.
+Module(
+    devices: [
+        (id: "g1", label: "Gate 1", kind: Gate(size: (7.0, 7.0)), at: (0.0, 0.0, 0.0), face: (0.286, 0.103, 0.953)),
+        (id: "g2", label: "Gate 2", kind: Gate(size: (7.0, 7.0)), at: (18.0, 6.5, 43.0), face: (0.054, 0.288, 0.956)),
+        (id: "g3", label: "Gate 3", kind: Gate(size: (7.0, 7.0)), at: (5.0, 26.5, 88.0), face: (-0.533, 0.155, 0.832)),
+        (id: "g4", label: "Gate 4", kind: Gate(size: (7.0, 7.0)), at: (-30.0, 20.5, 118.0), face: (-0.920, -0.385, 0.069)),
+        (id: "g5", label: "Gate 5", kind: Gate(size: (7.0, 7.0)), at: (-62.0, -1.5, 93.0), face: (-0.315, -0.529, -0.788)),
+        (id: "g6", label: "Gate 6", kind: Gate(size: (7.0, 7.0)), at: (-58.0, -26.5, 48.0), face: (0.403, -0.414, -0.816)),
+        (id: "g7", label: "Gate 7", kind: Gate(size: (7.0, 7.0)), at: (-25.0, -39.5, 18.0), face: (0.771, -0.053, -0.634)),
+        (id: "g8", label: "Gate 8", kind: Gate(size: (7.0, 7.0)), at: (15.0, -31.5, -12.0), face: (0.642, 0.321, -0.696)),
+        (id: "g9", label: "Gate 9", kind: Gate(size: (7.0, 7.0)), at: (35.0, -9.5, -47.0), face: (-0.064, 0.542, -0.838)),
+        (id: "g10", label: "Finish", kind: Gate(size: (7.0, 7.0)), at: (10.0, 10.5, -77.0), face: (-0.570, 0.456, -0.684)),
+    ],
+)

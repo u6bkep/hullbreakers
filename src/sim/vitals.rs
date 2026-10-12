@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::SimTick;
 use super::events::PlayerEvent;
 use super::bots::{self, Affixes, Brain, Condition, Robot};
-use super::pickups::{PICKUP_HALF, Pickup};
-use super::player::{DeckSlot, Mode, Player};
+use super::pickups::{Pickup, left_where};
+use super::player::{DeckSlot, Player};
 use super::ship::HomeShip;
 use super::tuning::Tuning;
 
@@ -163,22 +163,9 @@ pub fn settle_deaths(
         }
         // What they carried stays where they fell: on the deck under them,
         // or adrift on their last velocity.
-        let guns = player.loadout.carried();
-        if !guns.is_empty() {
-            let (body, at, velocity) = match player.mode {
-                Mode::Booted { body, feet, up, .. } => (Some(body), feet + up * PICKUP_HALF.y, Vec3::ZERO),
-                Mode::Eva { position, velocity, .. } => (None, position, velocity),
-            };
-            commands.spawn((
-                Name::new("Dropped kit"),
-                Pickup {
-                    body,
-                    at,
-                    velocity,
-                    since: tick.0,
-                    guns,
-                },
-            ));
+        let items = player.loadout.inventory.empty_out();
+        if !items.is_empty() {
+            commands.spawn((Name::new("Dropped kit"), Pickup::dropped(left_where(&player.mode), tick.0, items)));
         }
         player.events.push(PlayerEvent::Died);
         player.respawn(*home, slot.0);

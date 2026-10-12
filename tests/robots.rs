@@ -693,3 +693,32 @@ fn a_hull_turret_stays_bolted_down_and_hits_crew_crossing_open_space() {
     assert!(hurt, "never hit them");
     assert!(feet_of(&app, turret).distance(feet) < 0.02, "turret moved to {}", feet_of(&app, turret));
 }
+
+#[test]
+fn a_destroyed_robot_drops_loot_once_and_a_turret_none() {
+    use hullbreakers::sim::pickups::Pickup;
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    let tuning = Tuning::default();
+    let feet = Vec3::new(0.0, 0.01, -12.0);
+    let gunner = app
+        .world_mut()
+        .spawn(new_robot(Robot::Gunner, Affixes::NONE, booted(carrier, feet, 0.0), carrier, feet, &tuning, 0))
+        .id();
+    let roof = Vec3::new(3.0, 6.61, 26.0);
+    let turret = app
+        .world_mut()
+        .spawn(new_robot(Robot::Turret, Affixes::NONE, booted(carrier, roof, 0.0), carrier, roof, &tuning, 1))
+        .id();
+    ticks(&mut app, 2);
+    let pickups = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<&Pickup>().iter(world).count()
+    };
+    let before = pickups(&mut app);
+    kill(&mut app, gunner);
+    kill(&mut app, turret);
+    ticks(&mut app, 4);
+    assert!(app.world().get_entity(gunner).is_err() && app.world().get_entity(turret).is_err());
+    assert_eq!(pickups(&mut app), before + 1, "one drop, the gunner's");
+}
