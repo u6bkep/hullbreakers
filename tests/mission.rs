@@ -1510,6 +1510,7 @@ fn a_scenario_switch_drops_pending_damage() {
         source: None,
         weak: false,
         from: None,
+        steady: false,
     });
     app.world_mut().resource_mut::<Director>().start(ScenarioKind::Field);
     ticks(&mut app, 1);
