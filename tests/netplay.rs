@@ -755,27 +755,101 @@ fn a_mispredicted_press_goes_back() {
     assert_eq!(late, (0, Some(0)), "the shown state didn't go back to the authority's");
 }
 
-/// A death is the authority's alone. One where the respawn puts you back
-/// where you stood, with nothing on you, changes nothing else a client
-/// predicts; it must still reach the client's log (its HUD and camera show
-/// it from there).
-#[test]
-fn a_death_where_you_stand_reaches_the_client() {
-    use hullbreakers::sim::events::PlayerEvent;
+/// What the client's presentation was handed (see
+/// [`hullbreakers::client::events`]), in order.
+#[derive(Resource, Default)]
+struct Shown(Vec<hullbreakers::sim::events::PlayerEvent>);
+
+impl Session {
+    /// Runs the client's event presentation, collecting what it presents
+    /// into [`Shown`].
+    fn present(&mut self) {
+        use hullbreakers::client::events::{EventCursor, Presented, present_events};
+        let collect = |mut presented: MessageReader<Presented>, mut shown: ResMut<Shown>| shown.0.extend(presented.read().map(|p| p.0));
+        self.client
+            .init_resource::<EventCursor>()
+            .init_resource::<Shown>()
+            .add_message::<Presented>()
+            .add_systems(Update, (present_events, collect).chain());
+    }
+
+    fn shown(&self, event: hullbreakers::sim::events::PlayerEvent) -> usize {
+        self.client.world().resource::<Shown>().0.iter().filter(|&&e| e == event).count()
+    }
+
+    fn server_crew(&mut self) -> Entity {
+        let world = self.server.world_mut();
+        world
+            .query_filtered::<Entity, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>()
+            .single(world)
+            .unwrap()
+    }
+}
+
+/// A death, and the respawn after it, are the authority's alone. Where the
+/// respawn puts you back where you stood, with nothing on you, nothing a
+/// client predicts differs, so no correction carries them: they reach the
+/// client in its player's authority log, and are presented once each
+/// (however long the round trip: at 250 ms they arrive further back than a
+/// corrected event would be shown).
+fn a_death_where_you_stand_is_presented(lag_ms: u64) {
+    use hullbreakers::sim::events::{AuthorityLog, PlayerEvent};
     use hullbreakers::sim::vitals::Vitals;
-    let (_guard, mut s) = session(100);
+    let (_guard, mut s) = session(lag_ms);
+    s.present();
     s.step(60);
-    let world = s.server.world_mut();
-    let mut vitals = world.query_filtered::<&mut Vitals, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>().single_mut(world).unwrap();
+    let crew = s.server_crew();
+    let before = s.server_player().mode;
+    let mut vitals = s.server.world_mut().get_mut::<Vitals>(crew).unwrap();
     vitals.health = 0.0;
     vitals.since_hurt = 0.0;
-    let mut seen = false;
-    for _ in 0..60 {
-        s.step(1);
-        seen |= s.local_player().unwrap().events.iter().any(|(_, e)| e == PlayerEvent::Died);
-    }
-    assert!(s.server_player().events.iter().any(|(_, e)| e == PlayerEvent::Died), "the server never killed them");
-    assert!(seen, "the client never heard it died");
+    s.step(120);
+    let told = s.server.world().get::<AuthorityLog>(crew).unwrap();
+    let said: Vec<_> = told.iter().map(|(_, e)| e).collect();
+    assert_eq!(said, vec![PlayerEvent::Died, PlayerEvent::Respawned], "the server's log");
+    // Nothing a rollback would notice (it stood on its spawn).
+    let after = s.server_player().mode;
+    assert!(after.body() == before.body() && after.world_kinematics(&Default::default(), None).0.distance(before.world_kinematics(&Default::default(), None).0) < 0.01, "the respawn moved it: {before:?} to {after:?}");
+    assert_eq!(s.shown(PlayerEvent::Died), 1, "the client was told of its death {} times", s.shown(PlayerEvent::Died));
+    assert_eq!(s.shown(PlayerEvent::Respawned), 1, "the client was told of its respawn {} times", s.shown(PlayerEvent::Respawned));
+}
+
+#[test]
+fn a_death_where_you_stand_is_presented_at_100_ms() {
+    a_death_where_you_stand_is_presented(100);
+}
+
+#[test]
+fn a_death_where_you_stand_is_presented_at_250_ms() {
+    a_death_where_you_stand_is_presented(250);
+}
+
+/// A blast that knocks you off the deck is the authority's to decide: at
+/// 250 ms the client learns of it a quarter second after the tick it
+/// happened on, past what presentation shows of a corrected event, and must
+/// still present it, once. And it must still correct the client's
+/// prediction (which had it standing): the correction is older than
+/// lightyear's default rollback limit at that lag (see
+/// `MAX_ROLLBACK_TICKS`).
+#[test]
+fn a_blast_at_250_ms_is_presented() {
+    use hullbreakers::sim::events::{Detach, PlayerEvent};
+    let (_guard, mut s) = session(250);
+    s.present();
+    s.step(60);
+    assert!(matches!(s.server_player().mode, Mode::Booted { .. }));
+    let (_, _, rotation) = s.server_ship();
+    let crew = s.server_crew();
+    let mass = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().player_mass;
+    // Straight up off the deck at 12 m/s: past any boots' grip.
+    s.server.world_mut().resource_mut::<hullbreakers::sim::shots::Shoves>().0.push((crew, rotation * Vec3::Y * 12.0 * mass));
+    s.step(40);
+    assert!(matches!(s.server_player().mode, Mode::Eva { .. }), "the boots held");
+    let mine = s.local_player().unwrap().mode;
+    assert!(matches!(mine, Mode::Eva { .. }), "the client still stands: {mine:?} (server: {:?})", s.server_player().mode);
+    s.step(80);
+    let blasted = PlayerEvent::Detached(Detach::Blasted);
+    assert_eq!(s.shown(blasted), 1, "the client was told of the blast {} times", s.shown(blasted));
 }
 
 // ---------------------------------------------------------------------------
@@ -890,8 +964,8 @@ fn measure_kick(impulse: f32, what: &str) {
     float_clear(&mut s);
     let quiet = watch_corrections(&mut s, 60);
     let mass = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().player_mass;
-    let tuning = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().clone();
-    s.server_player().shove(Vec3::X * impulse / mass, None, &tuning);
+    let crew = s.server_crew();
+    s.server.world_mut().resource_mut::<hullbreakers::sim::shots::Shoves>().0.push((crew, Vec3::X * impulse));
     let mut views = Views::default();
     let (rollbacks, worst, total) = watch_corrections_drawn(&mut s, 120, &mut views);
     eprintln!(

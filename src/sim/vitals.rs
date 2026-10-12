@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::SimTick;
-use super::events::PlayerEvent;
+use super::events::{AuthorityLog, PlayerEvent};
 use super::bots::{self, Affixes, BodyTuning, Brain, Condition, Robot, tuning_of};
 use super::pickups::{Pickup, left_where};
 use super::combat::Beams;
@@ -218,13 +218,13 @@ pub fn settle_deaths(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
     home: Option<Single<Entity, With<HomeShip>>>,
-    mut players: Query<(Entity, &mut Player, &mut Vitals, &DeckSlot, Option<&BodyTuning>)>,
+    mut players: Query<(Entity, &mut Player, &mut AuthorityLog, &mut Vitals, &DeckSlot, Option<&BodyTuning>)>,
     mut commands: Commands,
 ) {
     let Some(home) = home else {
         return;
     };
-    for (entity, mut player, mut vitals, slot, own) in &mut players {
+    for (entity, mut player, mut told, mut vitals, slot, own) in &mut players {
         if vitals.health > 0.0 {
             continue;
         }
@@ -234,8 +234,8 @@ pub fn settle_deaths(
         if !items.is_empty() {
             commands.spawn((Name::new("Dropped kit"), Pickup::left_by(entity, left_where(&player.mode), tick.0, items)));
         }
-        player.events.push(PlayerEvent::Died);
-        player.respawn(*home, slot.0);
+        told.push(tick.0, PlayerEvent::Died);
+        player.respawn(*home, slot.0, &mut told, tick.0);
         *vitals = Vitals::full(tuning_of(&tuning, own));
     }
 }

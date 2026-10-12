@@ -21,6 +21,7 @@ use crate::sim::mission::{Director, Mission, ScenarioKind};
 use crate::sim::pickups::{Pickup, PickupKind};
 use crate::sim::player::{Grapple, Mode, Player};
 use crate::sim::progression::Profile;
+use crate::sim::shots::Shoves;
 use crate::sim::scenarios::boarding::CARRIER;
 use crate::sim::scenarios::dead_ship::DERELICT;
 use crate::sim::scenarios::escort::FREIGHTER;
@@ -80,6 +81,11 @@ enum Do {
     Nothing,
     Arm,
     Kill,
+    /// Kills the client and the host where they stand.
+    KillBoth,
+    /// Blows the client and the host off the deck (an authority's shove,
+    /// straight up).
+    Blast,
     /// Logs the client's profile as the host holds it.
     LogProfile,
     /// Sets the chance a carrier hit knocks out our damage-control devices.
@@ -164,6 +170,11 @@ fn steps() -> Vec<Step> {
         step("gallery_shielded", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Shielded }, Do::Arm, 6.0),
         step("gallery_armoured", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Armoured }, Do::Arm, 6.0),
         step("gallery_volatile", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Volatile }, Do::Arm, 6.0),
+        // What only the authority decides, on both: a death where they
+        // stand (the field's start put them on their deck spots), then a
+        // blast off the deck.
+        step("field_die", Field, Place::Stay, Do::KillBoth, 6.0),
+        step("field_blast", Field, Place::Stay, Do::Blast, 6.0),
     ];
     if let Ok(only) = std::env::var("HULLBREAKERS_COOP_ONLY")
         && !only.is_empty()
@@ -185,9 +196,10 @@ pub fn run_coop_tour(
     mut director: ResMut<Director>,
     mut tuning: ResMut<Tuning>,
     missions: Query<&Mission>,
-    mut crew: Query<(&mut Player, &mut Vitals, Option<&Profile>), (Without<LocalPlayer>, Without<Robot>)>,
+    mut crew: Query<(Entity, &mut Player, &mut Vitals, Option<&Profile>), (Without<LocalPlayer>, Without<Robot>)>,
     places: Places,
-    mut host: Option<Single<&mut Player, With<LocalPlayer>>>,
+    mut host: Option<Single<(Entity, &mut Player, &mut Vitals), With<LocalPlayer>>>,
+    mut shoves: ResMut<Shoves>,
     mut died_at: Local<Option<Vec3>>,
 ) {
     let steps = steps();
@@ -196,7 +208,7 @@ pub fn run_coop_tour(
     };
     let Ok(mission) = missions.single() else { return };
     // Wait for the client.
-    let Some((mut player, mut vitals, profile)) = crew.iter_mut().next() else {
+    let Some((client, mut player, mut vitals, profile)) = crew.iter_mut().next() else {
         return;
     };
     // Switch scenario, unless the step is the one that leaves it (the
@@ -214,7 +226,7 @@ pub fn run_coop_tour(
         tour.placed = true;
         put(step.place, &mut player, &places, *died_at);
         if let Some(host) = host.as_mut() {
-            put(step.host, host, &places, *died_at);
+            put(step.host, &mut host.1, &places, *died_at);
         }
         match step.action {
             Do::Nothing => {}
@@ -232,6 +244,20 @@ pub fn run_coop_tour(
                 });
                 vitals.health = 0.0;
                 vitals.since_hurt = 0.0;
+            }
+            Do::KillBoth => {
+                // Hurt just now, or the suit heals them first.
+                for v in [Some(&mut *vitals), host.as_mut().map(|h| &mut *h.2)].into_iter().flatten() {
+                    v.health = 0.0;
+                    v.since_hurt = 0.0;
+                }
+            }
+            Do::Blast => {
+                let mass = tuning.player_mass;
+                for (who, mode) in [Some((client, player.mode)), host.as_ref().map(|h| (h.0, h.1.mode))].into_iter().flatten() {
+                    let up = mode.body().and_then(|b| places.ships.get(b).ok()).map_or(Vec3::Y, |(_, t, _)| t.rotation * Vec3::Y);
+                    shoves.0.push((who, up * 12.0 * mass));
+                }
             }
             // At the step's end (once the upload has had time to land).
             Do::LogProfile => {}

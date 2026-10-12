@@ -33,7 +33,7 @@ use crate::sim::input::PlayerInput;
 use crate::sim::devices::Devices;
 use crate::sim::mission::{Debris, Mission};
 use crate::sim::scenarios::gallery::GalleryAnchor;
-use crate::sim::events::PlayerEvent;
+use crate::sim::events::AuthorityLog;
 use crate::sim::player::{DeckSlot, Mode, Player, PlayerTelemetry, PreviousMode, new_player};
 use crate::sim::ship::{Drift, HomeShip, ShipHull, Site};
 use crate::sim::tuning::Tuning;
@@ -53,6 +53,13 @@ const PROTOCOL_ID: u64 = 0x5ace_9a3e;
 const PRIVATE_KEY: [u8; 32] = [0; 32];
 /// How often the server sends world state.
 const SEND_INTERVAL: Duration = Duration::from_millis(50);
+/// How far back (ticks) a client will re-simulate to take a correction. A
+/// confirmed state is the client's lead over the authority plus the trip
+/// back old when it arrives: about 22 ticks at 250 ms. lightyear's default
+/// (20) quietly refuses anything older, so past ~220 ms of round trip a
+/// client was never corrected at all (an authority's shove left it standing
+/// on the deck). A second covers a round trip of about 650 ms.
+const MAX_ROLLBACK_TICKS: u16 = 60;
 /// The in-process client of a listen-server host.
 const HOST_PEER: PeerId = PeerId::Local(0);
 
@@ -229,7 +236,11 @@ impl Plugin for NetPlugin {
                 .init_resource::<ProfileRequests>()
                 .add_systems(Update, profiles::send_profile(mode.is_authority()))
                 .add_systems(Last, profiles::save_profile)
-                .insert_resource(PredictionManager::default())
+                .insert_resource({
+                    let mut prediction = PredictionManager::default();
+                    prediction.rollback_policy.max_rollback_ticks = MAX_ROLLBACK_TICKS;
+                    prediction
+                })
                 // A client can't simulate its player before its clock (and
                 // so the bodies around it) is in step with the authority.
                 .add_systems(
@@ -298,6 +309,10 @@ impl Plugin for ProtocolPlugin {
         app.component::<Vitals>().replicate();
         app.component::<HitLog>().replicate();
         app.component::<HurtLog>().replicate();
+        // What only the authority decides happens to a player: never
+        // predicted, so never rolled back, and read by count (see
+        // `client::events`).
+        app.component::<AuthorityLog>().replicate();
         app.component::<Mission>().replicate();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();
@@ -319,13 +334,8 @@ impl Plugin for ProtocolPlugin {
 /// Whether a predicted player state has strayed from the authority's state
 /// for the same tick far enough to re-simulate. Tolerances sit above the
 /// noise of extrapolated body poses (1 cm) so agreement isn't re-simulated.
-/// Whether the authority's log has a death the prediction's doesn't.
-fn died_unpredicted(confirmed: &Player, predicted: &Player) -> bool {
-    let deaths = |p: &Player| p.events.iter().filter(|(_, e)| *e == PlayerEvent::Died).map(|(t, _)| t).collect::<Vec<u32>>();
-    let predicted = deaths(predicted);
-    deaths(confirmed).iter().any(|t| !predicted.contains(t))
-}
-
+/// Events don't count: what a client can't predict comes in the player's
+/// [`AuthorityLog`], not by a correction.
 fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
     // A body this client hasn't received yet: nothing to predict against,
     // so nothing a rollback could fix.
@@ -395,12 +405,7 @@ fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
         || confirmed.input != predicted.input
         // What's carried is discrete: a pickup the authority settled
         // otherwise (someone else got there first) must be corrected.
-        || confirmed.loadout.inventory != predicted.loadout.inventory
-        // A death only the authority decides. Respawned where they already
-        // stood, with nothing on them, nothing else differs, and without a
-        // rollback the death would never reach this client's log (no
-        // SUIT FAILURE, no fade).
-        || died_unpredicted(confirmed, predicted);
+        || confirmed.loadout.inventory != predicted.loadout.inventory;
     if diverged {
         debug!(
             "diverged: modes {modes} grapple {grapples} input {}\n  confirmed {:?}\n  predicted {:?}",

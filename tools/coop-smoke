@@ -8,7 +8,9 @@
 # client's view (and, where it matters, the host's: `host-*.png`). Then
 # check the logs it copies for errors, the client's "prediction: N
 # rollbacks/s" lines, and the host's "coop tour:" lines (the client's
-# profile as the host holds it, damage control's state).
+# profile as the host holds it, damage control's state). Both log each
+# event their presentation hands on ("presented Died", ...: sound, camera
+# and HUD act on these), unless $RUST_LOG says otherwise.
 #
 #   tools/coop-smoke <outdir> [lag ms (default 100)] [port (default 5986)]
 #
@@ -26,6 +28,7 @@ OUT="$1"
 LAG="${2:-100}"
 PORT="${3:-5986}"
 ONLY="${COOP_ONLY:-}"
+export RUST_LOG="${RUST_LOG:-info,hullbreakers::client::events=debug,wgpu=error,naga=warn}"
 mkdir -p "$OUT"
 rm -f "$OUT/step" "$OUT/ack"
 "$H" stop >/dev/null 2>&1
@@ -197,6 +200,13 @@ for what in shielded armoured volatile; do
         sleep 1.2; shot ${what}_1; "$H" press left
         for i in 2 3 4; do sleep 0.6; shot ${what}_$i; done
         "$H" release left; sleep 1; shot ${what}_5
+    fi
+done
+# Authority-only events on both: the death's banner and fade, then the
+# blast's caption (and, in the logs, what each one presented).
+for what in die blast; do
+    if wait_step field_$what; then
+        sleep 0.5; shot ${what}_1; hostshot ${what}_1; sleep 1.2; shot ${what}_2; hostshot ${what}_2
     fi
 done
 [[ -n "$LAST" ]] && echo "$LAST" > "$OUT/ack"

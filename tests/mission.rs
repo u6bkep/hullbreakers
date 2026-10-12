@@ -55,6 +55,12 @@ fn player(app: &mut App) -> Player {
     world.query_filtered::<&Player, Without<Robot>>().single(world).unwrap().clone()
 }
 
+/// What the authority alone said happened to the player.
+fn told(app: &mut App) -> hullbreakers::sim::events::AuthorityLog {
+    let world = app.world_mut();
+    world.query_filtered::<&hullbreakers::sim::events::AuthorityLog, (With<Player>, Without<Robot>)>().single(world).unwrap().clone()
+}
+
 fn set_player(app: &mut App, f: impl FnOnce(&mut Player)) {
     let world = app.world_mut();
     f(&mut world.query_filtered::<&mut Player, Without<Robot>>().single_mut(world).unwrap());
@@ -149,7 +155,7 @@ fn the_mission_wall_starts_a_boarding_action() {
     assert!(ship_of(&mut app, "carrier").is_some());
     let p = player(&mut app);
     assert_eq!(p.mode.body(), Some(new_home), "not put back aboard");
-    assert!(p.events.iter().any(|(_, e)| e == PlayerEvent::Respawned));
+    assert!(told(&mut app).iter().any(|(_, e)| e == PlayerEvent::Respawned));
     // Both ships fly their duel, among rocks.
     let world = app.world_mut();
     assert_eq!(world.query::<&Flight>().iter(world).count(), 2);
@@ -215,11 +221,7 @@ fn dropping_the_shield_wins_and_blows_the_crew_clear() {
     assert_eq!(mission(&mut app).phase, Phase::Won);
     let p = player(&mut app);
     assert!(matches!(p.mode, Mode::Eva { .. }));
-    assert!(
-        p.events
-            .iter()
-            .any(|(_, e)| e == PlayerEvent::Detached(Detach::Blasted))
-    );
+    assert!(told(&mut app).iter().any(|(_, e)| e == PlayerEvent::Detached(Detach::Blasted)));
     let world = app.world_mut();
     assert!(world.query::<&Debris>().iter(world).count() > 10);
 }
@@ -309,7 +311,7 @@ fn beams_kill_and_the_dead_come_back_aboard() {
             });
         }
         ticks(&mut app, 1);
-        if player(&mut app).events.iter().any(|(_, e)| e == PlayerEvent::Died) {
+        if told(&mut app).iter().any(|(_, e)| e == PlayerEvent::Died) {
             died = true;
             break;
         }
