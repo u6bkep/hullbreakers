@@ -331,6 +331,28 @@ impl Device {
     }
 }
 
+/// A cable run through `waypoints`: straight runs along the ship's axes
+/// only, as cable is laid along walls and ceilings. A leg between
+/// waypoints that differ in more than one axis turns its corners in x,
+/// then z, then y.
+pub fn cable_run(waypoints: &[Vec3]) -> Vec<Vec3> {
+    let mut path: Vec<Vec3> = Vec::new();
+    for &p in waypoints {
+        let Some(&last) = path.last() else {
+            path.push(p);
+            continue;
+        };
+        let mut at = last;
+        for axis in [0, 2, 1] {
+            if (p[axis] - at[axis]).abs() > 1e-4 {
+                at[axis] = p[axis];
+                path.push(at);
+            }
+        }
+    }
+    path
+}
+
 /// Right, up and out for a face looking along `n` (up is +Y, or −Z for a
 /// face looking up or down).
 pub fn face_basis(n: Vec3) -> (Vec3, Vec3, Vec3) {
@@ -379,7 +401,7 @@ pub fn place(
             flash: *flash,
         },
         KindFile::Conduit { path } => DeviceKind::Conduit {
-            path: path.iter().map(|&p| to_ship(p)).collect(),
+            path: cable_run(&path.iter().map(|&p| to_ship(p)).collect::<Vec<_>>()),
         },
         KindFile::Gate { size } => DeviceKind::Gate { size: *size },
     };
@@ -816,6 +838,19 @@ mod tests {
         assert!(err("(id: \"a\", kind: Lamp, power: Port(\"j\", 2)), (id: \"j\", kind: Junction(ways: 2))").contains("2 ways"));
         assert!(err("(id: \"a\", kind: Lamp), (id: \"a\", kind: Lamp)").contains("share an id"));
         assert!(err("(id: \"j\", kind: Junction(ways: 2), start: 2)").contains("can't start at 2"));
+    }
+
+    #[test]
+    fn cable_runs_turn_their_corners_along_the_axes() {
+        let run = cable_run(&[Vec3::ZERO, Vec3::new(2.0, 1.0, 3.0), Vec3::new(2.0, 1.0, 5.0)]);
+        assert_eq!(
+            run,
+            vec![Vec3::ZERO, Vec3::new(2.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 3.0), Vec3::new(2.0, 1.0, 3.0), Vec3::new(2.0, 1.0, 5.0)]
+        );
+        for leg in run.windows(2) {
+            let d = (leg[1] - leg[0]).abs();
+            assert_eq!([d.x, d.y, d.z].iter().filter(|&&c| c > 0.0).count(), 1, "a diagonal leg {leg:?}");
+        }
     }
 
     #[test]
