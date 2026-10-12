@@ -458,9 +458,10 @@ fn a_held_laser_is_cheap_on_the_wire() {
     let beam = s.received_rate(180);
     s.input().0.main.held = false;
     eprintln!("laser on the wire: standing {idle:.0} B/s, beam held {beam:.0} B/s");
-    // Measured 2026-10-12: 6.3 kB/s standing; 71.8 kB/s with a beam as a
-    // `Fired` entry a tick, 7.1 kB/s as held state.
-    assert!(beam < idle * 1.3, "a beam costs {beam:.0} B/s against {idle:.0} standing");
+    // Measured 2026-10-12 (before the fauna came): 6.3 kB/s standing; a beam
+    // as a `Fired` entry a tick added 65.5 kB/s, as held state 0.8. With the
+    // fauna in the world: 45.2 kB/s standing, the beam adding 5.4.
+    assert!(beam - idle < 10_000.0, "a beam costs {beam:.0} B/s against {idle:.0} standing");
 }
 
 /// The carrier's robots reach a client as interpolated players with their
