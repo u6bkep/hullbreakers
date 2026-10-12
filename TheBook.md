@@ -199,6 +199,13 @@ it.
   host's grapple. Fix: `swaymsg 'seat * cursor set X Y'` onto the client
   before clicking (`tools/coop-smoke`). Focus also wanders, so it's set
   again before each step. Cost: two smoke runs.
+- 2026-10-12. Clicking egui menus in the harness: `hl-input`'s pointer is
+  relative only, but `swaymsg 'seat * cursor set X Y'` places it
+  absolutely, which is enough to click buttons at positions read off a
+  screenshot (`tools/coop-smoke`, the armory and workbench). Scrolling
+  needed a `wheel` command in `hl-input` (`tools/hl wheel`). Cost: a few
+  calibration runs per menu; the positions break when the menus' layouts
+  change.
 
 ## Our ship designs (sim/design.rs, ship.rs)
 

@@ -737,7 +737,8 @@ fn robot_destroyed(
         for e in std::iter::once(part).chain(children.iter_descendants(part)) {
             let shaft = robot_fx.as_ref().is_some_and(|r| meshes.get(e).is_ok_and(|m| m.0 == r.beam_cone));
             if lights.contains(e) || shaft {
-                commands.entity(e).despawn();
+                // A lamp's own lamps (a searchlight's shaft) go with it.
+                commands.entity(e).try_despawn();
                 continue;
             }
             let Ok(material) = lit.get(e) else { continue };
@@ -926,8 +927,9 @@ fn animate_blasts(
         let t = blast.age / blast.seconds();
         if t >= 1.0 {
             commands.entity(entity).despawn();
+            // Some of these hang from the blast, and went with it.
             for e in [blast.flash, blast.ring].into_iter().flatten().chain(blast.puffs.iter().map(|p| p.0)) {
-                commands.entity(e).despawn();
+                commands.entity(e).try_despawn();
             }
             continue;
         }
