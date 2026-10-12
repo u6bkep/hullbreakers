@@ -124,6 +124,7 @@ fn the_killing_blow_is_recorded_and_outlives_the_respawn() {
         source: None,
         weak: false,
         from: Some(from),
+        steady: false,
     });
     ticks(&mut app, 2);
     let log = hurts(&app, me);

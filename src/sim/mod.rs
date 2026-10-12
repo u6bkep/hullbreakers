@@ -180,6 +180,7 @@ impl Plugin for SimPlugin {
             .add_message::<bots::Detonation>()
             .init_resource::<shots::Shots>()
             .init_resource::<shots::Shoves>()
+            .init_resource::<vitals::SteadyHits>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
             .add_observer(pickups::note_owned)
@@ -273,7 +274,7 @@ impl Plugin for SimPlugin {
                     )
                         .chain()
                         .in_set(mission::MissionSystems::Settle),
-                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders, progression::open_slots)
+                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders, progression::open_slots, progression::publish_rank)
                         .chain()
                         .in_set(mission::MissionSystems::React),
                     (

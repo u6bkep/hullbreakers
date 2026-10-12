@@ -337,6 +337,7 @@ fn hit(app: &mut App, target: Entity, amount: f32, weak: bool) {
         source: None,
         weak,
         from: None,
+        steady: false,
     });
     ticks(app, 1);
 }

@@ -272,6 +272,10 @@ impl Plugin for NetPlugin {
 struct ProtocolPlugin;
 
 impl Plugin for ProtocolPlugin {
+    fn finish(&self, app: &mut App) {
+        profiles::finish(app);
+    }
+
     fn build(&self, app: &mut App) {
         app.add_plugins(InputPlugin::<PlayerInput>::default());
         profiles::register(app);
@@ -610,7 +614,7 @@ fn spawn_players(
             },
         ));
         if owner != HOST_PEER {
-            player.insert(PredictionTarget::to_clients(NetworkTarget::Single(owner)));
+            player.insert((PredictionTarget::to_clients(NetworkTarget::Single(owner)), profiles::ProfileOwner(client)));
         }
     }
 }

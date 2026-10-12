@@ -461,6 +461,7 @@ pub fn trample(
                 source: Some(body),
                 weak: false,
                 from: Some(position.0),
+                steady: false,
             });
         }
     }

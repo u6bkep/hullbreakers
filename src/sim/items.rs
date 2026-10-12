@@ -1068,6 +1068,13 @@ impl Weapon {
         Rarity::ALL[(self.rarity as usize).saturating_sub(self.tune as usize).max(1).min(self.rarity as usize)]
     }
 
+    /// Whether two are the same gun as made: frame, seed and family, which
+    /// the workbench never changes (a tuned, refitted or repainted gun is
+    /// the same make). What an order names a carried gun by.
+    pub fn same_make(&self, other: &Weapon) -> bool {
+        (self.frame, self.seed, self.family) == (other.frame, other.seed, other.family)
+    }
+
     /// Whether two are the same gun (whatever is in their mags).
     pub fn same_gun(&self, other: &Weapon) -> bool {
         (self.frame, self.seed, self.rarity, self.tune, self.refit, self.family)

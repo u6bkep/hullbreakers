@@ -234,9 +234,9 @@ pub enum ProfileOp {
     Take(Weapon),
     /// The armory: a standard-issue gun of a frame, free.
     TakeIssue(GunKind),
-    /// The armory: the gun at this place in the inventory into the stash
-    /// (standard issue just goes back on the rack).
-    Store(Place),
+    /// The armory: a carried gun into the stash (standard issue just goes
+    /// back on the rack).
+    Store(Holding),
     /// The workbench: a gun up a tier of rarity (see [`tune_cost`]).
     Tune(Holding),
     /// The workbench: one part slot (in [`items::SLOTS`] order) fitted with
@@ -250,24 +250,43 @@ pub enum ProfileOp {
     Scrap(Holding),
 }
 
-/// A gun a player has: carried (where), or in their stash (which: by what
-/// it is, not where, so a click on a stash that has just changed can't act
-/// on the gun beside it).
+/// A gun a player has: carried (where, and which gun was there: an order
+/// travels apart from the inventory moves sent with input, so by the time
+/// the host applies it another gun may be in that place, and then it's
+/// refused), or in their stash (by what it is, not where, so a click on a
+/// stash that has just changed can't act on the gun beside it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Holding {
-    Carried(Place),
+    Carried(Place, Weapon),
     Stash(Weapon),
 }
 
 impl Holding {
-    /// The gun it is, if it's one.
+    /// The gun it is, as it is now, if it's still there.
     pub fn weapon(self, inventory: &Inventory, profile: &Profile) -> Option<Weapon> {
         match self {
-            Holding::Carried(place) => match inventory.get(place) {
-                Some(Item::Weapon(w)) => Some(w),
+            Holding::Carried(place, was) => match inventory.get(place) {
+                Some(Item::Weapon(w)) if w.same_make(&was) => Some(w),
                 _ => None,
             },
             Holding::Stash(w) => profile.stash.contains(&w).then_some(w),
+        }
+    }
+
+    /// The gun carried at `place`, if there's one.
+    pub fn carried(inventory: &Inventory, place: Place) -> Option<Holding> {
+        match inventory.get(place) {
+            Some(Item::Weapon(w)) => Some(Holding::Carried(place, w)),
+            _ => None,
+        }
+    }
+
+    /// Whether two pick out the same gun (a carried one by its place and
+    /// make: the workbench changing it doesn't make it another).
+    pub fn same(self, other: Holding) -> bool {
+        match (self, other) {
+            (Holding::Carried(p, a), Holding::Carried(q, b)) => p == q && a.same_make(&b),
+            (a, b) => a == b,
         }
     }
 }
@@ -430,9 +449,9 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
             _ => false,
         },
         ProfileOp::TakeIssue(frame) => frames(rank(profile.xp)).contains(&frame) && inv.take(Item::Weapon(Weapon::issue(frame))),
-        ProfileOp::Store(place) => match inv.get(place) {
-            Some(Item::Weapon(w)) if w.rarity == Rarity::Standard => inv.remove(place).is_some(),
-            Some(Item::Weapon(w)) if profile.stash.len() < STASH_CAP => {
+        ProfileOp::Store(h) => match (h, h.weapon(inv, profile)) {
+            (Holding::Carried(place, _), Some(w)) if w.rarity == Rarity::Standard => inv.remove(place).is_some(),
+            (Holding::Carried(place, _), Some(w)) if profile.stash.len() < STASH_CAP => {
                 inv.remove(place);
                 profile.stash.push(w);
                 true
@@ -483,7 +502,7 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
         ProfileOp::Scrap(h) => match h.weapon(inv, profile) {
             Some(w) => {
                 match h {
-                    Holding::Carried(place) => {
+                    Holding::Carried(place, _) => {
                         inv.remove(place);
                     }
                     Holding::Stash(w) => {
@@ -520,7 +539,7 @@ fn workbench(h: Holding, inv: &mut Inventory, profile: &mut Profile, change: imp
     }
     w.mag = w.mag.min(w.stats().mag);
     match h {
-        Holding::Carried(place) => {
+        Holding::Carried(place, _) => {
             inv.remove(place);
             if !inv.put_back(place, Item::Weapon(w)) {
                 profile.stash.push(w);
@@ -610,6 +629,22 @@ pub fn rank_tuning(base: &Tuning, rank: u8) -> Tuning {
     t
 }
 
+/// A player's rank, public: every peer tunes their body by it (see
+/// [`tune_to_rank`]). The rest of a profile goes only to its owner (see
+/// `net::profiles`).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rank(pub u8);
+
+/// Authority: a player's rank, published from their profile.
+pub fn publish_rank(players: Query<(Entity, &Profile, Option<&Rank>), Changed<Profile>>, mut commands: Commands) {
+    for (entity, profile, published) in &players {
+        let r = Rank(rank(profile.xp));
+        if published != Some(&r) {
+            commands.entity(entity).insert(r);
+        }
+    }
+}
+
 /// The rank a player's body was last tuned for.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TunedFor(pub u8);
@@ -619,11 +654,11 @@ pub struct TunedFor(pub u8);
 /// up with the crew's tuning and their rank.
 pub fn tune_to_rank(
     base: Res<Tuning>,
-    players: Query<(Entity, &Profile, Option<&TunedFor>), (With<Player>, Without<Robot>)>,
+    players: Query<(Entity, &Rank, Option<&TunedFor>), (With<Player>, Without<Robot>)>,
     mut commands: Commands,
 ) {
-    for (entity, profile, tuned) in &players {
-        let r = rank(profile.xp);
+    for (entity, rank, tuned) in &players {
+        let r = rank.0;
         if tuned != Some(&TunedFor(r)) || base.is_changed() {
             commands.entity(entity).insert((BodyTuning(rank_tuning(&base, r)), TunedFor(r)));
         }

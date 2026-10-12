@@ -185,6 +185,35 @@ fn players_go_by_their_profiles_names() {
     assert_eq!(load(&pa).profile.id, 41, "the id changed");
 }
 
+/// A profile (and its saved snapshot) goes only to its own player's
+/// machine; the crew sees only what it needs of it: rank and name.
+#[test]
+fn a_profile_goes_only_to_its_owner() {
+    use hullbreakers::sim::progression::{Rank, SavedProfile, xp_for};
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (pa, pb, mut a, b) = two_profiles("private");
+    a.profile.xp = xp_for(4);
+    let mut crew = Crew::start(vec![store_with(&pa, &a), store_with(&pb, &b)]);
+    crew.step(60);
+    for i in 0..2 {
+        let world = crew.clients[i].world_mut();
+        let seen: Vec<(bool, bool, bool, Option<u8>)> = world
+            .query_filtered::<(Has<LocalPlayer>, Has<Profile>, Has<SavedProfile>, Option<&Rank>), (With<Player>, Without<hullbreakers::sim::bots::Robot>)>()
+            .iter(world)
+            .map(|(local, p, s, r)| (local, p, s, r.map(|r| r.0)))
+            .collect();
+        assert_eq!(seen.len(), 2, "client {i}: {seen:?}");
+        for (local, profile, saved, rank) in seen {
+            assert_eq!((profile, saved), (local, local), "client {i}: a profile where it isn't theirs");
+            assert!(rank.is_some(), "client {i}: a crewmate's rank didn't arrive");
+        }
+    }
+    // A's rank, as B has it.
+    let world = crew.clients[1].world_mut();
+    let ranks: Vec<u8> = world.query_filtered::<&Rank, Without<LocalPlayer>>().iter(world).map(|r| r.0).collect();
+    assert!(ranks.contains(&4), "{ranks:?}");
+}
+
 /// A host's own player takes its profile straight from the file, and
 /// saves it there.
 #[test]
@@ -227,7 +256,11 @@ fn a_clients_armory_works_through_the_host() {
     let (pa, pb, a, b) = two_profiles("armory");
     let mut crew = Crew::start(vec![store_with(&pa, &a), store_with(&pb, &b)]);
     let gun = b.carried.weapons[0].unwrap();
-    crew.clients[1].world_mut().resource_mut::<ProfileRequests>().0.push(ProfileOp::Store(Place::Weapon(0)));
+    crew.clients[1]
+        .world_mut()
+        .resource_mut::<ProfileRequests>()
+        .0
+        .push(ProfileOp::Store(hullbreakers::sim::progression::Holding::Carried(Place::Weapon(0), gun)));
     crew.clients[0].world_mut().resource_mut::<ProfileRequests>().0.push(ProfileOp::Take(a.profile.stash[0]));
     crew.step(60);
     let (player_b, profile_b) = crew.local(1).unwrap();

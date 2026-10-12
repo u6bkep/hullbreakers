@@ -67,10 +67,13 @@ pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Hold
         let places = (0..inv.weapon_slots()).map(|i| (Place::Weapon(i as u8), format!("SLOT {}", i + 1)));
         let pack = (0..inv.pack_slots()).map(|i| (Place::Pack(i as u8), "PACK".to_string()));
         for (place, tag) in places.chain(pack) {
-            let here = Holding::Carried(place);
-            let r = cell(ui, CELL, &tag, inv.get(place), *chosen == Some(here), false);
-            if r.clicked() && inv.get(place).is_some() {
-                *chosen = if *chosen == Some(here) { None } else { Some(here) };
+            let here = Holding::carried(inv, place);
+            let picked = here.is_some_and(|h| chosen.is_some_and(|c| c.same(h)));
+            let r = cell(ui, CELL, &tag, inv.get(place), picked, false);
+            if r.clicked()
+                && let Some(here) = here
+            {
+                *chosen = if picked { None } else { Some(here) };
             }
         }
     }));
@@ -146,12 +149,12 @@ pub fn armory_tab(
             weapon_details(ui, player, &weapon);
             ui.add_space(4.0);
             match c {
-                Holding::Carried(place) => {
+                Holding::Carried(..) => {
                     let issue = weapon.rarity == crate::sim::items::Rarity::Standard;
                     let full = profile.stash.len() >= STASH_CAP && !issue;
                     let label = if issue { "Put back on the rack" } else { "Store in the stash" };
                     if ui.add_enabled(!full, egui::Button::new(label)).clicked() {
-                        ask(ProfileOp::Store(place));
+                        ask(ProfileOp::Store(c));
                         *chosen = None;
                     }
                     if full {

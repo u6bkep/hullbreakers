@@ -101,6 +101,7 @@ pub fn detonate(
                 weak: false,
                 // The victim's arcs point at the blast's centre.
                 from: Some(blast.at),
+                steady: false,
             });
             let out = (center - blast.at).normalize_or(Vec3::Y);
             player.shove(out * blast.impulse * k / tuning.player_mass, frame.as_ref(), tuning);
