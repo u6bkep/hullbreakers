@@ -29,6 +29,11 @@ pub struct PlayerCamera;
 #[derive(Component, Default)]
 pub struct CameraSmoothing {
     position_offset: Vec3,
+    /// What's left of the network's corrections to blend out (apart from
+    /// `position_offset`, which is relocations: landings, edge wraps), and
+    /// how fast it's going (see [`blend_out`]).
+    correction_offset: Vec3,
+    correction_rate: Vec3,
     rotation_offset: Quat,
     last_eye: Vec3,
     last_rotation: Quat,
@@ -208,6 +213,11 @@ pub struct CameraFx {
     /// How far the view is zoomed, eased toward the loadout's zoom (0 or 1:
     /// not).
     pub zoom: f32,
+    /// A push's kick: the axis the head turns about (world), how far at
+    /// most (rad), and how long ago it started (s).
+    kick_axis: Vec3,
+    kick_size: f32,
+    kick_age: f32,
 }
 
 impl CameraFx {
@@ -216,10 +226,50 @@ impl CameraFx {
         self.trauma = (self.trauma + amount).min(1.0);
     }
 
+    /// A push in world direction `dir` (unit), of `size` (rad of head
+    /// kick): the head turns the way it was pushed, easing in over a few
+    /// frames and back (a bigger push than one under way replaces it).
+    pub fn push(&mut self, dir: Vec3, size: f32) {
+        let current = self.kick_size * kick_shape(self.kick_age);
+        if size <= current {
+            return;
+        }
+        // Pushed along `dir`, the head tips about the axis across it.
+        let axis = Vec3::Y.cross(dir).try_normalize().unwrap_or(Vec3::X);
+        self.kick_axis = axis;
+        self.kick_size = size.min(MAX_KICK);
+        self.kick_age = 0.0;
+    }
+
+    /// How hard the view is shaking (trauma, 0..1) and the push kick's
+    /// size (rad), for tests.
+    pub fn felt(&self) -> (f32, f32) {
+        (self.trauma, self.kick_size)
+    }
+
+    fn kick_rotation(&self) -> Quat {
+        Quat::from_axis_angle(self.kick_axis.try_normalize().unwrap_or(Vec3::X), self.kick_size * kick_shape(self.kick_age))
+    }
+
+    fn settle_kick(&mut self, dt: f32) {
+        self.kick_age += dt;
+    }
+
     /// Opacity of the black overlay (see [`PlayerEvent::Respawned`]).
     pub fn fade(&self) -> f32 {
         self.fade
     }
+}
+
+/// The largest head kick (rad), and how long one takes to peak (s).
+const MAX_KICK: f32 = 0.09;
+const KICK_PEAK: f32 = 0.07;
+
+/// A kick's shape over time: rises from 0 to 1 at [`KICK_PEAK`] (in a few
+/// frames, so nothing jumps), then falls away.
+fn kick_shape(age: f32) -> f32 {
+    let x = age / KICK_PEAK;
+    if x > 12.0 { 0.0 } else { x * (1.0 - x).exp() }
 }
 
 pub fn camera_fx_events(mut fx: ResMut<CameraFx>, mut events: MessageReader<Presented>) {
@@ -262,6 +312,33 @@ pub fn beam_shake(
         fx.trauma = (fx.trauma + if beam.shielded { 0.3 } else { 0.55 }).min(1.0);
     }
     *was_hit = hit.is_some();
+}
+
+/// How long (s) a correction of `size` (m) takes to blend out: the usual
+/// `smooth_time` for a small one, longer for a big one (up to
+/// [`MAX_CORRECTION_TIME`]), so a metres-long correction glides rather
+/// than lurches.
+pub fn correction_time(size: f32, smooth_time: f32) -> f32 {
+    (smooth_time * (1.0 + size / CORRECTION_SCALE)).clamp(smooth_time, MAX_CORRECTION_TIME.max(smooth_time))
+}
+
+/// The size of correction (m) that blends twice as slowly as a small one.
+const CORRECTION_SCALE: f32 = 0.6;
+const MAX_CORRECTION_TIME: f32 = 0.35;
+
+/// What's left of a correction `offset` (m) after `dt` (s), and how fast
+/// it's closing (`rate`, m/s). A critically damped spring: it starts from
+/// rest, so the drawn eye never jumps the frame a correction lands (an
+/// exponential blend's first step is its biggest), and settles in about
+/// the [`correction_time`] of what's left.
+pub fn blend_out(offset: Vec3, rate: Vec3, dt: f32, smooth_time: f32) -> (Vec3, Vec3) {
+    let tau = correction_time(offset.length(), smooth_time) / 2.0;
+    if tau <= 0.0 {
+        return (Vec3::ZERO, Vec3::ZERO);
+    }
+    let w = 1.0 / tau;
+    let rate = rate + (-2.0 * w * rate - w * w * offset) * dt;
+    (offset + rate * dt, rate)
 }
 
 pub fn update_camera(
@@ -341,11 +418,11 @@ pub fn update_camera(
     } else {
         0.0
     };
-    // Corrections from the network: keep showing the old view, blend out.
-    // A relocation this frame already blends from the last drawn view,
-    // whatever moved it.
+    // Corrections from the network: keep showing the old view, blend out,
+    // the bigger ones more slowly (see [`blend_out`]). A relocation this
+    // frame already blends from the last drawn view, whatever moved it.
     if !relocated {
-        smooth.position_offset += correction.position;
+        smooth.correction_offset += correction.position;
         smooth.rotation_offset = (smooth.rotation_offset * correction.rotation).normalize();
     }
     *correction = ViewCorrection {
@@ -353,12 +430,18 @@ pub fn update_camera(
         rotation: Quat::IDENTITY,
     };
     smooth.position_offset *= decay;
+    (smooth.correction_offset, smooth.correction_rate) =
+        blend_out(smooth.correction_offset, smooth.correction_rate, time.delta_secs(), tuning.smooth_time);
     smooth.rotation_offset = Quat::IDENTITY.slerp(smooth.rotation_offset, decay);
 
     smooth.last_eye = eye;
     smooth.last_rotation = rotation;
-    eye += smooth.position_offset;
+    eye += smooth.position_offset + smooth.correction_offset;
     let mut rotation = (smooth.rotation_offset * rotation).normalize();
+    // A push felt (see `client::push_feel`): the head knocked the way it
+    // went, and back.
+    rotation = (fx.kick_rotation() * rotation).normalize();
+    fx.settle_kick(time.delta_secs());
 
     // Event effects: landing dip, shake, boost FOV.
     let dt = time.delta_secs();
@@ -393,3 +476,43 @@ pub fn update_camera(
         }
     }
 }
+
+#[cfg(test)]
+mod blend_tests {
+    use super::*;
+
+    const DT: f32 = 1.0 / 60.0;
+
+    fn settle(offset: f32, seconds: f32) -> Vec<f32> {
+        let (mut o, mut r) = (Vec3::X * offset, Vec3::ZERO);
+        (0..(seconds / DT) as usize)
+            .map(|_| {
+                (o, r) = blend_out(o, r, DT, 0.12);
+                o.x
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_correction_blends_out_from_rest_without_overshoot() {
+        let path = settle(3.0, 1.5);
+        // No jump the frame it lands: the first step is small.
+        assert!(3.0 - path[0] < 0.05, "first step {}", 3.0 - path[0]);
+        // Steps grow, then shrink: the biggest is under a tenth of it.
+        let steps: Vec<f32> = std::iter::once(3.0).chain(path.iter().copied()).collect::<Vec<_>>().windows(2).map(|w| w[0] - w[1]).collect();
+        assert!(steps.iter().all(|&s| s >= -1e-4), "overshoots: {steps:?}");
+        assert!(steps.iter().cloned().fold(0.0, f32::max) < 0.3);
+        // Gone in about a second.
+        assert!(path[60].abs() < 0.1, "{} left after 1 s", path[60]);
+    }
+
+    #[test]
+    fn small_corrections_are_quick_and_big_ones_glide() {
+        let small = settle(0.1, 0.5);
+        // About as quick as the old fixed blend (12.5% left after 0.25 s).
+        let left = small[(0.25 / DT) as usize - 1].abs() / 0.1;
+        assert!(left < 0.15, "a small correction lingers: {left:.3} of it left after 0.25 s");
+        assert!(correction_time(3.0, 0.12) > 2.0 * correction_time(0.1, 0.12));
+    }
+}
+
