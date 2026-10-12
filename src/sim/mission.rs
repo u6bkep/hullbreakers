@@ -296,6 +296,11 @@ impl Director {
         self.next = Some(kind);
     }
 
+    /// The scenario the world switches to at the end of this tick, if it does.
+    pub fn switching(&self) -> Option<ScenarioKind> {
+        self.next
+    }
+
     pub fn with_asteroids(asteroids: bool) -> Self {
         Self {
             next: Some(ScenarioKind::Field),

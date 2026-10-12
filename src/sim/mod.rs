@@ -173,6 +173,7 @@ impl Plugin for SimPlugin {
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
+            .add_observer(pickups::note_owned)
             .init_resource::<progression::ProfileOrders>()
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
@@ -247,7 +248,7 @@ impl Plugin for SimPlugin {
                     (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders)
                         .chain()
                         .in_set(mission::MissionSystems::React),
-                    (mission::return_when_decided, mission::switch_scenario, mission::arrivals)
+                    (mission::return_when_decided, progression::settle_missions, mission::switch_scenario, mission::arrivals)
                         .chain()
                         .in_set(mission::MissionSystems::Switch),
                 ),

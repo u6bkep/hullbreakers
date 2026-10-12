@@ -218,18 +218,18 @@ impl Player {
 
     /// Puts the player back aboard `ship`, on deck spot `slot`, as at the
     /// start of a game: boots on, nothing grappled.
+    /// What they carry they keep (it's theirs: see `sim::progression`); a
+    /// death has already left it where they fell.
     pub fn respawn(&mut self, ship: Entity, slot: u32) {
-        let stances = self.loadout.stances;
         self.mode = deck_mode(ship, slot);
         self.boots_on = true;
         self.grapple = None;
         self.reference_body = Some(ship);
         self.detach_timer = 0.0;
-        // The base kit: guns are in the weapons locker (and whatever was
-        // carried before was left where it was dropped).
-        self.loadout = Loadout::base();
-        // Still in the stances they chose (so taking them up isn't a switch).
-        self.loadout.stances = stances;
+        for hand in &mut self.loadout.hands {
+            hand.reloading = None;
+            hand.reload_queued = false;
+        }
         self.emit(PlayerEvent::Respawned);
     }
 
@@ -804,6 +804,7 @@ pub fn player_tick(
                 turn,
                 half: p.half(),
                 items: p.items.clone(),
+                only: p.owner.filter(|_| p.owner_only),
             })
         })
         .collect();
@@ -893,7 +894,7 @@ pub fn player_tick(
                             claimed.len() - 1
                         }
                     };
-                    claimed[index].1 |= super::pickups::take_from(player, pickup, claimed[index].1);
+                    claimed[index].1 |= super::pickups::take_from(entity, player, pickup, claimed[index].1);
                 }
                 _ => {}
             }

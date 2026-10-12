@@ -1024,6 +1024,16 @@ pub struct Inventory {
 }
 
 impl Inventory {
+    /// How many weapon slots it has.
+    pub fn weapon_slots(&self) -> usize {
+        WEAPON_SLOTS
+    }
+
+    /// How many pack slots it has.
+    pub fn pack_slots(&self) -> usize {
+        PACK_SLOTS
+    }
+
     pub fn ammo(&self, kind: AmmoKind) -> u16 {
         self.ammo[kind.index()]
     }

@@ -3,6 +3,7 @@
 //! actions). Which player is local is the network layer's business.
 
 pub mod animate;
+pub mod armory;
 pub mod bindings;
 pub mod camera;
 pub mod combat_fx;
@@ -138,6 +139,7 @@ impl Plugin for ClientPlugin {
                         sfx::play_event_sounds,
                         camera::camera_fx_events,
                         camera::beam_shake,
+                        armory::open_on_press,
                     )
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),

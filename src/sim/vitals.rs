@@ -146,13 +146,13 @@ pub fn settle_deaths(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
     home: Option<Single<Entity, With<HomeShip>>>,
-    mut players: Query<(&mut Player, &mut Vitals, &DeckSlot)>,
+    mut players: Query<(Entity, &mut Player, &mut Vitals, &DeckSlot)>,
     mut commands: Commands,
 ) {
     let Some(home) = home else {
         return;
     };
-    for (mut player, mut vitals, slot) in &mut players {
+    for (entity, mut player, mut vitals, slot) in &mut players {
         if vitals.health > 0.0 {
             continue;
         }
@@ -160,7 +160,7 @@ pub fn settle_deaths(
         // or adrift on their last velocity.
         let items = player.loadout.inventory.empty_out();
         if !items.is_empty() {
-            commands.spawn((Name::new("Dropped kit"), Pickup::dropped(left_where(&player.mode), tick.0, items)));
+            commands.spawn((Name::new("Dropped kit"), Pickup::left_by(entity, left_where(&player.mode), tick.0, items)));
         }
         player.events.push(PlayerEvent::Died);
         player.respawn(*home, slot.0);

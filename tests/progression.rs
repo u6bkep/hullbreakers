@@ -176,3 +176,27 @@ fn a_hosts_profile_skips_the_network() {
     }
     assert_eq!(load(&pa).profile.salvage, 1);
 }
+
+/// What a client's armory asks reaches the host, and the result comes back.
+#[test]
+fn a_clients_armory_works_through_the_host() {
+    use hullbreakers::net::ProfileRequests;
+    use hullbreakers::sim::items::Place;
+    use hullbreakers::sim::progression::ProfileOp;
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (pa, pb, a, b) = two_profiles("armory");
+    let mut crew = Crew::start(vec![store_with(&pa, &a), store_with(&pb, &b)]);
+    let gun = b.carried.weapons[0].unwrap();
+    crew.clients[1].world_mut().resource_mut::<ProfileRequests>().0.push(ProfileOp::Store(Place::Weapon(0)));
+    crew.clients[0].world_mut().resource_mut::<ProfileRequests>().0.push(ProfileOp::Take(0));
+    crew.step(60);
+    let (player_b, profile_b) = crew.local(1).unwrap();
+    assert_eq!(profile_b.unwrap().stash, vec![gun], "B's gun isn't in B's stash");
+    assert_eq!(player_b.loadout.inventory.weapons[0], None);
+    let (player_a, profile_a) = crew.local(0).unwrap();
+    assert!(profile_a.unwrap().stash.is_empty());
+    assert_eq!(player_a.loadout.inventory.weapons[0], Some(a.profile.stash[0]), "A didn't get its rifle");
+    crew.step(4 * 60);
+    assert_eq!(load(&pb).profile.stash, vec![gun]);
+    assert_eq!(load(&pa).carried.weapons[0], Some(a.profile.stash[0]));
+}

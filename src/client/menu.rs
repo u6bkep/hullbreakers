@@ -22,7 +22,10 @@ use super::LocalPlayer;
 use super::bindings::{Action, Binding, Bindings, Button, KEYBINDS_PATH, Modifier, SLOTS};
 use super::items_hud::{self, AMBER, DIM, INK};
 use crate::sim::items::{AmmoKind, Inventory, Item, ItemOp, PACK_SLOTS, Place, WEAPON_SLOTS};
+use crate::net::ProfileRequests;
 use crate::sim::player::Player;
+use crate::sim::progression::Profile;
+use crate::sim::ship::HomeShip;
 use crate::sim::weapons::{DEFAULT_STANCES, Hand, Loadout, STANCES, Slot, Stance};
 
 pub const STANCES_PATH: &str = "stances.ron";
@@ -31,6 +34,8 @@ pub const STANCES_PATH: &str = "stances.ron";
 pub enum Tab {
     #[default]
     Inventory,
+    /// The stash, at the weapons locker (aboard our ship).
+    Armory,
     Controls,
 }
 
@@ -47,6 +52,8 @@ pub struct Menu {
     swallow_click: bool,
     /// The inventory item chosen, to move or look at.
     chosen: Option<Place>,
+    /// What's chosen at the armory.
+    pub armory: Option<super::armory::Chosen>,
 }
 
 /// Inventory changes asked for in the menu, waiting to go to the
@@ -187,8 +194,10 @@ pub fn menu(
     mut menu: ResMut<Menu>,
     mut bindings: ResMut<Bindings>,
     mut layout: ResMut<StanceLayout>,
-    player: Option<Single<&Player, With<LocalPlayer>>>,
+    player: Option<Single<(&Player, Option<&Profile>), With<LocalPlayer>>>,
+    homes: Query<(), With<HomeShip>>,
     mut ops: ResMut<ItemOps>,
+    mut requests: Option<ResMut<ProfileRequests>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut exit: MessageWriter<AppExit>,
 ) -> Result {
@@ -207,6 +216,15 @@ pub fn menu(
     // The controls list takes the screen's height, less the window around it.
     let list_height = (ctx.content_rect().height() - 48.0 - 200.0).max(160.0);
     let menu = &mut *menu;
+    let (player, profile) = match player.as_deref() {
+        Some((player, profile)) => (Some(*player), *profile),
+        None => (None, None),
+    };
+    // The armory is aboard our ship.
+    let aboard = player.is_some_and(|p| p.mode.body().is_some_and(|b| homes.contains(b)));
+    if menu.tab == Tab::Armory && !aboard {
+        menu.tab = Tab::Inventory;
+    }
     egui::Window::new("Hullbreakers")
         // Pinned at the top, so nothing moves when what's in it grows.
         .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
@@ -217,6 +235,9 @@ pub fn menu(
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut menu.tab, Tab::Inventory, egui::RichText::new("Inventory").size(16.0));
+                if aboard {
+                    ui.selectable_value(&mut menu.tab, Tab::Armory, egui::RichText::new("Armory").size(16.0));
+                }
                 ui.selectable_value(&mut menu.tab, Tab::Controls, egui::RichText::new("Controls").size(16.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Quit game").clicked() {
@@ -232,12 +253,13 @@ pub fn menu(
                 Tab::Inventory => inventory_tab(
                     ui,
                     &mut layout,
-                    player.as_deref().copied(),
+                    player,
                     &bindings,
                     &mut menu.status,
                     &mut menu.chosen,
                     &mut ops,
                 ),
+                Tab::Armory => super::armory::armory_tab(ui, player, profile, &mut menu.armory, requests.as_deref_mut()),
                 Tab::Controls => controls_tab(ui, menu, &mut bindings, list_height),
             }
             if !menu.status.is_empty() {
@@ -267,8 +289,8 @@ fn ask(ops: &mut ItemOps, op: ItemOp) {
 }
 
 /// An inventory place's card, three to a row.
-const CELL: egui::Vec2 = egui::vec2(150.0, 46.0);
-const GAP: f32 = 8.0;
+pub(super) const CELL: egui::Vec2 = egui::vec2(150.0, 46.0);
+pub(super) const GAP: f32 = 8.0;
 /// The height of the inventory above the stances (fixed, so the stances
 /// don't move as the chosen item's details change).
 const ITEMS_HEIGHT: f32 = 365.0;
@@ -276,7 +298,7 @@ const ITEMS_HEIGHT: f32 = 365.0;
 /// One place in the inventory, drawn as a card: what's there, in its
 /// colour. `chosen` is lit; `target` (where the chosen item could go) is
 /// outlined.
-fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chosen: bool, target: bool) -> egui::Response {
+pub(super) fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chosen: bool, target: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let painter = ui.painter_at(rect);
     let color = item.as_ref().map_or(DIM, items_hud::item_color);

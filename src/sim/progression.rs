@@ -17,8 +17,10 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::items::{AmmoKind, Inventory, Item, Weapon};
+use super::items::{AmmoKind, Inventory, Item, Place, Rarity, Weapon};
+use super::mission::Director;
 use super::player::Player;
+use super::ship::HomeShip;
 use super::weapons::GunKind;
 
 /// What a player owns besides what they carry, kept by the host while
@@ -97,7 +99,19 @@ pub enum ProfileWire {
 
 /// Something asked of a profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProfileOp {}
+pub enum ProfileOp {
+    /// The armory: a gun from the stash into the inventory (the first free
+    /// place, as a pickup would go).
+    Take(u16),
+    /// The armory: a standard-issue gun of a frame, free.
+    TakeIssue(GunKind),
+    /// The armory: the gun at this place in the inventory into the stash
+    /// (standard issue just goes back on the rack).
+    Store(Place),
+}
+
+/// The most guns a stash holds (past it, scrap some at the workbench).
+pub const STASH_CAP: usize = 40;
 
 /// Authority: what players asked of their profiles this frame, to apply
 /// at the next tick. (A resource, not a message: frames and ticks don't
@@ -135,6 +149,7 @@ fn sanitized(mut file: ProfileFile) -> ProfileFile {
 pub fn apply_profile_orders(
     mut orders: ResMut<ProfileOrders>,
     mut players: Query<(&mut Player, Option<&mut Profile>)>,
+    homes: Query<(), With<HomeShip>>,
     mut commands: Commands,
 ) {
     for (entity, wire) in orders.0.drain(..) {
@@ -157,14 +172,53 @@ pub fn apply_profile_orders(
                 commands.entity(entity).insert(file.profile);
             }
             (ProfileWire::Upload(_), Some(_)) => {}
-            (ProfileWire::Op(op), Some(mut profile)) => apply(op, &mut player, &mut profile),
+            // The armory and workbench are aboard our ship.
+            (ProfileWire::Op(op), Some(mut profile)) => {
+                if player.mode.body().is_some_and(|b| homes.contains(b)) {
+                    apply(op, &mut player, &mut profile);
+                }
+            }
             (ProfileWire::Op(_), None) => {}
         }
     }
 }
 
-fn apply(op: ProfileOp, _player: &mut Player, _profile: &mut Profile) {
-    match op {}
+/// Does `op` to a player's profile and inventory, if it can be done.
+/// Whether it was.
+pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool {
+    let before = player.loadout.held();
+    let inv = &mut player.loadout.inventory;
+    let done = match op {
+        ProfileOp::Take(i) => match profile.stash.get(i as usize) {
+            Some(&w) if inv.take(Item::Weapon(w)) => {
+                profile.stash.remove(i as usize);
+                true
+            }
+            _ => false,
+        },
+        ProfileOp::TakeIssue(frame) => GunKind::CREW.contains(&frame) && inv.take(Item::Weapon(Weapon::issue(frame))),
+        ProfileOp::Store(place) => match inv.get(place) {
+            Some(Item::Weapon(w)) if w.rarity == Rarity::Standard => inv.remove(place).is_some(),
+            Some(Item::Weapon(w)) if profile.stash.len() < STASH_CAP => {
+                inv.remove(place);
+                profile.stash.push(w);
+                true
+            }
+            _ => false,
+        },
+    };
+    player.loadout.hands_changed(before);
+    done
+}
+
+/// Authority: at the end of each scenario (when the world it was in goes),
+/// guns of a player's still out in it go back to their stash (or are lost:
+/// see [`RECOVER_UNCLAIMED`]).
+pub fn settle_out(profile: &mut Profile) {
+    let out = std::mem::take(&mut profile.out);
+    if RECOVER_UNCLAIMED {
+        profile.stash.extend(out);
+    }
 }
 
 #[cfg(test)]
@@ -203,5 +257,16 @@ mod tests {
         assert!(file.profile.stash.is_empty(), "a robot's gun in the stash");
         assert_eq!(file.carried.weapons[0].unwrap().mag, 40);
         assert_eq!(file.carried.ammo(AmmoKind::Light), AmmoKind::Light.cap());
+    }
+}
+
+/// Authority: when the world is about to change (a scenario's end, or a
+/// switch away from it), every profile's guns still out in it are settled.
+pub fn settle_missions(director: Res<Director>, mut profiles: Query<&mut Profile>) {
+    if director.switching().is_none() {
+        return;
+    }
+    for mut profile in &mut profiles {
+        settle_out(&mut profile);
     }
 }
