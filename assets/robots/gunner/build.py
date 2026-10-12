@@ -245,6 +245,111 @@ for side, s in SIDES:
     a.collider(f"COL_thigh_{side}", around=[thigh], parent=thigh)
     a.collider(f"COL_shin_{side}", around=[shin, foot], parent=shin)
 
+# ---------------------------------------------------------------- affixes
+# Variations the game shows only on a robot that has them (it hides every affix_ part
+# otherwise): affix_<tag>_<what>, each on the part it rides. Their lights are
+# emissive_secondary; the game tints them per affix.
+LIGHT = "emissive_secondary"
+BOLT = dict(mat=BARE, bevel=0)
+
+# Armoured: thick dark slabs bolted over the chest, head, shoulders, thighs and shins. Bulkier
+# and darker; the back (and its core) stays bare.
+plate = a.part("affix_armour_chest", torso, pivot=WAIST, bevel=0.014)
+plate.prism([(-0.26, 1.40), (-0.21, 1.355), (0.21, 1.355), (0.26, 1.40), (0.26, 1.60), (0.21, 1.648),
+             (-0.21, 1.648), (-0.26, 1.60)], plane="xy", span=(-0.345, -0.284), mat=DARK)
+for x in (-0.215, 0.215):
+    for y in (1.40, 1.605):
+        plate.cylinder("z", (x, y), 0.016, (-0.36, -0.34), segments=8, **BOLT)
+helmet = a.part("affix_armour_head", head, pivot=NECK, bevel=0.012)
+helmet.prism([(-0.325, 1.878), (-0.29, 1.948), (0.05, 1.948), (0.095, 1.905), (0.095, 1.878)],
+             span=(-0.172, 0.172), mat=DARK)
+for _, s in SIDES:
+    helmet.box((s * 0.158, 1.70, -0.235), (s * 0.205, 1.88, 0.05), mat=DARK)           # cheek guards
+for side, s in SIDES:
+    x = s * AX
+    pad = a.part(f"affix_armour_pauldron_{side}", uppers[side], pivot=(x, SHOULDER_Y, 0), bevel=0.014)
+    pad.prism([(-0.195, 1.60), (-0.135, 1.775), (0.10, 1.775), (0.175, 1.67), (0.165, 1.60)],
+              span=sorted((s * 0.33, s * 0.58)), mat=DARK)
+    x = s * LX
+    tp = a.part(f"affix_armour_thigh_{side}", f"thigh_{side}", pivot=(x, HIP_Y, 0), bevel=0.012)
+    tp.box((x - 0.108, 0.70, -0.185), (x + 0.108, 0.915, -0.135), mat=DARK)
+    xa, xb = sorted((x + s * 0.096, x + s * 0.128))
+    tp.box((xa, 0.70, -0.135), (xb, 0.915, 0.075), mat=DARK)                          # outer side plate
+    sp = a.part(f"affix_armour_shin_{side}", f"shin_{side}", pivot=(x, KNEE[0], KNEE[1]), bevel=0.012)
+    sp.prism([(-0.19, 0.48), (-0.205, 0.36), (-0.165, 0.27), (-0.13, 0.27), (-0.14, 0.48)],
+             span=(x - 0.095, x + 0.095), mat=DARK)
+
+# Shielded: an emitter dish on a stalk on its right shoulder, its rim glowing.
+emit = a.part("affix_shield_emitter", torso, pivot=WAIST, bevel=0.006)
+EM = (0.215, -0.02)                                                                     # (x, z)
+emit.cylinder("y", EM, 0.03, (1.64, 1.68), mat=DARK, bevel=0.004)
+emit.cylinder("y", EM, 0.014, (1.67, 1.80), segments=8, **BOLT)
+emit.lathe([(0.02, 1.79), (0.075, 1.815), (0.082, 1.83), (0.035, 1.835), (0, 1.84)], axis="y", center=EM,
+           mats=[DARK, DARK, DARK, DARK], bevel=0)
+emit.lathe([(0.084, 1.816), (0.084, 1.83)], axis="y", center=EM, mat=LIGHT, bevel=0)
+
+# Overclocked: finned radiators behind the shoulders, glowing between the fins, and two
+# exhaust stacks on the backpack, where it vents.
+oc = a.part("affix_overclock_radiators", torso, pivot=WAIST, bevel=0.006)
+for _, s in SIDES:
+    x0, x1 = sorted((s * 0.305, s * 0.312))
+    oc.box((x0, 1.25, 0.165), (x1, 1.51, 0.295), mat=LIGHT, bevel=0)                    # the glow behind the fins
+    for k in range(6):
+        y = 1.25 + k * 0.05
+        xa, xb = sorted((s * 0.31, s * 0.375))
+        oc.box((xa, y, 0.16), (xb, y + 0.014, 0.30), mat=BARE, bevel=0)
+    xa, xb = sorted((s * 0.305, s * 0.38))
+    oc.box((xa, 1.235, 0.15), (xb, 1.25, 0.31), mat=DARK, bevel=0)
+stacks = a.part("affix_overclock_stacks", torso, pivot=WAIST, bevel=0.006)
+for side, s in SIDES:
+    c = (s * 0.12, 0.235)
+    stacks.lathe([(0.04, 1.58), (0.04, 1.62), (0.033, 1.64), (0.033, 1.83), (0.042, 1.85), (0.042, 1.88)],
+                 axis="y", center=c, mats=[DARK, DARK, DARK, DARK, DARK])
+    stacks.cylinder("y", c, 0.03, (1.86, 1.876), mat=LIGHT, bevel=0)
+    a.socket(f"SOCKET_vent_{side}", torso, at=(c[0], 1.88, c[1]), forward=(0, 1, 0), up=(0, 0, 1))
+
+# Volatile: a bandolier of hazard-yellow charges across its belly, and a fat canister slung
+# under its backpack; warning bands on each.
+vol = a.part("affix_volatile_charges", torso, pivot=WAIST, bevel=0.008)
+vol.box((-0.23, 1.29, -0.252), (0.23, 1.31, -0.218), mat=DARK, bevel=0)                 # strap
+for x in (-0.14, 0.0, 0.14):
+    vol.box((x - 0.05, 1.19, -0.31), (x + 0.05, 1.30, -0.235), mat=ACCENT)
+    vol.box((x - 0.052, 1.235, -0.313), (x + 0.052, 1.252, -0.233), mat=LIGHT, bevel=0)
+can = a.part("affix_volatile_canister", torso, pivot=WAIST, bevel=0.008)
+can.lathe([(0.03, -0.215), (0.055, -0.20), (0.055, 0.20), (0.03, 0.215)], axis="x", center=(1.165, 0.245),
+          mats=[ACCENT, ACCENT, ACCENT])
+can.cylinder("x", (1.165, 0.245), 0.058, (-0.03, 0.03), mat=LIGHT, bevel=0)
+
+# Marksman: a long barrel run out past the muzzle, and a scope on the top rail whose lens
+# glows like its eye. The game's aiming laser starts at SOCKET_aim.
+mb = a.part("affix_marksman_barrel", gun, pivot=(xr, ELBOW_Y, 0), bevel=0.005)
+mb.lathe([(0.034, -0.94), (0.034, -1.26), (0.026, -1.27), (0.026, -1.34), (0.044, -1.34), (0.044, -1.43),
+          (0.016, -1.43), (0.016, -1.42), (0, -1.42)], axis="z", center=(xr, BORE),
+         mats=[DARK, DARK, BARE, DARK, DARK, DARK, DARK, DARK])
+ms = a.part("affix_marksman_scope", gun, pivot=(xr, ELBOW_Y, 0), bevel=0.005)
+SC = (xr, BORE + 0.205)                                                                 # scope axis (x, y)
+for z in (-0.2, -0.34):
+    ms.box((xr - 0.02, BORE + 0.12, z - 0.025), (xr + 0.02, BORE + 0.18, z + 0.025), mat=DARK, bevel=0)
+ms.lathe([(0.03, -0.10), (0.036, -0.12), (0.036, -0.40), (0.046, -0.43), (0.046, -0.47)], axis="z", center=SC,
+         mats=[DARK, DARK, DARK, DARK])
+ms.cylinder("z", SC, 0.036, (-0.476, -0.466), mat="emissive", bevel=0)
+a.socket("SOCKET_aim", gun, at=(xr, BORE, -1.43), forward=(0, 0, -1))
+
+# Leader: a tall antenna mast on its back with a beacon on top and a crossbar, and a hazard-
+# yellow crest on its head: the one to pick out of a crowd.
+mast = a.part("affix_leader_mast", torso, pivot=WAIST, bevel=0.008)
+MC = (0.0, 0.205)                                                                       # (x, z)
+mast.box((-0.055, 1.585, 0.15), (0.055, 1.665, 0.26), mat=DARK)
+mast.cylinder("y", MC, 0.02, (1.66, 2.20), segments=8, **BOLT)
+mast.box((-0.13, 2.0, 0.19), (0.13, 2.02, 0.22), mat=DARK, bevel=0)
+for x in (-0.13, 0.13):
+    mast.box((x - 0.012, 1.95, 0.195), (x + 0.012, 2.03, 0.215), mat=LIGHT, bevel=0)
+mast.lathe([(0.026, 2.19), (0.04, 2.21), (0.04, 2.25), (0.022, 2.275), (0, 2.28)], axis="y", center=MC,
+           mats=[LIGHT, LIGHT, LIGHT, LIGHT], bevel=0)
+a.socket("SOCKET_beacon", torso, at=(MC[0], 2.235, MC[1]))
+crest = a.part("affix_leader_crest", head, pivot=NECK, bevel=0.006)
+crest.prism([(-0.21, 1.885), (-0.14, 2.0), (0.04, 2.05), (0.085, 1.885)], span=(-0.022, 0.022), mat=ACCENT)
+
 # Torso and pelvis hulls from their outlines (the lathes' many near-coplanar points make
 # Blender's hull wobble past the verifier's convexity tolerance).
 a.collider("COL_torso", parent=torso, points=[(x, y, z) for z, y in CHEST for x in (-0.335, 0.335)]

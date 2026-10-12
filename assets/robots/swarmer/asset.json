@@ -1,12 +1,13 @@
 {
   "name": "swarmer",
   "kind": "small_robot",
-  "brief": "Swarmer: a small, fast, fragile hostile drone that rushes the crew in packs in zero-g. Compact armoured insect-like shell, a cluster of sensor eyes on the front, four small swivelling thruster pods, and a stubby twin gun turret under the body. Bone-white plates, black joints and underside, cyan eyes and thruster glows. Revision: the weak spot is a hot-magenta reactor core exposed at the back between the rear pods (visible from behind and above-behind, hidden from the front), SOCKET_weak at its centre; thruster glow and small status lights on emissive_secondary; longer, jointed legs and a dorsal crest for a spider outline at range.",
+  "brief": "Swarmer: a small, fast, fragile hostile drone that rushes the crew in packs in zero-g. Compact armoured insect-like shell, a cluster of sensor eyes on the front, four small swivelling thruster pods, and a stubby twin gun turret under the body. Bone-white plates, black joints and underside, cyan eyes and thruster glows. Revision: the weak spot is a hot-magenta reactor core exposed at the back between the rear pods (visible from behind and above-behind, hidden from the front), SOCKET_weak at its centre; thruster glow and small status lights on emissive_secondary; longer, jointed legs and a dorsal crest for a spider outline at range. Affix parts (shown only on robots with that affix): a shield emitter dish, overclock radiator fins, and a hazard-orange volatile charge slung under its belly.",
   "palette": {
     "paint_primary": "#e4dccb",
     "emissive": "#4fe8ff",
     "emissive_secondary": "#38d4ff",
-    "emissive_core": "#ff40c8"
+    "emissive_core": "#ff40c8",
+    "paint_secondary": "#d8862c"
   },
   "expect": {
     "size": {
@@ -29,7 +30,10 @@
       "thruster_fl",
       "thruster_fr",
       "thruster_rl",
-      "thruster_rr"
+      "thruster_rr",
+      "affix_shield_emitter",
+      "affix_overclock_radiators",
+      "affix_volatile_charge"
     ],
     "colliders": [
       "COL_body",
