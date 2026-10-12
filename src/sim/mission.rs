@@ -6,24 +6,34 @@
 //! asteroid field, which is also where the wall's "Asteroid field" button
 //! returns to.
 //!
+//! This module is what every scenario shares: which one is on
+//! ([`Mission`], replicated for the HUD), the switch between them, the crew's
+//! tally and the debrief. Each scenario is its own module under
+//! [`super::scenarios`], with a common shape: it builds its world, judges
+//! it (its own systems, run only while it's on), and writes its objective,
+//! status, markers and report into the [`Mission`].
+//!
 //! The authority runs all of this; clients see the result through
 //! replication (the world itself, and the [`Mission`] status).
 
+use std::collections::BTreeMap;
+
 use avian3d::prelude::*;
+use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use super::asteroids::{self, Asteroid};
-use super::bodies::{Bodies, PreviousVelocity, dynamic_mass};
-use super::combat::Combatant;
-use super::events::PlayerEvent;
-use super::flight::{Duel, Flight, Path};
-use super::bots::{self, Robot};
-use super::player::{DeckSlot, Mode, Player, PreviousMode};
+use super::bodies::{PreviousVelocity, dynamic_mass};
+use super::bots::Robot;
 use super::design::ShipDesign;
-use super::ship::{self, ControlAction, HomeShip, ShipCommand, ShipHull};
+use super::events::PlayerEvent;
+use super::frame::BodyFrame;
+use super::player::{DeckSlot, Mode, Player, PreviousMode};
+use super::scenarios::{self, Stage};
+use super::ship::{ControlAction, HomeShip, ShipCommand, ShipHull};
 use super::tuning::Tuning;
 use super::{SimMaterial, SimTick, TICK_HZ};
 
@@ -34,20 +44,35 @@ pub enum ScenarioKind {
     Field,
     /// Under attack: cross to the enemy ship and drop its shield.
     Boarding,
+    /// Checkpoint gates strung through a cluster of rocks, against the clock.
+    GrappleRun,
+    /// A dark derelict: bring its power back, open its vault, get out.
+    DeadShip,
     /// Every model in the game set out behind our ship, for review.
     Gallery,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 3] = [ScenarioKind::Field, ScenarioKind::Boarding, ScenarioKind::Gallery];
+    pub const ALL: [ScenarioKind; 5] = [
+        ScenarioKind::Field,
+        ScenarioKind::Boarding,
+        ScenarioKind::GrappleRun,
+        ScenarioKind::DeadShip,
+        ScenarioKind::Gallery,
+    ];
 
     pub fn button_label(self) -> &'static str {
-        match self {
-            ScenarioKind::Field => "Asteroid field",
-            ScenarioKind::Boarding => "Boarding action",
-            ScenarioKind::Gallery => "Model gallery",
-        }
+        scenarios::scenario(self).label
+    }
+
+    /// What `HULLBREAKERS_SCENARIO` calls it.
+    pub fn id(self) -> &'static str {
+        scenarios::scenario(self).id
+    }
+
+    pub fn from_id(id: &str) -> Option<ScenarioKind> {
+        Self::ALL.into_iter().find(|k| k.id() == id)
     }
 }
 
@@ -59,6 +84,24 @@ pub enum Phase {
     Lost,
 }
 
+/// One crew member's part in a mission: the score card.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrewCard {
+    pub name: String,
+    /// Standing on the crew's ship when the crew left the scenario.
+    pub aboard: bool,
+    /// Time spent in EVA.
+    pub vacuum_seconds: f32,
+    /// The farthest they travelled on one rope, in EVA (m).
+    pub longest_swing: f32,
+    /// Buttons and devices pressed.
+    pub presses: u32,
+    pub deaths: u32,
+    /// What they did that the scenario thought worth a mention ("dropped
+    /// the shield", "turned the port key").
+    pub credits: Vec<String>,
+}
+
 /// How the last mission went, shown to the crew when they're back in the
 /// field.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -67,24 +110,134 @@ pub struct Debrief {
     pub phase: Phase,
     /// From the start to the win or loss.
     pub seconds: f32,
-    /// Who dropped the shield.
-    pub shield_breaker: Option<String>,
-    /// Who was standing on the crew's ship when it was over, and who wasn't.
-    pub aboard: Vec<String>,
-    pub adrift: Vec<String>,
+    /// The banner it ended with ("CARRIER DESTROYED").
+    pub outcome: String,
+    /// The scenario's report, then who made it home.
+    pub lines: Vec<String>,
+    /// Everyone's score card, by name.
+    pub crew: Vec<CrewCard>,
+    /// The best of the score cards ("Longest swing: Player 2, 84 m").
+    pub awards: Vec<String>,
+}
+
+/// What a marker points at, for the HUD to style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MarkerKind {
+    /// The thing the mission is about.
+    Goal,
+    /// A place to go through (a gate).
+    Waypoint,
+    /// Something to work (a lever, a key, a junction, a board to read).
+    Device,
+    /// Where to go to finish: home.
+    Exit,
+}
+
+/// A place the HUD can point the crew to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Marker {
+    pub label: String,
+    pub kind: MarkerKind,
+    /// The body it's on (`at` in its coordinates), or `None` for a point in
+    /// the world.
+    pub body: Option<Entity>,
+    pub at: Vec3,
+    /// Only this player's marker (`None`: everyone's).
+    pub player: Option<Entity>,
+    /// The device it is, if it's one (an index into `body`'s design's
+    /// devices), so it can be drawn as the thing to go to.
+    pub device: Option<u16>,
+}
+
+impl Marker {
+    /// Where it is, given its body's frame (if it has a body).
+    pub fn position(&self, frame: Option<&BodyFrame>) -> Vec3 {
+        match (self.body, frame) {
+            (Some(_), Some(frame)) => frame.point_to_world(self.at),
+            _ => self.at,
+        }
+    }
+
+    /// A marker on a device of a ship.
+    pub fn device(ship: Entity, design: &ShipDesign, id: &str, kind: MarkerKind) -> Marker {
+        let i = design.device(id);
+        let device = &design.devices[i];
+        Marker {
+            label: device.label.clone(),
+            kind,
+            body: Some(ship),
+            at: device.at,
+            player: None,
+            device: Some(i as u16),
+        }
+    }
 }
 
 /// The scenario under way, replicated to everyone for the HUD.
 #[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[component(map_entities)]
 pub struct Mission {
     pub kind: ScenarioKind,
     pub phase: Phase,
     pub started: u32,
     /// The tick it was won or lost on.
     pub ended: Option<u32>,
-    pub shield_breaker: Option<String>,
+    /// What to do now, in a line.
+    pub objective: String,
+    /// The scenario's own board: a few lines of live status (gates passed,
+    /// circuits live, a countdown).
+    pub status: Vec<String>,
+    /// Where the things to do are.
+    pub markers: Vec<Marker>,
+    /// The banner once it's decided ("CARRIER DESTROYED").
+    pub outcome: String,
+    /// Lines for the debrief, written as things happen.
+    pub report: Vec<String>,
     /// The mission before this one, if it ended.
     pub debrief: Option<Debrief>,
+}
+
+impl MapEntities for Mission {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        for marker in &mut self.markers {
+            if let Some(body) = &mut marker.body {
+                *body = mapper.get_mapped(*body);
+            }
+            if let Some(player) = &mut marker.player {
+                *player = mapper.get_mapped(*player);
+            }
+        }
+    }
+}
+
+impl Mission {
+    /// Decides it, at `tick`, unless it already is.
+    pub fn decide(&mut self, phase: Phase, tick: u32, outcome: &str) {
+        if self.phase == Phase::Underway {
+            self.phase = phase;
+            self.ended = Some(tick);
+            self.outcome = outcome.to_string();
+        }
+    }
+
+    /// Seconds since it started, at `tick`.
+    pub fn elapsed(&self, tick: u32) -> f32 {
+        tick.wrapping_sub(self.started) as f32 / TICK_HZ as f32
+    }
+
+    /// Sets what the HUD shows, touching the (replicated) mission only if
+    /// something changed.
+    pub fn show(mission: &mut Mut<Mission>, objective: String, status: Vec<String>, markers: Vec<Marker>) {
+        if mission.objective != objective {
+            mission.objective = objective;
+        }
+        if mission.status != status {
+            mission.status = status;
+        }
+        if mission.markers != markers {
+            mission.markers = markers;
+        }
+    }
 }
 
 /// Wreckage: a box of hull, flung off a destroyed ship. Its body is built
@@ -118,6 +271,12 @@ pub fn shape_debris(add: On<Add, Debris>, pieces: Query<&Debris>, mut commands: 
     ));
 }
 
+/// Something a scenario put in the world besides ships, rocks, robots and
+/// debris (its own state, a gallery's anchor): cleared away with the world
+/// when the scenario changes.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct Staged;
+
 /// Authority: what to do next, decided by this tick's button presses and
 /// battle results.
 #[derive(Resource, Default)]
@@ -146,103 +305,162 @@ impl Director {
     }
 }
 
-/// Authority: acts on the controls players pressed this tick.
+/// The parts of the authority's mission tick, in order.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MissionSystems {
+    /// Damage and deaths are settled.
+    Settle,
+    /// Presses are acted on and devices settle; the tally is kept.
+    React,
+    /// The scenario on judges how it's going (see [`super::scenarios`]).
+    Judge,
+    /// A switch, if one was asked for, and arrivals.
+    Switch,
+}
+
+/// This tick's presses of `action`s, by whom: (player, body, action).
+pub fn presses<'a>(
+    tick: u32,
+    players: impl IntoIterator<Item = (Entity, &'a Player)>,
+) -> impl Iterator<Item = (Entity, Entity, ControlAction)> {
+    players.into_iter().flat_map(move |(who, player)| {
+        player.events.iter().filter_map(move |(at, event)| match event {
+            PlayerEvent::Pressed { body, action } if at == tick => Some((who, body, action)),
+            _ => None,
+        })
+    })
+}
+
+/// Authority: acts on the controls every scenario shares (the mission wall,
+/// the lurch). Scenarios act on their own (see [`presses`]); devices on
+/// theirs (see [`super::devices`]).
 pub fn handle_presses(
     tick: Res<SimTick>,
-    players: Query<(&Player, Option<&Name>)>,
+    players: Query<(Entity, &Player)>,
     mut director: ResMut<Director>,
-    mut mission: Single<&mut Mission>,
-    mut ships: Query<&mut Combatant>,
     mut orders: MessageWriter<ShipCommand>,
 ) {
-    for (player, name) in &players {
+    for (_, _, action) in presses(tick.0, &players) {
+        match action {
+            ControlAction::Scenario(kind) => director.next = Some(kind),
+            ControlAction::Lurch => {
+                orders.write(ShipCommand::Lurch);
+            }
+            // The player's own simulation armed them already; the rest are
+            // the scenario's and the devices'.
+            ControlAction::Armory | ControlAction::DisableShields | ControlAction::Device(_) => {}
+        }
+    }
+}
+
+/// One crew member's running tally, for the score card.
+#[derive(Clone, Debug, Default)]
+pub struct CrewStats {
+    pub vacuum_ticks: u32,
+    /// The rope travel of the swing under way, and where they were last
+    /// tick on it.
+    swing: f32,
+    last: Option<Vec3>,
+    pub longest_swing: f32,
+    pub presses: u32,
+    pub deaths: u32,
+    pub credits: Vec<String>,
+}
+
+/// Authority: every crew member's tally this mission.
+#[derive(Resource, Default)]
+pub struct CrewTally(pub BTreeMap<Entity, CrewStats>);
+
+impl CrewTally {
+    /// Credits `player` with something they did (once per mission).
+    pub fn credit(&mut self, player: Entity, what: impl Into<String>) {
+        let what = what.into();
+        let credits = &mut self.0.entry(player).or_default().credits;
+        if !credits.contains(&what) {
+            credits.push(what);
+        }
+    }
+}
+
+/// Authority: keeps the crew's tally (time in vacuum, swings, presses,
+/// deaths).
+pub fn tally_crew(
+    tick: Res<SimTick>,
+    tuning: Res<Tuning>,
+    players: Query<(Entity, &Player), Without<Robot>>,
+    mut tally: ResMut<CrewTally>,
+) {
+    for (entity, player) in &players {
+        let stats = tally.0.entry(entity).or_default();
+        let eva = matches!(player.mode, Mode::Eva { .. });
+        if eva {
+            stats.vacuum_ticks += 1;
+        }
+        if eva && player.grapple.is_some() {
+            let (at, _) = player.mode.world_kinematics(&tuning, None);
+            if let Some(last) = stats.last {
+                stats.swing += at.distance(last);
+                stats.longest_swing = stats.longest_swing.max(stats.swing);
+            }
+            stats.last = Some(at);
+        } else {
+            stats.swing = 0.0;
+            stats.last = None;
+        }
         for (at, event) in player.events.iter() {
-            let PlayerEvent::Pressed { body, action } = event else {
-                continue;
-            };
             if at != tick.0 {
                 continue;
             }
-            match action {
-                ControlAction::Scenario(kind) => director.next = Some(kind),
-                ControlAction::Lurch => {
-                    orders.write(ShipCommand::Lurch);
-                }
-                // The player's own simulation armed them already.
-                ControlAction::Armory => {}
-                ControlAction::DisableShields => {
-                    if let Ok(mut ship) = ships.get_mut(body)
-                        && ship.shield
-                    {
-                        ship.shield = false;
-                        mission.shield_breaker = name.map(|n| n.to_string());
-                    }
-                }
+            match event {
+                PlayerEvent::Pressed { .. } => stats.presses += 1,
+                PlayerEvent::Died => stats.deaths += 1,
+                _ => {}
             }
         }
     }
 }
 
-/// Authority: wrecks any ship worn down to nothing, and decides the
-/// mission.
-pub fn settle_battle(
+/// Authority: once a scenario is decided, its crew goes back to the field
+/// after a while, if the scenario says so (otherwise they choose, at the
+/// mission wall).
+pub fn return_when_decided(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
-    bodies: Bodies,
-    mut commands: Commands,
+    mission: Single<&Mission>,
     mut director: ResMut<Director>,
-    mut mission: Single<&mut Mission>,
-    mut ships: Query<(Entity, &mut Combatant, &ShipHull, Has<HomeShip>, Option<&mut Flight>)>,
-    mut players: Query<(Entity, &mut Player, Has<Robot>)>,
 ) {
-    let wrecked: Vec<(Entity, &'static ShipDesign, bool)> = ships
-        .iter()
-        .filter(|(_, c, ..)| c.integrity <= 0.0)
-        .map(|(e, _, hull, home, _)| (e, hull.design(), home))
-        .collect();
-    for (ship, kind, home) in wrecked {
-        let Some(frame) = bodies.frame(ship) else {
-            continue;
-        };
-        info!("{} destroyed", kind.id);
-        wreck(&mut commands, ship, kind, &frame, tick.0);
-        for (entity, mut player, robot) in &mut players {
-            // Robots aboard go down with their ship.
-            if robot {
-                if player.mode.body() == Some(ship) {
-                    commands.entity(entity).despawn();
-                }
-                continue;
-            }
-            player.thrown_off(ship, &frame, &tuning);
-        }
-        // Nobody shoots at wreckage, and it can't shake anyone.
-        for (_, mut combatant, _, _, flight) in &mut ships {
-            if combatant.target == Some(ship) {
-                combatant.target = None;
-                if let Some(mut flight) = flight {
-                    flight.shaken = false;
-                }
-            }
-        }
-        if mission.phase == Phase::Underway {
-            mission.phase = if home { Phase::Lost } else { Phase::Won };
-            mission.ended = Some(tick.0);
-        }
-    }
-    // After a loss, the crew drifts a while, then it's back to the field.
-    if mission.phase == Phase::Lost
-        && let Some(ended) = mission.ended
-        && tick.0.wrapping_sub(ended) as f32 >= tuning.wreck_return_seconds * TICK_HZ as f32
-    {
+    let Some(ended) = mission.ended else { return };
+    let Some(after) = (scenarios::scenario(mission.kind).return_after)(mission.phase, &tuning) else {
+        return;
+    };
+    if tick.0.wrapping_sub(ended) as f32 >= after * TICK_HZ as f32 && director.next.is_none() {
         director.next = Some(ScenarioKind::Field);
     }
 }
 
-/// Breaks a ship into tumbling pieces of its hull.
-fn wreck(commands: &mut Commands, ship: Entity, kind: &ShipDesign, frame: &super::frame::BodyFrame, tick: u32) {
+/// Breaks a ship into tumbling pieces of its hull. Whoever is standing on
+/// it is thrown clear; robots aboard go down with it.
+pub fn break_up<'a>(
+    commands: &mut Commands,
+    ship: Entity,
+    design: &ShipDesign,
+    frame: &BodyFrame,
+    tick: u32,
+    tuning: &Tuning,
+    players: impl IntoIterator<Item = (Entity, Mut<'a, Player>, bool)>,
+) {
+    info!("{} destroyed", design.id);
+    for (entity, mut player, robot) in players {
+        if robot {
+            if player.mode.body() == Some(ship) {
+                commands.entity(entity).despawn();
+            }
+            continue;
+        }
+        player.thrown_off(ship, frame, tuning);
+    }
     let mut rng = ChaCha8Rng::seed_from_u64(tick as u64);
-    for b in &kind.boxes {
+    for b in &design.boxes {
         let (center, size, turn, material) = (b.center, b.size, b.rotation, b.material);
         if material == SimMaterial::Trim && size.max_element() < 1.5 {
             continue;
@@ -263,7 +481,7 @@ fn wreck(commands: &mut Commands, ship: Entity, kind: &ShipDesign, frame: &super
             Name::new("Debris"),
             Debris {
                 size,
-                hostile: kind.hostile,
+                hostile: design.hostile,
             },
             RigidBody::Dynamic,
             SleepingDisabled,
@@ -277,12 +495,108 @@ fn wreck(commands: &mut Commands, ship: Entity, kind: &ShipDesign, frame: &super
     commands.entity(ship).despawn();
 }
 
+/// Who was on which ship, for the debrief: a player standing on the home
+/// ship is aboard.
+fn aboard(player: &Player, homes: &Query<(), With<HomeShip>>) -> bool {
+    player.mode.body().is_some_and(|b| homes.contains(b))
+}
+
+/// The debrief of a decided mission: its report, the crew's cards and the
+/// awards.
+fn debrief(
+    mission: &Mission,
+    tick: u32,
+    tally: &CrewTally,
+    crew: impl Iterator<Item = (Entity, String, bool)>,
+) -> Debrief {
+    let ended = mission.ended.unwrap_or(tick);
+    let mut cards: Vec<CrewCard> = crew
+        .map(|(entity, name, aboard)| {
+            let stats = tally.0.get(&entity).cloned().unwrap_or_default();
+            CrewCard {
+                name,
+                aboard,
+                vacuum_seconds: stats.vacuum_ticks as f32 / TICK_HZ as f32,
+                longest_swing: stats.longest_swing,
+                presses: stats.presses,
+                deaths: stats.deaths,
+                credits: stats.credits,
+            }
+        })
+        .collect();
+    cards.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut lines = mission.report.clone();
+    let names = |aboard: bool| cards.iter().filter(|c| c.aboard == aboard).map(|c| c.name.as_str()).collect::<Vec<_>>();
+    let (home, adrift) = (names(true), names(false));
+    if scenarios::scenario(mission.kind).homecoming {
+        if !home.is_empty() {
+            lines.push(format!("Made it home: {}", home.join(", ")));
+        }
+        if !adrift.is_empty() {
+            lines.push(format!("Left drifting: {}. Send a postcard.", adrift.join(", ")));
+        }
+    }
+    let mut awards = Vec::new();
+    let best = |key: &dyn Fn(&CrewCard) -> f32| {
+        cards
+            .iter()
+            .filter(|c| key(c) > 0.0)
+            .max_by(|a, b| key(a).total_cmp(&key(b)))
+    };
+    if let Some(c) = best(&|c| c.longest_swing) {
+        awards.push(format!("Longest swing: {}, {:.0} m on one rope", c.name, c.longest_swing));
+    }
+    if let Some(c) = best(&|c| c.vacuum_seconds) {
+        awards.push(format!("Most time in vacuum: {}, {}", c.name, clock(c.vacuum_seconds)));
+    }
+    if let Some(c) = best(&|c| c.presses as f32) {
+        awards.push(format!("Busiest hands: {}, {} presses", c.name, c.presses));
+    }
+    if let Some(c) = best(&|c| c.deaths as f32) {
+        awards.push(format!("Most deaths: {}, {}", c.name, c.deaths));
+    }
+    Debrief {
+        scenario: mission.kind,
+        phase: mission.phase,
+        seconds: ended.wrapping_sub(mission.started) as f32 / TICK_HZ as f32,
+        outcome: mission.outcome.clone(),
+        lines,
+        crew: cards,
+        awards,
+    }
+}
+
+/// A time as minutes and seconds.
+pub fn clock(seconds: f32) -> String {
+    // Rounded to tenths first, so 59.96 s is 1:00.0, not 0:60.0.
+    let tenths = (seconds.max(0.0) * 10.0).round() as u32;
+    format!("{}:{:02}.{}", tenths / 600, tenths % 600 / 10, tenths % 10)
+}
+
+#[cfg(test)]
+#[test]
+fn clocks_round_before_they_carry() {
+    assert_eq!(clock(59.96), "1:00.0");
+    assert_eq!(clock(72.34), "1:12.3");
+    assert_eq!(countdown(59.2), "1:00");
+    assert_eq!(countdown(0.0), "0:00");
+}
+
+/// A countdown in whole seconds, rounded up (so it reads 0:00 only at the
+/// end).
+pub fn countdown(seconds: f32) -> String {
+    let s = seconds.max(0.0).ceil() as u32;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
 /// Authority: at the end of a tick that asked for one, replaces the world
 /// with a new scenario's and puts every player back aboard.
+#[allow(clippy::too_many_arguments)]
 pub fn switch_scenario(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
     mut director: ResMut<Director>,
+    mut tally: ResMut<CrewTally>,
     mut commands: Commands,
     old_world: Query<
         Entity,
@@ -290,7 +604,7 @@ pub fn switch_scenario(
             With<ShipHull>,
             With<Asteroid>,
             With<Debris>,
-            With<GalleryAnchor>,
+            With<Staged>,
             With<Robot>,
             With<super::pickups::Pickup>,
         )>,
@@ -298,7 +612,7 @@ pub fn switch_scenario(
     homes: Query<(), With<HomeShip>>,
     mut mission: Single<&mut Mission>,
     mut players: Query<
-        (&mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>),
+        (Entity, &mut Player, Option<&DeckSlot>, Option<&mut PreviousMode>, Option<&Name>),
         Without<Robot>,
     >,
     mut shots: ResMut<super::shots::Shots>,
@@ -310,59 +624,35 @@ pub fn switch_scenario(
     shots.0.clear();
     info!("starting scenario {kind:?}");
     let debrief = (mission.phase != Phase::Underway).then(|| {
-        let ended = mission.ended.unwrap_or(tick.0);
-        let mut debrief = Debrief {
-            scenario: mission.kind,
-            phase: mission.phase,
-            seconds: ended.wrapping_sub(mission.started) as f32 / TICK_HZ as f32,
-            shield_breaker: mission.shield_breaker.clone(),
-            ..default()
-        };
-        for (player, _, _, name) in &players {
-            let name = name.map_or("?".to_string(), |n| n.to_string());
-            if player.mode.body().is_some_and(|b| homes.contains(b)) {
-                debrief.aboard.push(name);
-            } else {
-                debrief.adrift.push(name);
-            }
-        }
-        debrief
+        let crew = players.iter().map(|(entity, player, _, _, name)| {
+            (entity, name.map_or("?".to_string(), |n| n.to_string()), aboard(player, &homes))
+        });
+        debrief(&mission, tick.0, &tally, crew)
     });
+    tally.0.clear();
     for entity in &old_world {
         commands.entity(entity).despawn();
     }
     commands.remove_resource::<asteroids::FieldRng>();
-    let home = match kind {
-        ScenarioKind::Field => {
-            let home = commands.spawn(ship::drifting_home_ship()).id();
-            if director.asteroids {
-                asteroids::spawn_field(&mut commands, &tuning);
-            }
-            home
-        }
-        ScenarioKind::Boarding => spawn_duel(&mut commands, &tuning, tick.0, director.robots),
-        ScenarioKind::Gallery => {
-            commands.spawn((
-                Name::new("Gallery"),
-                GalleryAnchor,
-                Transform::from_translation(GALLERY_AT),
-            ));
-            commands.spawn(ship::drifting_home_ship()).id()
-        }
-    };
+    let scenario = scenarios::scenario(kind);
+    let home = (scenario.build)(&mut Stage {
+        commands: &mut commands,
+        tuning: &tuning,
+        tick: tick.0,
+        asteroids: director.asteroids,
+        robots: director.robots,
+    });
     **mission = Mission {
         kind,
-        phase: Phase::Underway,
         started: tick.0,
-        ended: None,
-        shield_breaker: None,
         debrief,
+        ..default()
     };
-    for (index, (mut player, slot, previous, _)) in players.iter_mut().enumerate() {
+    for (index, (_, mut player, slot, previous, _)) in players.iter_mut().enumerate() {
         let slot = slot.map_or(index as u32, |s| s.0);
         player.respawn(home, slot);
-        if kind == ScenarioKind::Gallery {
-            to_gallery(&mut player, slot);
+        if let Some(arrive) = scenario.arrive {
+            arrive(&mut player, slot);
         }
         if let Some(mut previous) = previous {
             previous.0 = player.mode;
@@ -370,171 +660,20 @@ pub fn switch_scenario(
     }
 }
 
-/// Where the model gallery starts: a row behind our ship's stern, centred
-/// on its cargo door, at standing eye height.
-pub const GALLERY_AT: Vec3 = Vec3::new(0.0, 1.5, 24.0);
-
-/// Puts a player in front of the gallery's row, facing it (−Z), floating
-/// beside the others.
-fn to_gallery(player: &mut Player, slot: u32) {
-    player.mode = Mode::Eva {
-        position: GALLERY_AT + Vec3::new(slot as f32 * 1.5, 0.0, 7.0),
-        velocity: Vec3::ZERO,
-        orientation: Quat::IDENTITY,
-        pitch: 0.0,
-    };
-    player.boots_on = false;
-}
-
-/// Authority: players who join during the gallery start at it too.
-pub fn gallery_arrivals(
+/// Authority: players who join during a scenario that starts its crew
+/// somewhere other than the deck start there too.
+pub fn arrivals(
     mission: Single<&Mission>,
-    mut players: Query<(&mut Player, &DeckSlot, Option<&mut PreviousMode>), Added<Player>>,
+    mut players: Query<(&mut Player, &DeckSlot, Option<&mut PreviousMode>), (Added<Player>, Without<Robot>)>,
 ) {
-    if mission.kind != ScenarioKind::Gallery {
+    let Some(arrive) = scenarios::scenario(mission.kind).arrive else {
         return;
-    }
+    };
     for (mut player, slot, previous) in &mut players {
-        to_gallery(&mut player, slot.0);
+        arrive(&mut player, slot.0);
         if let Some(mut previous) = previous {
             previous.0 = player.mode;
         }
-    }
-}
-
-/// Where the gallery's models are set out (by the client, which knows what
-/// models there are).
-#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GalleryAnchor;
-
-/// Rocks around a battle.
-const BATTLE_ROCKS: usize = 320;
-/// How far (m) a rock's surface keeps from where a ship's origin passes: a
-/// ship's half-length and some.
-const SHIP_CLEARANCE: f32 = 40.0;
-/// The ships' paths are sampled every half second for ten minutes when
-/// placing rocks.
-const SAMPLE_TICKS: u32 = TICK_HZ as u32 / 2;
-const BATTLE_SAMPLES: u32 = 1200;
-
-/// Two ships in a duel: ours, and the carrier weaving in and out around it.
-/// Returns ours.
-fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool) -> Entity {
-    let duel = Duel {
-        center: Vec3::ZERO,
-        radius: 300.0,
-        lap: 120.0,
-        bob: 20.0,
-        near: tuning.duel_near,
-        far: tuning.duel_far,
-        pass: tuning.carrier_pass_seconds,
-        sweep: 240.0,
-    };
-    let (orbit, weave) = (
-        Flight {
-            start: tick,
-            path: Path::Orbit(duel),
-            shaken: true,
-        },
-        Flight {
-            start: tick,
-            path: Path::Weave(duel),
-            shaken: true,
-        },
-    );
-    // Rocks among the fight, for the crew to swing between, clear of
-    // everywhere either ship goes for longer than any fight lasts.
-    let swept: Vec<Vec3> = (0..BATTLE_SAMPLES)
-        .flat_map(|i| {
-            let at = tick + i * SAMPLE_TICKS;
-            [orbit.pose(at, 0.0).0, weave.pose(at, 0.0).0]
-        })
-        .collect();
-    let near: Vec<Vec3> = swept.iter().step_by(7).copied().collect();
-    asteroids::spawn_battlefield(commands, &near, BATTLE_ROCKS, |at, radius| {
-        let keep_out = radius + SHIP_CLEARANCE;
-        swept.iter().all(|p| p.distance_squared(at) > keep_out * keep_out)
-    });
-    let flying = |flight: Flight| {
-        let frame = flight.frame(tick, Vec3::ZERO);
-        (
-            flight,
-            RigidBody::Static,
-            PreviousVelocity::default(),
-            Position(frame.position),
-            Rotation(frame.rotation),
-            LinearVelocity(frame.linear_velocity),
-            AngularVelocity(frame.angular_velocity),
-        )
-    };
-    let home = commands
-        .spawn((
-            Name::new("Ship"),
-            HomeShip,
-            ShipHull::new(ship::HOME),
-            flying(orbit),
-        ))
-        .id();
-    let carrier = commands
-        .spawn((
-            Name::new("Carrier"),
-            ShipHull::new(CARRIER),
-            flying(weave),
-            Combatant {
-                target: Some(home),
-                integrity: 1.0,
-                shield: true,
-                shielded_seconds: tuning.enemy_shielded_seconds,
-                exposed_seconds: tuning.enemy_exposed_seconds,
-            },
-        ))
-        .id();
-    commands.entity(home).insert(Combatant {
-        target: Some(carrier),
-        integrity: 1.0,
-        shield: true,
-        shielded_seconds: tuning.home_survival_seconds,
-        exposed_seconds: tuning.home_survival_seconds,
-    });
-    if robots {
-        crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick);
-    }
-    super::pickups::stock_ship(commands, carrier, ShipHull::new(CARRIER).design(), tick);
-    home
-}
-
-/// The enemy ship in a boarding action.
-pub const CARRIER: &str = "carrier";
-
-/// Puts robots at the posts of `design` aboard `ship` (flying `flight`):
-/// walkers standing on its decks, flyers holding station about it.
-fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, flight: &Flight, tick: u32) {
-    let frame = flight.frame(tick, Vec3::ZERO);
-    for (i, post) in design.posts.iter().enumerate() {
-        let mode = match post.robot {
-            Robot::Gunner => Mode::Booted {
-                body: ship,
-                feet: post.at + Vec3::Y * 0.01,
-                up: Vec3::Y,
-                velocity: Vec3::ZERO,
-                orientation: post.rotation(),
-                pitch: 0.0,
-            },
-            Robot::Swarmer => {
-                let position = frame.point_to_world(post.at);
-                Mode::Eva {
-                    position,
-                    velocity: frame.point_velocity(position),
-                    orientation: frame.rotation * post.rotation(),
-                    pitch: 0.0,
-                }
-            }
-        };
-        let home_post = match mode {
-            Mode::Booted { feet, .. } => feet,
-            Mode::Eva { .. } => post.at,
-        };
-        commands.spawn(bots::new_robot(post.robot, mode, ship, home_post, tuning, i as u32));
     }
 }
 

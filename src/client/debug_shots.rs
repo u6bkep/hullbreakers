@@ -7,7 +7,9 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::sim::player::{Grapple, Mode, Player};
-use crate::sim::mission::CARRIER;
+use crate::sim::devices::Devices;
+use crate::sim::scenarios::boarding::CARRIER;
+use crate::sim::scenarios::dead_ship::DERELICT;
 use crate::sim::ship::{HOME, ShipHull};
 
 #[derive(Resource)]
@@ -55,14 +57,24 @@ enum Vantage {
 }
 
 /// `HULLBREAKERS_SHOTS_SHIP=carrier`: tour the enemy carrier instead
-/// (start in the boarding scenario).
-fn carrier_tour() -> bool {
-    std::env::var("HULLBREAKERS_SHOTS_SHIP").is_ok_and(|v| v == "carrier")
+/// (start in the boarding scenario); `derelict`, the dead ship's derelict
+/// (start in it), dark and then with its power routed; `course`, the
+/// grapple run (start in it).
+fn tour() -> &'static str {
+    match std::env::var("HULLBREAKERS_SHOTS_SHIP").as_deref() {
+        Ok("carrier") => CARRIER,
+        Ok("derelict") => DERELICT,
+        Ok("course") => "course",
+        _ => HOME,
+    }
 }
 
 fn vantages() -> Vec<(&'static str, Vantage)> {
-    if carrier_tour() {
-        return carrier_vantages();
+    match tour() {
+        CARRIER => return carrier_vantages(),
+        DERELICT => return derelict_vantages(),
+        "course" => return course_vantages(),
+        _ => {}
     }
     vec![
         (
@@ -166,6 +178,83 @@ fn carrier_vantages() -> Vec<(&'static str, Vantage)> {
     ]
 }
 
+/// The derelict's tour: the first few vantages dark, the rest (from
+/// [`DERELICT_POWERED`]) with its power routed to the vault.
+fn derelict_vantages() -> Vec<(&'static str, Vantage)> {
+    let booted = |feet: Vec3, forward: Vec3, pitch: f32| Vantage::Booted {
+        feet,
+        up: Vec3::Y,
+        forward,
+        pitch,
+    };
+    vec![
+        (
+            "derelict_outside",
+            Vantage::Eva {
+                offset: Vec3::new(14.0, 7.0, 42.0),
+                look_at: Vec3::new(0.0, 1.5, 0.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        ("derelict_airlock", booted(Vec3::new(0.0, 0.01, 17.4), Vec3::NEG_Z, 0.0)),
+        ("derelict_engineering_dark", booted(Vec3::new(0.3, 0.01, 13.2), Vec3::new(-0.3, 0.0, -1.0), -0.1)),
+        ("derelict_junction_dark", booted(Vec3::new(4.6, 0.01, 1.0), Vec3::X, -0.05)),
+        ("derelict_engineering_lit", booted(Vec3::new(0.3, 0.01, 13.2), Vec3::new(-0.3, 0.0, -1.0), -0.1)),
+        ("derelict_board", booted(Vec3::new(-4.6, 0.01, 10.0), Vec3::NEG_X, 0.0)),
+        ("derelict_junction", booted(Vec3::new(4.6, 0.01, 1.0), Vec3::X, -0.05)),
+        ("derelict_mid_hall", booted(Vec3::new(3.0, 0.01, 5.2), Vec3::new(-0.5, 0.0, -1.0), -0.25)),
+        ("derelict_vault_door", booted(Vec3::new(-2.0, 0.01, -8.5), Vec3::new(-0.3, 0.0, -1.0), -0.05)),
+        ("derelict_key", booted(Vec3::new(4.5, 0.01, -17.2), Vec3::NEG_Z, -0.5)),
+    ]
+}
+
+/// From this vantage on, the derelict's power is on and routed.
+const DERELICT_POWERED: usize = 4;
+
+/// The grapple run's tour, from our ship (positions are in its frame).
+fn course_vantages() -> Vec<(&'static str, Vantage)> {
+    vec![
+        (
+            "run_stern",
+            Vantage::Booted {
+                feet: Vec3::new(0.0, 0.01, 12.5),
+                up: Vec3::Y,
+                forward: Vec3::Z,
+                pitch: 0.05,
+            },
+        ),
+        (
+            "run_gate",
+            Vantage::Eva {
+                offset: Vec3::new(4.0, 4.0, 22.0),
+                look_at: Vec3::new(18.0, 8.0, 75.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        (
+            "run_cluster",
+            Vantage::Eva {
+                offset: Vec3::new(30.0, 45.0, 40.0),
+                look_at: Vec3::new(-20.0, 0.0, 90.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+    ]
+}
+
+/// Debug: routes the derelict's power to its vault, as a crew would have,
+/// straight into the authority's state (the shots run on a host).
+fn power_up(hull: &ShipHull, devices: &mut Devices) {
+    let design = hull.design();
+    for (id, set) in [("reactor", 1), ("j1", 2), ("j2", 1), ("j3", 1)] {
+        devices.0[design.device(id)].set = set;
+    }
+    // The doors those junctions opened on the way, latched.
+    for id in ["port_door", "bulkhead"] {
+        devices.0[design.device(id)].live = true;
+    }
+}
+
 const SETTLE_SECONDS: f32 = 1.5;
 
 pub fn run_shot_script(
@@ -174,9 +263,13 @@ pub fn run_shot_script(
     mut commands: Commands,
     mut player: Single<&mut Player, With<super::LocalPlayer>>,
     ships: Query<(Entity, &Transform, &ShipHull)>,
+    mut devices: Query<(&ShipHull, &mut Devices)>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let want = if carrier_tour() { CARRIER } else { HOME };
+    let want = match tour() {
+        "course" => HOME,
+        ship => ship,
+    };
     let Some((ship_entity, ship_transform, _)) = ships.iter().find(|(.., h)| h.0 == want) else {
         return;
     };
@@ -204,6 +297,13 @@ pub fn run_shot_script(
     if script.next == shots.len() {
         script.next += 1;
         return;
+    }
+    if tour() == DERELICT && script.next == DERELICT_POWERED {
+        for (hull, mut devices) in &mut devices {
+            if hull.0 == DERELICT {
+                power_up(hull, &mut devices);
+            }
+        }
     }
     player.mode = match shots[script.next].1 {
         Vantage::Booted {

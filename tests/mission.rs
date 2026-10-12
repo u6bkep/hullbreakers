@@ -13,7 +13,9 @@ use hullbreakers::sim::flight::Flight;
 use hullbreakers::sim::input::PlayerInput;
 use hullbreakers::sim::mission::{Debris, Director, Mission, Phase, ScenarioKind};
 use hullbreakers::sim::player::{Mode, Player};
-use hullbreakers::sim::ship::{HOME, HomeShip, ShipHull};
+use hullbreakers::sim::design::design;
+use hullbreakers::sim::devices::Devices;
+use hullbreakers::sim::ship::{ControlAction, HOME, HomeShip, ShipHull};
 use hullbreakers::sim::tuning::Tuning;
 use hullbreakers::sim::vitals::Vitals;
 
@@ -108,15 +110,24 @@ fn eye_height() -> f32 {
     Tuning::default().eye_height
 }
 
-/// Presses the mission wall's "Boarding action" button.
-fn start_boarding(app: &mut App) {
+/// Presses the mission wall's button for `kind`.
+fn start(app: &mut App, kind: ScenarioKind) {
     let ship = home(app);
-    // The button is on the port wall of the bridge.
-    let feet = Vec3::new(-2.0, 0.01, -7.3);
-    let button = Vec3::new(-3.5, 1.75, -7.3);
+    // The buttons are on the port wall of the bridge.
+    let (_, button, _) = *design(HOME)
+        .controls
+        .iter()
+        .find(|(a, ..)| *a == ControlAction::Scenario(kind))
+        .expect("no button");
+    let feet = Vec3::new(-2.0, 0.01, button.z);
     stand(app, ship, feet, button - (feet + Vec3::Y * eye_height()));
     interact(app);
     ticks(app, 2);
+    assert_eq!(mission(app).kind, kind, "the button didn't start it");
+}
+
+fn start_boarding(app: &mut App) {
+    start(app, ScenarioKind::Boarding);
 }
 
 #[test]
@@ -188,7 +199,8 @@ fn dropping_the_shield_wins_and_blows_the_crew_clear() {
     interact(&mut app);
     ticks(&mut app, 2);
     assert!(!app.world().get::<Combatant>(carrier).unwrap().shield);
-    assert_eq!(mission(&mut app).shield_breaker.as_deref(), Some("Player 1"));
+    let report = mission(&mut app).report;
+    assert!(report.iter().any(|l| l.starts_with("Shield dropped by Player 1")), "{report:?}");
     // Our beams cut through in seconds, with the boarder still aboard.
     let exposed = Tuning::default().enemy_exposed_seconds;
     let mut waited = 0;
@@ -225,7 +237,9 @@ fn losing_the_ship_returns_to_the_field() {
     assert_eq!(m.kind, ScenarioKind::Field);
     let debrief = m.debrief.expect("no debrief");
     assert_eq!(debrief.phase, Phase::Lost);
-    assert_eq!(debrief.adrift, vec!["Player 1".to_string()]);
+    assert_eq!(debrief.outcome, "SHIP LOST");
+    assert!(!debrief.crew[0].aboard);
+    assert!(debrief.lines.iter().any(|l| l.starts_with("Left drifting: Player 1")), "{:?}", debrief.lines);
     // Back aboard, and no wreckage left over.
     let home = self::home(&mut app);
     assert_eq!(player(&mut app).mode.body(), Some(home));
@@ -499,4 +513,271 @@ fn the_dead_leave_their_guns_where_they_fell() {
     ticks(&mut app, 2);
     assert_eq!(player(&mut app).loadout.inventory.weapons.iter().flatten().count(), 2, "didn't pick them up");
     assert!(pickups(&mut app).is_empty(), "the case is still there");
+}
+
+// ---------------------------------------------------------------------------
+// Devices, and the scenarios built from them
+
+fn live(app: &mut App, ship: Entity, device: &str) -> bool {
+    let hull = app.world().get::<ShipHull>(ship).unwrap().design();
+    app.world().get::<Devices>(ship).unwrap().live(hull, device)
+}
+
+/// Presses `device` on `ship`, standing a metre out from its face, looking
+/// at it, through the usual interact path.
+fn press_device(app: &mut App, ship: Entity, device: &str) {
+    let hull = app.world().get::<ShipHull>(ship).unwrap().design();
+    let d = &hull.devices[hull.device(device)];
+    let out = Vec3::new(d.face.x, 0.0, d.face.z).normalize();
+    let feet = Vec3::new(d.at.x, 0.01, d.at.z) + out;
+    stand(app, ship, feet, d.at - (feet + Vec3::Y * eye_height()));
+    interact(app);
+    ticks(app, 2);
+}
+
+/// Floating at `position`, still.
+fn float(app: &mut App, position: Vec3) {
+    set_player(app, |p| {
+        p.mode = Mode::Eva {
+            position,
+            velocity: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        };
+    });
+}
+
+fn walk_forward(app: &mut App, on: bool) {
+    let world = app.world_mut();
+    let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
+    input.movement = if on { Vec3::Z } else { Vec3::ZERO };
+}
+
+#[test]
+fn the_mission_wall_starts_the_grapple_run_and_the_dead_ship() {
+    use hullbreakers::sim::scenarios::grapple_run::{COURSE, COURSE_AT, gates, rock_places};
+    let mut app = app();
+    start(&mut app, ScenarioKind::GrappleRun);
+    let course = ship_of(&mut app, COURSE).expect("no course");
+    assert_eq!(app.world().get::<Position>(course).unwrap().0, COURSE_AT);
+    let world = app.world_mut();
+    let rocks = world.query::<&hullbreakers::sim::asteroids::Asteroid>().iter(world).count();
+    assert!(rocks > 200, "only {rocks} rocks");
+    // Every gate is clear of rocks.
+    let course_design = design(COURSE);
+    for i in gates(course_design) {
+        let gate = COURSE_AT + course_design.devices[i].at;
+        for (at, r) in rock_places() {
+            assert!(gate.distance(at) > r * 2.0 + 8.0, "a rock at {at} (r {r}) crowds gate {i} at {gate}");
+        }
+    }
+    assert_eq!(mission(&mut app).markers.len(), 1, "a marker on the next gate");
+    start(&mut app, ScenarioKind::DeadShip);
+    assert!(ship_of(&mut app, COURSE).is_none(), "the course outlived its scenario");
+    assert!(ship_of(&mut app, "derelict").is_some());
+}
+
+/// A door is a wall until it's opened: walking at the port door stops at
+/// it, until junction A is turned to it.
+#[test]
+fn a_door_blocks_the_way_until_its_power_opens_it() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::DeadShip);
+    let derelict = ship_of(&mut app, "derelict").unwrap();
+    let toward_door = |app: &mut App| {
+        // In the mid hall, facing the port door (at x = -1, z = 0.3 to 1.7).
+        stand(app, derelict, Vec3::new(1.5, 0.01, 1.0), Vec3::NEG_X);
+        walk_forward(app, true);
+        ticks(app, 120);
+        walk_forward(app, false);
+        let Mode::Booted { feet, .. } = player(app).mode else { panic!("off the deck") };
+        feet
+    };
+    // (Walking into it climbs it, as with any wall: but never through.)
+    let feet = toward_door(&mut app);
+    assert!(feet.x > -0.9, "walked through a shut door to {feet}");
+    press_device(&mut app, derelict, "reactor");
+    press_device(&mut app, derelict, "j1");
+    assert!(live(&mut app, derelict, "port_door"));
+    let feet = toward_door(&mut app);
+    assert!(feet.x < -2.0, "the open door still stopped us at {feet}");
+}
+
+/// The whole dead ship, solo: restart the reactor, route the power to the
+/// vault, turn the keys, release the core, and get home.
+#[test]
+fn the_dead_ship_can_be_won() {
+    use hullbreakers::sim::scenarios::BANNER_SECONDS;
+    let mut app = app();
+    start(&mut app, ScenarioKind::DeadShip);
+    let derelict = ship_of(&mut app, "derelict").unwrap();
+    assert!(mission(&mut app).objective.contains("restart its reactor"));
+    press_device(&mut app, derelict, "reactor");
+    assert!(live(&mut app, derelict, "reactor") && live(&mut app, derelict, "board"));
+    assert!(mission(&mut app).objective.contains("Route power"));
+    // Junction A to the port door (it latches open), then on to junction B.
+    press_device(&mut app, derelict, "j1");
+    press_device(&mut app, derelict, "j1");
+    assert!(live(&mut app, derelict, "port_door") && live(&mut app, derelict, "j2"));
+    // Junction B to the bulkhead, then on to junction C.
+    press_device(&mut app, derelict, "j2");
+    press_device(&mut app, derelict, "j2");
+    assert!(live(&mut app, derelict, "bulkhead") && live(&mut app, derelict, "j3"));
+    // Junction C to the vault bus.
+    press_device(&mut app, derelict, "j3");
+    assert!(live(&mut app, derelict, "vault_bus"));
+    assert!(mission(&mut app).objective.contains("key B"), "{}", mission(&mut app).objective);
+    // Alone: key B holds while we get to key A.
+    press_device(&mut app, derelict, "key_b");
+    ticks(&mut app, 120);
+    assert!(!live(&mut app, derelict, "vault"));
+    press_device(&mut app, derelict, "key_a");
+    assert!(live(&mut app, derelict, "vault"), "the keys didn't open the vault");
+    press_device(&mut app, derelict, "core_clamp");
+    let m = mission(&mut app);
+    assert!(m.objective.contains("take the data core"), "{}", m.objective);
+    assert!(m.status[0].starts_with("Overload in"), "{:?}", m.status);
+    // Home without the core isn't a win.
+    let ship = home(&mut app);
+    stand(&mut app, ship, Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z);
+    ticks(&mut app, 2);
+    assert_eq!(mission(&mut app).phase, Phase::Underway, "won without the core");
+    // Take the core off its cradle, then home.
+    let core = mission(&mut app).markers.iter().find(|m| m.label == "Data core").expect("no core marker").at;
+    let feet = Vec3::new(core.x, 0.01, core.z + 1.4);
+    stand(&mut app, derelict, feet, core - (feet + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    let core = hullbreakers::sim::items::Item::Cargo(hullbreakers::sim::items::CargoKind::DataCore);
+    assert!(player(&mut app).loadout.inventory.pack.contains(&Some(core)), "didn't take the core");
+    assert!(mission(&mut app).objective.contains("everyone back"), "{}", mission(&mut app).objective);
+    stand(&mut app, ship, Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z);
+    ticks(&mut app, 2);
+    let m = mission(&mut app);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Won, "SALVAGE COMPLETE"));
+    assert!(ship_of(&mut app, "derelict").is_none(), "the derelict should go up as we leave");
+    // Back to the field, with the score card.
+    ticks(&mut app, (BANNER_SECONDS * 60.0) as usize + 5);
+    let m = mission(&mut app);
+    assert_eq!(m.kind, ScenarioKind::Field);
+    let debrief = m.debrief.expect("no debrief");
+    assert_eq!(debrief.scenario, ScenarioKind::DeadShip);
+    let card = &debrief.crew[0];
+    assert!(card.aboard);
+    for credit in ["restarted the reactor", "turned key A", "turned key B", "released the data core", "carried the data core home", "turned junctions 5 times"] {
+        assert!(card.credits.iter().any(|c| c == credit), "no {credit:?} in {:?}", card.credits);
+    }
+    assert!(card.presses >= 9, "{} presses", card.presses);
+    assert!(debrief.lines.iter().any(|l| l.starts_with("Reactor restarted by Player 1")), "{:?}", debrief.lines);
+}
+
+/// A pull pulled before its power comes counts when the power does: the
+/// core's clamp, pulled at a shut vault (by reaching through, here),
+/// releases the core as the vault opens.
+#[test]
+fn the_core_released_early_counts_when_the_vault_opens() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::DeadShip);
+    let derelict = ship_of(&mut app, "derelict").unwrap();
+    {
+        let hull = design("derelict");
+        let mut devices = app.world_mut().get_mut::<Devices>(derelict).unwrap();
+        devices.0[hull.device("core_clamp")].set = 1;
+    }
+    for device in ["reactor", "j1", "j1", "j2", "j2", "j3", "key_b", "key_a"] {
+        press_device(&mut app, derelict, device);
+    }
+    ticks(&mut app, 1);
+    let m = mission(&mut app);
+    assert!(m.report.iter().any(|l| l.starts_with("Data core released by ?")), "{:?}", m.report);
+    assert!(m.status[0].starts_with("Overload in 1:1"), "{:?}", m.status);
+}
+
+#[test]
+fn the_dead_ship_is_lost_if_the_crew_is_still_out_when_it_goes() {
+    use hullbreakers::sim::scenarios::dead_ship::OVERLOAD_SECONDS;
+    let mut app = app();
+    start(&mut app, ScenarioKind::DeadShip);
+    let derelict = ship_of(&mut app, "derelict").unwrap();
+    for device in ["reactor", "j1", "j1", "j2", "j2", "j3", "key_b", "key_a", "core_clamp"] {
+        press_device(&mut app, derelict, device);
+    }
+    assert!(live(&mut app, derelict, "alarm"), "the alarms should be going");
+    assert!(!live(&mut app, derelict, "eng_lights"), "the lights should be out");
+    // Standing in the vault as it goes.
+    stand(&mut app, derelict, Vec3::new(-3.0, 0.01, -14.0), Vec3::NEG_Z);
+    ticks(&mut app, (OVERLOAD_SECONDS * 60.0) as usize);
+    let m = mission(&mut app);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Lost, "DERELICT LOST"));
+    assert!(ship_of(&mut app, "derelict").is_none());
+    assert!(matches!(player(&mut app).mode, Mode::Eva { .. }), "not thrown off the wreck");
+}
+
+/// Through every gate in order, by hopping from just before each to just
+/// after it.
+fn fly_the_gates(app: &mut App, order: impl IntoIterator<Item = usize>) {
+    use hullbreakers::sim::scenarios::grapple_run::{COURSE, COURSE_AT, gates};
+    let course = design(COURSE);
+    let gates = gates(course);
+    for k in order {
+        let gate = &course.devices[gates[k]];
+        let at = COURSE_AT + gate.at;
+        float(app, at - gate.face * 1.0);
+        ticks(app, 1);
+        float(app, at + gate.face * 1.0);
+        ticks(app, 1);
+    }
+}
+
+#[test]
+fn the_grapple_run_is_won_through_every_gate_in_order() {
+    use hullbreakers::sim::scenarios::BANNER_SECONDS;
+    let mut app = app();
+    start(&mut app, ScenarioKind::GrappleRun);
+    ticks(&mut app, 60);
+    // Out of order doesn't count: the next gate is still the first.
+    fly_the_gates(&mut app, [1, 2]);
+    let m = mission(&mut app);
+    assert_eq!(m.markers[0].label, "Gate 1", "{:?}", m.markers);
+    assert!(m.status[0].contains("to gate 1"), "{:?}", m.status);
+    fly_the_gates(&mut app, 0..4);
+    let m = mission(&mut app);
+    assert_eq!(m.markers[0].label, "Gate 5");
+    assert!(m.status[0].contains("gate 4/10"), "{:?}", m.status);
+    fly_the_gates(&mut app, 4..10);
+    let m = mission(&mut app);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Won, "COURSE CLEAR"));
+    assert!(m.report[0].starts_with("Player 1: 0:"), "{:?}", m.report);
+    assert!(m.markers.is_empty());
+    ticks(&mut app, (BANNER_SECONDS * 60.0) as usize + 5);
+    let m = mission(&mut app);
+    assert_eq!(m.kind, ScenarioKind::Field);
+    let debrief = m.debrief.expect("no debrief");
+    assert!(debrief.crew[0].vacuum_seconds > 0.0);
+    assert!(debrief.crew[0].credits[0].starts_with("ran the course in"));
+    // Finishing out past the bow isn't being left drifting.
+    assert!(!debrief.lines.iter().any(|l| l.contains("drifting")), "{:?}", debrief.lines);
+    // A second run: the board remembers the first.
+    start(&mut app, ScenarioKind::GrappleRun);
+    ticks(&mut app, 30);
+    fly_the_gates(&mut app, 0..10);
+    let report = mission(&mut app).report;
+    assert!(report[0].contains("personal best"), "{report:?}");
+}
+
+#[test]
+fn the_grapple_run_is_lost_when_the_clock_runs_out() {
+    use hullbreakers::sim::scenarios::grapple_run::TIME_LIMIT;
+    let mut app = app();
+    start(&mut app, ScenarioKind::GrappleRun);
+    fly_the_gates(&mut app, 0..3);
+    {
+        let world = app.world_mut();
+        let mut m = world.query::<&mut Mission>().single_mut(world).unwrap();
+        m.started = m.started.wrapping_sub((TIME_LIMIT * 60.0) as u32);
+    }
+    ticks(&mut app, 2);
+    let m = mission(&mut app);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Lost, "OUT OF TIME"));
+    assert!(m.report.iter().any(|l| l.contains("out of time at gate 4 of 10")), "{:?}", m.report);
 }

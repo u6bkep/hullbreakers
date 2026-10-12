@@ -1,0 +1,12 @@
+// The derelict: a dead ship for the crew to bring back to life (the "Dead
+// ship" scenario). Dark inside until its power is restored and routed;
+// its vault, at the bow, is sealed by a two-key lock. Ship coordinates,
+// metres: +Y up, bow toward -Z. See docs/ships.md.
+Design(
+    name: "DERELICT",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 1.5, 0.0), radii: (9.0, 5.0, 23.0)),
+    turrets: [],
+    modules: [(module: "derelict/hull")],
+)

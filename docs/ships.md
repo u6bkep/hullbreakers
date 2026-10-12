@@ -63,7 +63,55 @@ Markers are named points. Play uses `entry` (where boarders come in) and
 starts with `loot` (`loot_bridge`, ...) gets a loot crate on that floor spot,
 rolled better the nearer it is to the `objective` than the `entry`
 (`sim/pickups.rs`). Others are free (the carrier's `upper_deck` is a point on
-its upper floor, for tests).
+its upper floor, for tests). A site
+(below) uses them too: the derelict's `entry` is its airlock, its `objective`
+the data core.
+
+## Sites
+
+Not every design is a ship that flies. A **site** is a design set at rest in
+the world by a scenario (`ship::site`, a static body): the derelict
+(`assets/ships/derelict`) and the grapple run's course of gates
+(`assets/ships/course`, which is only devices). Sites are `hostile: false`;
+only the design `home` is the crew's ship.
+
+## Devices
+
+Interactive things beyond buttons, in a module's `devices: [...]` (the code is
+`src/sim/devices.rs`; the client draws them, `src/client/devices.rs`):
+
+```ron
+(id: "j1", label: "Junction A", kind: Junction(ways: 3), at: (6.88, 1.3, 1.0),
+ face: (-1.0, 0.0, 0.0), power: On("reactor"), start: 0),
+(id: "vault", kind: Door(size: (1.6, 2.3, 0.15), latch: true), at: (-3.2, 1.15, -12.0),
+ power: All([On("key_a"), On("key_b")])),
+```
+
+`id` names it for other devices and for scenarios (unique in the ship);
+`label` is what players see (default: the id); `at` its middle; `face` the
+way it looks, out of the wall it's on (a gate's way through); `start` a
+lever's (1 thrown) or junction's (its way) first setting.
+
+| Kind | Pressed (F) | Output, while powered |
+|---|---|---|
+| `Lever` | flips it | on while thrown |
+| `Pull` | pulls it, for good | on once pulled |
+| `Key(hold, solo)` | turns it | on for `hold` s (`solo` s for a crew of one) |
+| `Junction(ways)` | turns it to its next way | on; `Port(id, k)` is on while it's set to way *k* |
+| `Door(size, latch)` | no | open (a latched door stays open once opened); shut, it's in the collider |
+| `Lamp` | no | lit |
+| `Board(size, rows: [(label, cond)])` | no | lit, a lamp per row showing its condition |
+| `Lights(at: [...], color, flash)` | no | room lights at those points; `flash` for alarms |
+| `Conduit(path: [...])` | no | a cable along those points, lit |
+| `Gate(size)` | no | a frame (structure) round a `size` opening; scenarios count flights through it |
+
+`power` is a condition over other devices' outputs: `Always` (the default),
+`Never`, `On(id)`, `Port(id, way)`, `All([...])`, `Any([...])`, `Not(...)`.
+Devices are evaluated once a tick in dependency order, so a chain settles in
+a tick; a loop is refused when the design is read, as is an unknown id or
+way. Light colours mean the same everywhere: cyan is power, amber waiting
+(powered but not thrown, a key counting down, a gate), dark is dead, a shut
+door's strip dim red.
 
 ## What play needs: the check
 
@@ -84,8 +132,13 @@ Gunner can. It checks:
   on an enemy);
 - an enemy has an `entry` a walker can stand at, an `objective`, and a
   `DisableShields` control;
-- the crew's ship has a button for every scenario;
-- every `loot` marker is on a floor that can be walked to from the entry.
+- every `loot` marker is on a floor that can be walked to from the entry;
+- a site with an `entry` and an `objective` can be walked from one to the
+  other with every door open (doors are drawn `D` on the plan);
+- the crew's ship (`home`) has a button for every scenario.
+
+A design with nothing to walk to (no posts, controls or entry, like the
+course) isn't drawn or walked.
 
 What the grid takes as walkable: a floor with 2 m clear above it, no wall within
 0.42 m, floor under most of the walker, and steps between places of at most
