@@ -468,6 +468,7 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
                     problems.push(format!("post {i} ({:?} at {}): not on an open hull surface", post.robot, post.at));
                 }
             }
+            Gait::Clinger => problems.push(format!("post {i} ({:?}): fauna isn't posted aboard ships", post.robot)),
         }
     }
     if ship.hostile {

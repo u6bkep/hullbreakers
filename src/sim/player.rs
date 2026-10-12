@@ -1762,8 +1762,8 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
         let relative = velocity - frame.point_velocity(point);
         let closing = relative.dot(normal);
 
-        let feet_contact =
-            (point - position).dot(axis) < -(t.capsule_height / 2.0) * (1.0 - 2.0 * FEET_REGION);
+        let feet_contact = t.land_any_side
+            || (point - position).dot(axis) < -(t.capsule_height / 2.0) * (1.0 - 2.0 * FEET_REGION);
         let upright = axis.dot(normal) > t.attach_max_angle_deg.to_radians().cos();
         if player.boots_on
             && player.detach_timer <= 0.0

@@ -12,6 +12,7 @@ pub mod crew;
 pub mod debug_shots;
 pub mod devices;
 pub mod events;
+pub mod fauna_fx;
 pub mod gallery;
 pub mod guns;
 pub mod hud;
@@ -61,7 +62,7 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, robot_fx::RobotFxPlugin, hud::HudPlugin))
+        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, robot_fx::RobotFxPlugin, fauna_fx::FaunaFxPlugin, hud::HudPlugin))
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<guns::GunModels>()
             .init_resource::<input::TuningOpen>()

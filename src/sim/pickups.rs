@@ -378,14 +378,14 @@ pub fn note_owned(add: On<Add, Pickup>, pickups: Query<&Pickup>, mut profiles: Q
 /// removed): mostly ammo, sometimes a gun, better from tougher robots. Once:
 /// on the tick it's destroyed, not the tick its wreck is cleared (see
 /// [`Wrecked`]). A hull turret leaves nothing: it's bolted to the outside of
-/// the hull, where nothing would stay put.
+/// the hull, where nothing would stay put. Nor does a creature (a limpet).
 pub fn drop_robot_loot(
     tick: Res<SimTick>,
     robots: Query<(Entity, &Robot, &Player, &Vitals, &BodyTuning), Without<Wrecked>>,
     mut commands: Commands,
 ) {
     for (entity, kind, player, vitals, tuning) in &robots {
-        if vitals.health > 0.0 || kind.gait() == Gait::Mount {
+        if vitals.health > 0.0 || kind.gait() == Gait::Mount || kind.fauna() {
             continue;
         }
         let bits = entity.to_bits();

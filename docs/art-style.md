@@ -28,7 +28,10 @@ models are built is in [assets.md](assets.md).
     extra damage. The game pulses it. Reserve it for weak spots so players
     learn what it means; mark its centre with a `SOCKET_weak`.
     Weak spots are the same hot magenta (`#ff40c8`) on every enemy, the one
-    colour rule in the game: it's a signal to learn, not a faction.
+    colour rule in the game: it's a signal to learn, not a faction. So
+    nothing else glows anywhere near it (pinks, violets, purples): the
+    verifier holds every other light 45 degrees of hue away (in Oklch).
+    Code-drawn colours (ropes, tendrils, effects) keep the same rule.
 - **Value contrast between masses.** Neighbouring parts differ in lightness
   (light body, dark grip; pale plating, dark joints) so the form reads even
   without colour.
@@ -40,6 +43,9 @@ design language rather than by paint:
 - **Robots** share a mechanical language: exposed joints, sensor eyes, panel
   seams, industrial wear. They come in many colours.
 - **Flora and fauna** are organic: no straight lines, bioluminescent accents.
+  They're unbevelled; a surface is either one smooth skin (smooth shading over
+  few polygons) or faceted like the asteroids (flat triangles), never chamfered
+  like a machine. See "Organic primitives" in assets.md.
 - **Crew gear** is clean, human-scaled, and practical.
 
 Every asset brief names its palette, and the builder works from it. Left to
@@ -67,8 +73,10 @@ asked for.
 |---|---|---|---|---|---|
 | Handheld (weapon, tool) | 1k–4k | 2–4 mm | 0.3 m | 1 px = 0.4 mm | 1 |
 | Weapon part (a gun's barrel, magazine, stock, sight, muzzle device) | 40–1.2k | 1.5–4 mm | 0.3 m | 1 px = 0.4 mm | 1 |
-| Small robot or creature (≤ 1 m) | 2k–5k | 5–10 mm | 2 m | 2 px = 5.1 mm | 1 |
+| Small robot (≤ 1 m) | 2k–5k | 5–10 mm | 2 m | 2 px = 5.1 mm | 1 |
 | Large robot (2–4 m) | 3k–8k | 1–3 cm | 3 m | 2 px = 7.6 mm | 1 |
+| Small creature (≤ 1 m) | 2k–5k | (organic, none) | 2 m | 2 px = 5.1 mm | 1 |
+| Large creature (2–4 m) | 3k–8k | (organic, none) | 3 m | 2 px = 7.6 mm | 1 |
 | Prop, console, crate | 0.5k–3k | 5–20 mm | 1.5 m | 2 px = 3.8 mm | 1 |
 | Flora cluster | 1k–5k | (organic, none) | 2 m | 2 px = 5.1 mm | 1 |
 | Ship module | 5k–30k | 3–15 cm | 5 m | 2 px = 12.7 mm | 1 |
@@ -89,7 +97,10 @@ not from a target:
 | SMG (handheld) | 3,852 | 3,756 | 1,772 |
 
 Props, flora and ship modules have no asset yet, so their budgets are
-unchanged; lower them when the first ones are measured.
+unchanged; lower them when the first ones are measured. The creature budgets
+are the robots' for now. The first two fauna came in well inside them: the
+Limpet (small) at 3.0k, half of it the rock it hides in, and the Grazer
+(large) at 5.6k, 2.4k of it the bell with its canals painted per face.
 
 **Whole ships** were measured on the first one, the carrier (60 m, two decks, a
 hangar, a bridge, and nine rooms and corridors): 16,860 triangles, split into

@@ -4,7 +4,8 @@
 //! vantage points, saves a screenshot at each, then exits.
 //! `HULLBREAKERS_SHOTS_SHIP=hud` puts the HUD through the states it has to
 //! show (armed, hurt, critical, by an objective, dying, a lost fight and
-//! its debrief); start it in the boarding scenario.
+//! its debrief); start it in the boarding scenario. `=fauna` visits the
+//! field's life: the nearest herd of grazers and the nearest limpet.
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -59,6 +60,12 @@ enum Vantage {
         /// Drift relative to the ship, in ship axes.
         drift: Vec3,
     },
+    /// EVA `offset` (world axes) from the grazer (or limpet) nearest the
+    /// ship, drifting with it, looking at it.
+    NearFauna {
+        limpet: bool,
+        offset: Vec3,
+    },
     /// EVA at `offset`, grappled to `anchor` (ship local) with `slack` meters
     /// of spare rope, drifting away along the rope at `drift` m/s.
     Rope {
@@ -82,6 +89,7 @@ fn tour() -> &'static str {
         Ok("freighter") => "freighter",
         Ok("power") => "power",
         Ok("hud") => "hud",
+        Ok("fauna") => "fauna",
         _ => HOME,
     }
 }
@@ -95,6 +103,7 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
         "freighter" => return freighter_vantages(),
         "power" => return power_vantages(),
         "hud" => return hud_vantages(),
+        "fauna" => return fauna_vantages(),
         _ => {}
     }
     vec![
@@ -292,6 +301,19 @@ fn recovery_vantages() -> Vec<(&'static str, Vantage)> {
     ]
 }
 
+/// The field's life (start in the field): a herd from off to its side and
+/// from below (their hearts), then a limpet on its rock, from out of its
+/// reach and then within it.
+fn fauna_vantages() -> Vec<(&'static str, Vantage)> {
+    let near = |limpet: bool, offset: Vec3| Vantage::NearFauna { limpet, offset };
+    vec![
+        ("fauna_herd", near(false, Vec3::new(14.0, 5.0, 10.0))),
+        ("fauna_grazer_below", near(false, Vec3::new(3.0, -6.0, 2.5))),
+        ("fauna_limpet_rock", near(true, Vec3::new(5.0, 3.0, 22.0))),
+        ("fauna_limpet_strike", near(true, Vec3::new(4.0, 2.0, 9.0))),
+    ]
+}
+
 /// The HUD tour, on our ship and (the `hud_carrier_*` shots) the carrier.
 fn hud_vantages() -> Vec<(&'static str, Vantage)> {
     let upper = ShipHull::new(CARRIER).design().marker("upper_deck").y;
@@ -457,13 +479,18 @@ pub fn run_shot_script(
     ships: Query<(Entity, &Transform, &ShipHull)>,
     mut devices: Query<(&ShipHull, &mut Devices)>,
     pods: Query<(&Pod, &Transform)>,
+    fauna: (
+        Query<(Entity, &Transform, &avian3d::prelude::LinearVelocity), With<crate::sim::fauna::Grazer>>,
+        Query<(&crate::sim::bots::Robot, &Player), Without<super::LocalPlayer>>,
+        Query<(&Transform, &avian3d::prelude::LinearVelocity), Without<crate::sim::fauna::Grazer>>,
+    ),
     mut missions: Query<&mut Mission>,
     tick: Res<SimTick>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let shots = vantages();
     let want = match tour() {
-        "course" | "recovery" | "power" => HOME,
+        "course" | "recovery" | "power" | "fauna" => HOME,
         // The HUD tour's `hud_carrier_*` shots are on the carrier.
         "hud" => match shots.get(script.next) {
             Some((name, _)) if name.starts_with("hud_carrier") => CARRIER,
@@ -505,6 +532,8 @@ pub fn run_shot_script(
             }
         }
     }
+    // Who a vantage drifts with (flight assist holds still relative to it).
+    let mut reference = None;
     player.mode = match shots[script.next].1 {
         Vantage::Booted {
             feet,
@@ -543,6 +572,39 @@ pub fn run_shot_script(
         }
         // Set up below, along with the grapple.
         Vantage::Rope { .. } => player.mode,
+        Vantage::NearFauna { limpet, offset } => {
+            let (grazers, robots, bodies) = &fauna;
+            let home = ship_transform.translation;
+            // Where it is and how it drifts: a grazer's own, a limpet's
+            // rock's.
+            let found = if limpet {
+                robots
+                    .iter()
+                    .filter(|(k, _)| **k == crate::sim::bots::Robot::Limpet)
+                    .filter_map(|(_, p)| match p.mode {
+                        Mode::Booted { body, feet, .. } => {
+                            let (t, v) = bodies.get(body).ok()?;
+                            Some((t.transform_point(feet), v.0, body))
+                        }
+                        _ => None,
+                    })
+                    .min_by(|a, b| a.0.distance(home).total_cmp(&b.0.distance(home)))
+            } else {
+                grazers
+                    .iter()
+                    .map(|(e, t, v)| (t.translation, v.0, e))
+                    .min_by(|a, b| a.0.distance(home).total_cmp(&b.0.distance(home)))
+            };
+            let Some((target, velocity, body)) = found else { return };
+            reference = Some(body);
+            let position = target + offset;
+            Mode::Eva {
+                position,
+                velocity,
+                orientation: Transform::from_translation(position).looking_at(target, Vec3::Y).rotation,
+                pitch: 0.0,
+            }
+        }
         Vantage::NearPod { index, offset } => {
             let Some((_, pod)) = pods.iter().find(|(p, _)| p.index == index) else { return };
             let position = pod.translation + offset;
@@ -554,6 +616,9 @@ pub fn run_shot_script(
             }
         }
     };
+    if let Some(body) = reference {
+        player.reference_body = Some(body);
+    }
     if let Vantage::Rope {
         offset,
         anchor,

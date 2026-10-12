@@ -26,8 +26,9 @@ tools/assets/
 
 ## Making an asset, end to end
 
-1. **Brief.** You need: what it is, its kind (`handheld`, `small_robot`, `large_robot`,
-   `prop`, `flora`, `ship_module`, `ship`), rough size, the parts that move or swap, the sockets,
+1. **Brief.** You need: what it is, its kind (`handheld`, `weapon_part`, `small_robot`,
+   `large_robot`, `small_creature`, `large_creature`, `prop`, `flora`, `ship_module`, `ship`),
+   rough size, the parts that move or swap, the sockets,
    and a palette. If the brief names no palette, ask; don't default to orange and cyan.
 
 2. **`asset.json`, before modelling.** Write the expectations from the brief, not from
@@ -198,6 +199,10 @@ for thin strips and small details).
 | `p.cylinder(axis, center, radius, span, mat=, segments=None)` | A capped cylinder. |
 | `p.hull(points, mat=)` | The convex hull of `points` (at least 4, not flat). Every face is flat and coplanar sides merge into one face. For wedges, sloped plates and chamfered blocks that a box or prism can't tilt into. |
 
+A material argument can also be a function of a face's centre (a Bevy world point) that
+returns a role, for markings: `hull`, `lump`, `loft`, `blob` and `sweep` take one (see the
+Grazer's canals, `bell_role` in `assets/fauna/grazer/build.py`).
+
 `segments` (lathe, cylinder): leave it out for a round surface. hb picks the fewest
 segments (even, at least 8) that keep the widest radius within one detail size (see
 below) of a true circle, or half of one if any of its materials is emissive, and its
@@ -208,6 +213,39 @@ are never bevelled. The end caps and profile steps still are.
 
 Primitives are separate closed shells. They may overlap, but they are never welded or
 booleaned together. There's no boolean operation; build cut-outs from separate pieces.
+
+### Organic primitives (flora, fauna)
+
+Creatures have no straight lines; these build them. All coordinates are Bevy world, like
+everything else.
+
+| call | shape |
+|---|---|
+| `p.loft(rings, mat=, smooth=True, crease=None)` | A closed shell through rings of points (each a closed loop, all the same count). The first and last ring may be a single point: a pole, a rounded or pointed end. An end ring of several points is capped, flat if it's planar. The general tool: the Grazer's bell is one loft from apex to rim and back up the cavity, a lappet is a loft of arcs. |
+| `p.blob(center, radii, mat=, forward=None, up=None, noise=0.0, seed=0, frequency=1.5, segments=None, smooth=True, crease=None)` | An ellipsoid, radii `(rx, ry, rz)` in a local frame turned by `forward`/`up` (as for `part()`), poles on local Y, its radius pushed in and out by fractal noise (`noise` is a fraction: 0.2 is +/-20%; `seed` picks the shape). Sacs, eyes, foot lobes. |
+| `p.sweep(path, radius, mat=, sides=None, up=None, smooth=True, crease=None)` | A tube along a path of points. `radius` is one number, or a list with one entry per point, each `r` or `(r_side, r_up)` for an oval (a ribbon; a bare tuple is refused, since on a two-point path it would read as a taper); 0 at an end makes it pointed. Sections follow the path by parallel transport, `r_up` starting toward `up` (default +Y). Fronds, tendrils, siphons. |
+| `p.lump(center, radii, mat=, forward=None, up=None, noise=0.25, seed=0, frequency=1.3, subdivisions=1, floor=None, bevel=None)` | A rock: the convex hull of a noisy ellipsoid's icosphere points (subdivisions 1 is 42 points, about 80 faces; 2 is 162), the way the game builds its asteroids (`src/sim/asteroids.rs`). Every face flat. `floor` raises points below that y to it: a flat base sitting on a surface. |
+
+`geometry.fbm(point, seed)` (`from hb import geometry`) is the same fractal noise, for
+scripts that shape their own points (the Limpet's dome).
+
+**Shading.** An organic surface is smooth or faceted by its `smooth` flag, never by an
+angle guess:
+- `smooth=True`: one smooth skin. Every edge between its own band faces stays smooth
+  whatever the angle, so a low-poly creature shows its polygons in the silhouette, not in
+  its shading. `crease=<degrees>` makes edges at least that sharp hard instead (a lip that
+  folds back on itself: the Grazer's rim, the Limpet's snout).
+- `smooth=False`: faceted. Every quad becomes two flat triangles, each shading exactly flat
+  (and checked flat by the verifier). Lumps are always faceted.
+
+Segment counts: leave `segments`/`sides` out and they come from the widest radius and the
+detail size, as for a lathe, but at least 6 (an organic tube 6 sided at a few centimetres
+reads round at play distance); half the detail size if the role glows. Organic kinds don't
+bevel (`default_bevel` 0): a chamfer is a machined edge.
+
+Creatures are built in their asset's frame like anything else; a moving part's local axes
+are its own convention, so say in the build script's docstring which local axis does what
+(the fauna use local −Z from the joint to the free end, local X as the hinge).
 
 ### How finishing works (what `export()` does to each part)
 
@@ -254,9 +292,13 @@ verifier can check that those faces really do shade flat in the file.
 
 The roles are defined once, in `tools/assets/materials.json`: `paint_primary`,
 `paint_secondary`, `metal_dark`, `metal_bare`, `polymer`, `rubber`, `glass` (alpha-blended),
-and `emissive` (emitted colour × 8, exported with `KHR_materials_emissive_strength`; the
-exporter normalises the colour so its brightest channel is 1 and scales the strength to
-match, so the file's strength is 8 only for colours with an `ff` channel).
+the organic ones (`hide_primary` and `hide_secondary`, matte stony plates, hide or chitin;
+`skin`, smooth with a sheen; `flesh`, wet and glistening; `membrane`, translucent tissue,
+alpha-blended; all of them palette roles), `emissive` (emitted colour × 8, exported with
+`KHR_materials_emissive_strength`; the exporter normalises the colour so its brightest
+channel is 1 and scales the strength to match, so the file's strength is 8 only for colours
+with an `ff` channel), `emissive_secondary` (× 3) and `emissive_core` (× 10, weak spots
+only).
 
 - The defaults are neutral greys; the palette in `asset.json` gives the colours.
 - The glTF material is named after the role.
@@ -283,6 +325,12 @@ The driver runs it. A FAIL exits 1; a WARN doesn't.
     Base colour and emitted colour × strength match the palette, or the default.
     Other material extensions (ior, transmission, ...) are not checked.
   - Palette-required roles that are used appear in the palette.
+  - If `emissive_core` is used, its colour is the weak-spot magenta `#ff40c8` (the one colour
+    rule in art-style.md) and the model has a `SOCKET_weak`.
+  - Every other light (an emissive role) keeps at least 45 degrees of Oklch hue from that
+    magenta, unless it's nearly grey (chroma under 0.04): nothing else may look like a weak
+    spot. (The grazer's violet frond tips, 42 degrees off, read as magenta; the red laser
+    emitters sit at 47.)
   - The extension is declared in `extensionsUsed`.
   - WARN for palette entries the model doesn't use.
 - **Triangles:**
@@ -295,7 +343,9 @@ The driver runs it. A FAIL exits 1; a WARN doesn't.
   - Every triangle lying on a plane listed in `intent.json` has all its vertex normals
     within 1° of that plane's normal. A part none of whose planes are found FAILs.
   - WARN when some modelled-flat plane has no triangles left. Coplanar faces count as one
-    plane, so a vanished face that shares a plane with a surviving one isn't reported. That usually means the bevel ate a step
+    plane, so a vanished face that shares a plane with a surviving one isn't reported; a
+    triangle lying on two planes a fraction of a degree apart (neighbouring faces of a rock
+    hull, or of the carrier) counts for both, and its normals are judged against the closer. That usually means the bevel ate a step
     narrower than twice its width.
 - **Bounds and orientation:** the bounding-box size per axis is within `expect.size`.
   Each expected socket is present, at `at`, with its `forward` and `up`.
@@ -345,7 +395,8 @@ The driver runs it. A FAIL exits 1; a WARN doesn't.
   need booleans, expect bevel pinching and normal cleanup at the seams.
 - **No joint limits or articulation data** in the export. Robots get parts pivoted at their
   joints; the limits will need glTF extras or a sidecar when the game wants them.
-- **Organic shapes** (flora, fauna) are beyond prisms and lathes. They'll need new
-  primitives, such as curve sweeps or Geometry Nodes, with their own shading rules.
+- **Organic shapes** are built from lofts, sweeps, blobs and lumps (above). There are still
+  no skinned meshes: a creature bends only at its parts' joints (the Grazer's fronds are
+  three rigid segments with soft knuckles), and no morph targets for a pulsing bell.
 - **The previews have no bloom** and don't use Bevy's lighting. That's what `asset_view`
   is for.

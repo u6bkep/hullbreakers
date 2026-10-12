@@ -139,6 +139,10 @@ pub fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design:
                 let feet = post.at + up * 0.01;
                 (booted(ship, feet, up, post.rotation()), feet)
             }
+            Gait::Clinger => {
+                warn!("{}: post {i} is for a {:?}, which lives on rocks", design.id, post.robot);
+                continue;
+            }
             Gait::Flyer => {
                 let position = frame.point_to_world(post.at);
                 let mode = Mode::Eva {
@@ -242,6 +246,15 @@ pub fn spawn_zoo(commands: &mut Commands, tuning: &Tuning, home: Entity, at: Vec
             });
         }
     }
+}
+
+/// Where in the gallery's robot table (see [`spawn_zoo`]) the cell in
+/// `kind`'s row and `column` is.
+pub fn zoo_cell(at: Vec3, turn: Quat, kind: Robot, column: f32) -> Vec3 {
+    let rows = Robot::ALL.len() as f32;
+    let row = Robot::ALL.iter().position(|k| *k == kind).unwrap_or(0) as f32;
+    let columns = 1 + Affix::ALL.iter().filter(|a| a.fits(Robot::Gunner)).count();
+    at + turn * Vec3::new((column - (columns as f32 - 1.0) / 2.0) * ZOO_COLUMN, ((rows - 1.0) / 2.0 - row) * ZOO_ROW, 0.0)
 }
 
 /// The gallery's robot table: room per column and per row (m).
