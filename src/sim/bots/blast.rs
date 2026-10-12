@@ -42,6 +42,8 @@ pub fn blast_of(kind: Robot, at: Vec3, robot: Entity, credit: Option<Entity>) ->
         Robot::Grappler => (7.0, 80.0, 900.0),
         Robot::Turret => (7.0, 80.0, 900.0),
         Robot::Crawler => (4.0, 40.0, 350.0),
+        // No affixes, so never volatile; for completeness.
+        Robot::Limpet => (2.5, 20.0, 150.0),
     };
     Detonation {
         at,

@@ -14,10 +14,17 @@
 //! hull) and the **Turret** (a gun on the hull, tracking EVA players with a
 //! searchlight). On top of its kind a robot may have affixes (see
 //! [`affixes`]), rolled when a ship is crewed (see [`crew`]).
+//!
+//! The same machinery drives the asteroid field's **Limpet**, which is no
+//! robot but a rock mimic (see [`limpet`] for its brain, and
+//! [`crate::sim::fauna`] for the field's other life): a body with boots,
+//! a gas sac for a jetpack and a tendril for a grapple is a player like any
+//! other. Fauna have no affixes and leave nothing behind.
 
 mod affixes;
 mod blast;
 mod crew;
+mod limpet;
 
 pub use affixes::{Affix, Affixes, Condition, absorb, robot_upkeep};
 
@@ -27,7 +34,7 @@ pub use affixes::{Affix, Affixes, Condition, absorb, robot_upkeep};
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Wrecked;
 pub use blast::{Detonation, blast_of, detonate};
-pub use crew::{Posting, Threat, compose_crew, crew_ship, mount, spawn_zoo};
+pub use crew::{Posting, Threat, compose_crew, crew_ship, mount, spawn_zoo, zoo_cell};
 
 use avian3d::prelude::*;
 use bevy::ecs::entity::MapEntities;
@@ -66,6 +73,11 @@ pub enum Robot {
     /// ceilings inside to come at the crew from above. Heard through the
     /// hull before it's seen.
     Crawler,
+    /// Fauna, not a robot: a rock mimic clinging to an asteroid. Feels the
+    /// crew through its rock, shoots a tendril into whoever comes near,
+    /// reels them in (or itself to them), rides them and bites. See
+    /// [`limpet`].
+    Limpet,
 }
 
 /// How a kind of robot gets about.
@@ -80,6 +92,9 @@ pub enum Gait {
     /// Walks any surface: floors, walls, ceilings, the outside of the hull.
     /// Posted on a hull surface, as a mount is.
     Crawler,
+    /// Clings to rocks, and goes from rock to rock (and onto prey) on its
+    /// tendril. Never posted aboard a ship.
+    Clinger,
 }
 
 /// A body's own tuning, where it differs from the crew's.
@@ -92,7 +107,7 @@ pub fn tuning_of<'a>(base: &'a Tuning, own: Option<&'a BodyTuning>) -> &'a Tunin
 }
 
 impl Robot {
-    pub const ALL: [Robot; 5] = [Robot::Gunner, Robot::Swarmer, Robot::Grappler, Robot::Turret, Robot::Crawler];
+    pub const ALL: [Robot; 6] = [Robot::Gunner, Robot::Swarmer, Robot::Grappler, Robot::Turret, Robot::Crawler, Robot::Limpet];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -101,7 +116,14 @@ impl Robot {
             Robot::Grappler => "Grappler",
             Robot::Turret => "Turret",
             Robot::Crawler => "Crawler",
+            Robot::Limpet => "Limpet",
         }
+    }
+
+    /// Whether it's a creature, not a machine: no affixes, nothing left
+    /// behind.
+    pub fn fauna(self) -> bool {
+        self == Robot::Limpet
     }
 
     pub fn gait(self) -> Gait {
@@ -110,6 +132,7 @@ impl Robot {
             Robot::Swarmer => Gait::Flyer,
             Robot::Turret => Gait::Mount,
             Robot::Crawler => Gait::Crawler,
+            Robot::Limpet => Gait::Clinger,
         }
     }
 
@@ -184,6 +207,36 @@ impl Robot {
                 t.adhesion_accel = 90.0;
                 t.shear_accel = 90.0;
             }
+            Robot::Limpet => {
+                t.player_mass = 40.0;
+                t.capsule_radius = 0.32;
+                t.capsule_height = 0.64;
+                t.eye_height = 0.22;
+                // It creeps.
+                t.walk_speed = 1.0;
+                t.sprint_speed = 1.6;
+                t.walk_accel = 6.0;
+                t.player_health = 45.0;
+                // Its foot holds to any face of a rock, however it spins.
+                t.wall_walk = true;
+                t.adhesion_accel = 150.0;
+                t.shear_accel = 150.0;
+                t.attach_max_speed = 6.0;
+                t.attach_max_angle_deg = 180.0;
+                t.land_any_side = true;
+                // A gas sac, not a jetpack.
+                t.thrust_accel = 4.0;
+                t.boost_multiplier = 1.0;
+                t.brake_accel = 4.0;
+                t.assist_max_speed = 4.0;
+                // Its tendril: short, and its winch out-pulls a crew
+                // member's jetpack (so they can't fly free of it) but not a
+                // crewmate's winch (which tears it off).
+                t.grapple_range = limpet::TENDRIL_REACH;
+                t.reel_force = 3_500.0;
+                t.reel_speed = 8.0;
+                t.rope_break_force = 3_500.0;
+            }
         }
         t
     }
@@ -198,6 +251,7 @@ impl Robot {
             Robot::Grappler => (WEAK_GRAPPLER, 0.15),
             Robot::Turret => (WEAK_TURRET, 0.17),
             Robot::Crawler => (WEAK_CRAWLER, 0.08),
+            Robot::Limpet => (WEAK_LIMPET, 0.09),
         }
     }
 
@@ -210,6 +264,8 @@ impl Robot {
             Robot::Grappler => None,
             Robot::Turret => Some(GunKind::TurretCannon),
             Robot::Crawler => Some(GunKind::SwarmerSprayer),
+            // Its tendril, as the Grappler's harpoon.
+            Robot::Limpet => None,
         }
     }
 
@@ -258,6 +314,18 @@ impl Robot {
                 range: (0.0, CRAWLER_REACH),
                 lead: false,
                 calls: CALL_RANGE,
+            },
+            // Its own brain (see `limpet`); this is for what's shared.
+            Robot::Limpet => Mind {
+                sight: 20.0,
+                turn_rate: 2.5,
+                aim_error: 0.0,
+                burst_on: 0.0,
+                burst_off: 1.0,
+                fire_cone: 0.09,
+                range: (0.0, limpet::TENDRIL_REACH),
+                lead: false,
+                calls: 0.0,
             },
             Robot::Turret => Mind {
                 sight: 320.0,
@@ -359,6 +427,8 @@ pub struct Brain {
     attack: Attack,
     /// A crawler's way about (see [`crawl`]).
     crawling: Crawling,
+    /// A limpet's hunt (see [`limpet`]).
+    limpet: limpet::Limpet,
     /// What its affixes are doing (see [`affixes`]).
     pub(crate) state: affixes::State,
 }
@@ -400,6 +470,7 @@ impl Brain {
             seed: index as f32 * 1.618,
             attack: Attack::Ready,
             crawling: Crawling::default(),
+            limpet: limpet::Limpet::default(),
             state,
         }
     }
@@ -540,6 +611,7 @@ pub fn think(
     mut grids: ResMut<NavGrids>,
     mut damage: MessageReader<Damage>,
     mut robots: Query<RobotQuery>,
+    rocks: Query<(Entity, &super::asteroids::Asteroid)>,
 ) {
     let dt = time.delta_secs();
     let now = tick.0 as f32 / TICK_HZ as f32;
@@ -567,6 +639,23 @@ pub fn think(
     // Robots that caught sight of someone just now: where, who, and how far
     // their call carries.
     let mut sightings: Vec<(Vec3, Entity, f32)> = Vec::new();
+    // What a limpet knows of the world (built only if there's one).
+    let limpets = robots.iter().any(|(_, kind, ..)| *kind == Robot::Limpet);
+    let prey: Vec<limpet::Prey> = everyone
+        .iter()
+        .filter(|(_, _, team, _)| limpets && crew(*team))
+        .filter_map(|(e, p, ..)| {
+            let (position, velocity) = motion_of(e)?;
+            Some(limpet::Prey { entity: e, position, velocity, on: p.mode.body() })
+        })
+        .collect();
+    let rock_list: Vec<(Entity, f32)> = if limpets { rocks.iter().map(|(e, a)| (e, a.radius)).collect() } else { Vec::new() };
+    let surroundings = limpet::Surroundings {
+        crew: &prey,
+        bodies: &bodies,
+        spatial: &spatial,
+        rocks: &rock_list,
+    };
     for (entity, kind, affixes, condition, mut brain, mut input) in &mut robots {
         let Ok((_, me, _, own)) = everyone.get(entity) else {
             continue;
@@ -580,6 +669,13 @@ pub fn think(
             continue;
         }
         let tuning = tuning_of(&base, own);
+        if *kind == Robot::Limpet {
+            let mut home = (brain.home, brain.post);
+            limpet::think(me, tuning, &mut brain.limpet, &mut home, &mut input, &surroundings, dt);
+            (brain.home, brain.post) = home;
+            brain.target = brain.limpet.prey();
+            continue;
+        }
         let mind = affixes::mind(kind.mind(), *kind, *affixes, condition.rallied);
         let frame = me.mode.body().and_then(|b| bodies.frame(b));
         let home = bodies.frame(brain.home);
@@ -1156,6 +1252,10 @@ const WEAK_TURRET: Vec3 = Vec3::new(0.0, 0.21, 0.56);
 // feet, its middle 0.3 up.
 const WEAK_CRAWLER: Vec3 = Vec3::new(0.0, 0.06, 0.12);
 
+// Limpet: the sac under its back plates, SOCKET_weak at (0, 0.26, 0.2)
+// from its foot, its middle 0.32 up.
+const WEAK_LIMPET: Vec3 = Vec3::new(0.0, -0.06, 0.2);
+
 /// A crawler sprays what's within this (m) of it.
 pub const CRAWLER_REACH: f32 = 9.0;
 /// How far above a target a crawler looks for a ceiling to come at them
@@ -1277,6 +1377,38 @@ pub fn settle_robot_deaths(
     }
 }
 
+/// Authority, after robots think: the bites of limpets that are on someone.
+pub fn limpet_bites(
+    base: Res<Tuning>,
+    bodies: Bodies,
+    mut limpets: Query<(Entity, &Player, &mut Brain, Option<&BodyTuning>)>,
+    mut damage: MessageWriter<Damage>,
+) {
+    for (entity, player, mut brain, own) in &mut limpets {
+        if !std::mem::take(&mut brain.limpet.bite) {
+            continue;
+        }
+        let Some(prey) = brain.limpet.prey() else { continue };
+        let frame = player.mode.body().and_then(|b| bodies.frame(b));
+        let (at, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
+        damage.write(Damage {
+            target: prey,
+            amount: LIMPET_BITE,
+            source: Some(entity),
+            weak: false,
+            from: Some(at),
+        });
+    }
+}
+
+/// What a limpet's bite does (every [`limpet::BITE_EVERY`] s).
+pub const LIMPET_BITE: f32 = 6.0;
+
+/// Whether a limpet is on someone, biting (its plates open).
+pub fn limpet_latched(brain: &Brain) -> bool {
+    brain.limpet.latched()
+}
+
 /// Debug: robots to spawn by our ship, for trying out a fight. Read by the
 /// authority (so only the host's buttons work).
 #[derive(Message, Clone, Copy, Debug)]
@@ -1327,6 +1459,8 @@ pub fn debug_spawn_robots(
                     commands.spawn(new_robot(*kind, Affixes::NONE, mode, *home, post, &tuning, *spawned * 3 + i));
                 }
             }
+            // Limpets live on rocks (see `fauna`).
+            Gait::Clinger => {}
         }
     }
 }

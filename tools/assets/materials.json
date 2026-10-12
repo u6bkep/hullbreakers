@@ -39,6 +39,26 @@
       "doc": "Clear glass or visor: alpha-blended, smooth.",
       "color": "#b4c8d2", "metallic": 0.0, "roughness": 0.05, "alpha": 0.3
     },
+    "hide_primary": {
+      "doc": "A creature's main outer surface: stony plates, hide, chitin. Matte, like the asteroids.",
+      "color": "#a8a9a5", "metallic": 0.0, "roughness": 0.9, "palette": true
+    },
+    "hide_secondary": {
+      "doc": "A creature's second hide, for value contrast: darker plates, markings.",
+      "color": "#5c5e62", "metallic": 0.0, "roughness": 0.9, "palette": true
+    },
+    "skin": {
+      "doc": "Smooth living skin with a sheen: a jelly's bell, a soft body.",
+      "color": "#a8a9a5", "metallic": 0.0, "roughness": 0.4, "palette": true
+    },
+    "flesh": {
+      "doc": "Soft wet tissue: feet, mouths, siphons, what shows between plates. Glistening.",
+      "color": "#5c5e62", "metallic": 0.0, "roughness": 0.25, "palette": true
+    },
+    "membrane": {
+      "doc": "Thin translucent tissue: fronds, fins, veils. Alpha-blended, glistening.",
+      "color": "#b4c8d2", "metallic": 0.0, "roughness": 0.3, "alpha": 0.7, "palette": true
+    },
     "emissive": {
       "doc": "Lights that mean something: indicators, sensors and eyes, weak spots, interactables.",
       "color": "#ffffff", "metallic": 0.0, "roughness": 0.4, "palette": true,

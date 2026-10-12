@@ -136,6 +136,9 @@ tuning! {
     bools {
         "Boots" {
             wall_walk: true;
+            // Boots take hold whatever side of the body touches first (a
+            // limpet's whole underside is foot), not only the feet.
+            land_any_side: false;
         }
         "Debug" {
             show_gizmos: false;

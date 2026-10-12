@@ -21,8 +21,10 @@
 //!   way. A beam isn't a `Fired` entry but held state ([`super::weapons::Beam`]),
 //!   which hits every tick it's there.
 //!
-//! Something with [`Vitals`] is hurt; a free body is pushed; a player (or
-//! robot) is shoved as by a blast (floating, it drifts off; on boots, only a
+//! Bullets and beams find weak spots (a robot's by its kind, a creature
+//! body's by its [`WeakSpot`]); bursts and arcs don't. Something with
+//! [`Vitals`] is hurt; a free body is pushed (a grazer, which is both, is
+//! hurt and pushed); a player (or robot) is shoved as by a blast (floating, it drifts off; on boots, only a
 //! hard shove knocks it off the deck). Teammates are passed through. Clients
 //! draw their own tracers from the same log entries; only the authority
 //! decides what was hit.
@@ -44,6 +46,15 @@ use super::Layer;
 /// spot (m): weak spots sit just inside the hull capsule, so a shot from
 /// the far side doesn't reach through the body to one.
 const WEAK_DEPTH: f32 = 0.25;
+
+/// A weak spot on something that isn't a player (a grazer): a sphere about
+/// `at` in its body's frame. (A robot's is its kind's: see
+/// [`Robot::weak_spot`].)
+#[derive(Component, Clone, Copy, Debug)]
+pub struct WeakSpot {
+    pub at: Vec3,
+    pub radius: f32,
+}
 
 /// Seconds a bullet flies before it's forgotten.
 pub const SHOT_LIFE: f32 = 2.0;
@@ -137,11 +148,14 @@ pub fn launch_shots(tick: Res<SimTick>, players: Query<(Entity, &Player, Option<
     }
 }
 
-/// Something that can be hurt: where its middle is, and its side.
+/// Something that can be hurt: where its middle is, its side (none, for
+/// fauna that isn't a player: everyone's shots hit a grazer), and whether
+/// it's a player (shoved as one) or a body (pushed as any body is).
 struct Target {
     entity: Entity,
     center: Vec3,
-    team: Team,
+    team: Option<Team>,
+    player: bool,
 }
 
 /// Authority: moves every flown shot one tick, settles the instant ones,
@@ -156,21 +170,32 @@ pub fn fly_shots(
     teams: Query<Option<&Team>, With<Player>>,
     vitals: Query<(Entity, Option<&Player>, Option<&BodyTuning>, Option<&Team>), With<Vitals>>,
     robots: Query<(&Robot, &Player, Option<&BodyTuning>)>,
+    spots: Query<&WeakSpot>,
+    shapes: Query<&Collider>,
     base: Res<Tuning>,
     mut damage: MessageWriter<Damage>,
 ) {
     let dt = time.delta_secs();
     let targets: Vec<Target> = vitals
         .iter()
-        .filter_map(|(entity, player, own, team)| {
-            let player = player?;
-            let frame = player.mode.body().and_then(|b| bodies.frame(b));
-            let (center, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
-            Some(Target {
+        .filter_map(|(entity, player, own, team)| match player {
+            Some(player) => {
+                let frame = player.mode.body().and_then(|b| bodies.frame(b));
+                let (center, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
+                Some(Target {
+                    entity,
+                    center,
+                    team: Some(team.copied().unwrap_or_default()),
+                    player: true,
+                })
+            }
+            // A creature that's a body of its own (a grazer).
+            None => Some(Target {
                 entity,
-                center,
-                team: team.copied().unwrap_or_default(),
-            })
+                center: bodies.frame(entity)?.center_of_mass,
+                team: None,
+                player: false,
+            }),
         })
         .collect();
     // A clear line between two points, as far as hulls and rocks go.
@@ -179,6 +204,49 @@ pub fn fly_shots(
         let Ok(dir) = Dir3::new(d) else { return true };
         let world = SpatialQueryFilter::from_mask(Layer::World);
         spatial.cast_ray(from, dir, d.length(), true, &world).is_none()
+    };
+    // In sight of `from`: for a player, a clear line (their capsule isn't
+    // in the world's way); for a body, the first thing toward its middle is
+    // itself.
+    let in_sight = |from: Vec3, t: &Target| {
+        if t.player {
+            return clear(from, t.center);
+        }
+        let d = t.center - from;
+        let Ok(dir) = Dir3::new(d) else { return true };
+        let world = SpatialQueryFilter::from_mask(Layer::World);
+        spatial
+            .cast_ray(from, dir, d.length(), true, &world)
+            .is_none_or(|h| bodies.body_of_collider(h.entity) == Some(t.entity))
+    };
+    // A weak spot: a robot's is its kind's (inside it, or behind its armour),
+    // a creature body's its own; a shot's line through the body finds it.
+    let weak_at = |entity: Entity, point: Vec3, dir: Vec3| {
+        let spot = match robots.get(entity) {
+            Ok((kind, player, own)) => {
+                let frame = player.mode.body().and_then(|b| bodies.frame(b));
+                let (center, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
+                let (local, radius) = kind.weak_spot();
+                Some((center + body_rotation(&player.mode, frame.as_ref()) * local, radius))
+            }
+            Err(_) => spots.get(entity).ok().and_then(|w| Some((bodies.frame(entity)?.point_to_world(w.at), w.radius))),
+        };
+        spot.is_some_and(|(spot, radius)| {
+            let along = (spot - point).dot(dir).clamp(0.0, WEAK_DEPTH);
+            (point + dir * along).distance(spot) < radius
+        })
+    };
+    // How far a burst is from a target: a player's middle (they're small);
+    // a creature body's nearest surface (a grazer is 3 m across).
+    let reach_to = |from: Vec3, t: &Target| {
+        if t.player {
+            return t.center.distance(from);
+        }
+        let (Ok(shape), Some(frame)) = (shapes.get(t.entity), bodies.frame(t.entity)) else {
+            return t.center.distance(from);
+        };
+        let (surface, inside) = shape.project_point(frame.position, frame.rotation, from, true);
+        if inside { 0.0 } else { surface.distance(from) }
     };
     let mut hurts: Vec<Damage> = Vec::new();
     // Who's pushed: at what velocity, by what mass, where.
@@ -231,16 +299,7 @@ pub fn fly_shots(
         match shot.kind {
             ShotKind::Bullet { pierce } => {
                 if living {
-                    // A robot's weak spot is a sphere (inside it, or behind
-                    // its armour); the bullet's line through the body finds it.
-                    let weak = robots.get(hit.entity).is_ok_and(|(kind, player, own)| {
-                        let frame = player.mode.body().and_then(|b| bodies.frame(b));
-                        let (center, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
-                        let (local, radius) = kind.weak_spot();
-                        let spot = center + body_rotation(&player.mode, frame.as_ref()) * local;
-                        let along = (spot - point).dot(*dir).clamp(0.0, WEAK_DEPTH);
-                        (point + *dir * along).distance(spot) < radius
-                    });
+                    let weak = weak_at(hit.entity, point, *dir);
                     hurts.push(hurt(hit.entity, if weak { shot.damage * WEAK_MULTIPLIER } else { shot.damage }, weak));
                     pushes.push((hit.entity, shot.velocity, shot.mass, point));
                     // Through it, if it pierces, on from here.
@@ -284,19 +343,23 @@ pub fn fly_shots(
                     let away = if direct { *dir } else { (frame.center_of_mass - burst).normalize_or(*dir) };
                     pushes.push((collider, away * shot.velocity.length(), shot.mass * near, if direct { point } else { frame.center_of_mass }));
                 }
+                // What's living in it is hurt (a burst finds no weak spots);
+                // players are shoved (bodies were pushed above).
                 for t in &targets {
-                    if t.team == shot.team {
+                    if t.team == Some(shot.team) {
                         continue;
                     }
-                    let d = t.center.distance(burst);
+                    let d = reach_to(burst, t);
                     let direct = t.entity == hit.entity;
-                    if !direct && (d > splash || !clear(burst, t.center)) {
+                    if !direct && (d > splash || !in_sight(burst, t)) {
                         continue;
                     }
                     let near = if direct { 1.0 } else { (1.0 - d / splash).max(0.25) };
                     hurts.push(hurt(t.entity, shot.damage * near, false));
-                    let away = (t.center - burst).normalize_or(*dir);
-                    pushes.push((t.entity, away * shot.velocity.length(), shot.mass * near, t.center));
+                    if t.player {
+                        let away = (t.center - burst).normalize_or(*dir);
+                        pushes.push((t.entity, away * shot.velocity.length(), shot.mass * near, t.center));
+                    }
                 }
             }
             ShotKind::Arc { chain, .. } => {
@@ -309,8 +372,8 @@ pub fn fly_shots(
                         amount *= ARC_FALLOFF;
                         let next = targets
                             .iter()
-                            .filter(|t| t.team != shot.team && !struck.contains(&t.entity))
-                            .filter(|t| t.center.distance(at) <= ARC_JUMP && clear(at, t.center))
+                            .filter(|t| t.team != Some(shot.team) && !struck.contains(&t.entity))
+                            .filter(|t| t.center.distance(at) <= ARC_JUMP && in_sight(at, t))
                             .min_by(|a, b| a.center.distance(at).total_cmp(&b.center.distance(at)));
                         let Some(next) = next else { break };
                         hurts.push(hurt(next.entity, amount, false));
@@ -320,8 +383,10 @@ pub fn fly_shots(
                 }
             }
             ShotKind::Laser { .. } => {
+                // A beam hits where it's pointed, weak spots and all.
                 if living {
-                    hurts.push(hurt(hit.entity, shot.damage, false));
+                    let weak = weak_at(hit.entity, point, *dir);
+                    hurts.push(hurt(hit.entity, if weak { shot.damage * WEAK_MULTIPLIER } else { shot.damage }, weak));
                 }
             }
         }
@@ -335,7 +400,7 @@ pub fn fly_shots(
         if mass <= 0.0 {
             continue;
         }
-        if targets.iter().any(|t| t.entity == entity) {
+        if targets.iter().any(|t| t.entity == entity && t.player) {
             shoves.0.push((entity, velocity * mass));
         } else if let Some(body) = bodies.body_of_collider(entity) {
             // Relative to the body: a bolt chasing a fleeing rock pushes less.

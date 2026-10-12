@@ -90,7 +90,8 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   under the crosshair), sockets drawn as small axes (red +X, green +Y, blue
   forward), with every robot model's affix parts showing at once. To the
   left, a table of live robots: a row per kind, the plain one and then one
-  with each affix it can have; they don't fight back. To the right, every
+  with each affix it can have, and the field's fauna (a limpet, a
+  grazer); they don't fight back. To the right, every
   weapon part; behind, rolled guns (a row per frame, and one of the families). An area's labels show only
   while you face it.
 
@@ -247,6 +248,31 @@ threat). The boarding action's carrier is threat 3: two Grapplers, three
 turrets, two crawlers on its hull, a Leader on the bridge and six affixes.
 The model gallery has a row of every kind with each of its affixes,
 dormant but shootable.
+
+The asteroid field (where the game starts) is alive (`sim::fauna`). Rocks
+streaming in sometimes bring some with them:
+
+- **Limpets** (`sim::bots::limpet`): rock mimics, a lump of rock clinging
+  to an asteroid with a thin magenta crack between its shell plates. One
+  feels anyone standing on its rock (you hear it scrape over the rock
+  toward you) and sees anyone who comes close; it shoots a fleshy tendril
+  into them and reels. Someone adrift is hauled in to its rock; someone
+  standing fast on something gets the limpet flying at them instead. Then
+  it rides them, biting, its 40 kg on their line (they can't jet free of
+  it). Shoot it (the sac under its plates is its weak spot), or have a
+  crewmate hook it and reel: their winch out-pulls its tendril and tears
+  it off, stunned a moment, onto *their* rope. Adrift, it tendrils back
+  to the nearest rock.
+- **Grazers**: big, harmless jellyfish-like drifters, in herds, swimming
+  bell-first in slow pulses from rock to rock and tugging at the small
+  ones they feed on. Stand on one's bell and ride it. Hook one, shoot
+  near one or hurt one and it bolts (towing whoever hooked it), its alarm
+  running through the herd into a stampede that tramples whoever's in the
+  way and scatters small rocks. Weak spot: the magenta heart under its
+  bell. Its pulses are its only changes of motion, on a schedule every
+  peer knows, so the network sends one only at each pulse, and clients
+  draw them on time. You hear its pulse only through what touches it: your
+  boots on its back, or your rope in it.
 
 The F1 panel can spawn a Gunner on our bridge or three Swarmers off our
 port side, for trying out a fight.

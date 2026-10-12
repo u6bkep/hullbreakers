@@ -11,6 +11,7 @@ pub mod combat;
 pub mod design;
 pub mod devices;
 pub mod events;
+pub mod fauna;
 pub mod flight;
 pub mod frame;
 pub mod input;
@@ -100,6 +101,7 @@ impl Plugin for SimSharedPlugin {
             .add_observer(bots::add_affix_tuning)
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid)
+            .add_observer(fauna::shape_grazer)
             .add_observer(mission::shape_debris)
             .add_observer(scenarios::recovery::shape_pod)
             // How its devices look here (a client's own presses at once).
@@ -199,6 +201,16 @@ impl Plugin for SimPlugin {
                 )
                     .run_if(in_field)
                     .in_set(SimSystems::Drive),
+            )
+            .add_systems(
+                FixedUpdate,
+                (
+                    fauna::swim,
+                    (fauna::populate_field, fauna::cull_fauna)
+                        .after(asteroids::recycle_field)
+                        .run_if(resource_exists::<fauna::FaunaField>.and_then(in_field)),
+                )
+                    .in_set(SimSystems::Drive),
             );
         // The first scenario is built at the end of the first tick; the
         // local player joins it then.
@@ -222,7 +234,7 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 FixedPostUpdate,
-                (bots::debug_spawn_robots, bots::robot_upkeep, bots::think)
+                (bots::debug_spawn_robots, bots::robot_upkeep, bots::think, bots::limpet_bites)
                     .chain()
                     .after(SimSystems::Beams)
                     .before(SimSystems::Players),
@@ -248,6 +260,9 @@ impl Plugin for SimPlugin {
                         shots::apply_shoves,
                         vitals::beam_burns,
                         vitals::apply_damage,
+                        fauna::alarm,
+                        fauna::trample,
+                        fauna::settle_grazer_deaths,
                         pickups::remove_taken,
                         pickups::spawn_drops,
                         pickups::debug_spawn_loot,
@@ -277,10 +292,11 @@ impl Plugin for SimPlugin {
     }
 }
 
-/// Keeps rocks the player is standing on or grappled to from being recycled.
+/// Keeps rocks the crew are standing on or grappled to from being recycled
+/// (not robots': a limpet goes with its rock).
 fn update_pins(
     mut commands: Commands,
-    players: Query<&player::Player>,
+    players: Query<&player::Player, Without<bots::Robot>>,
     pinned: Query<Entity, With<asteroids::Pinned>>,
     rocks: Query<(), With<asteroids::Asteroid>>,
 ) {
@@ -302,11 +318,11 @@ fn update_pins(
     }
 }
 
-/// The field is kept populated around the ship and every player.
+/// The field is kept populated around the ship and every crew member.
 fn update_field_interest(
     mut interest: ResMut<asteroids::FieldInterest>,
     ships: Query<&Position, With<ship::HomeShip>>,
-    players: Query<&player::Player>,
+    players: Query<&player::Player, Without<bots::Robot>>,
     bodies: bodies::Bodies,
     tuning: Res<tuning::Tuning>,
 ) {

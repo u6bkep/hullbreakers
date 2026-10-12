@@ -133,11 +133,12 @@ impl Session {
         (self.rollbacks() - before) as f32 / (frames as f32 * FRAME.as_secs_f32())
     }
 
-    /// The server's (only) player.
+    /// The server's (only) crew member (the field's limpets are players
+    /// too).
     fn server_player(&mut self) -> Mut<'_, Player> {
         let world = self.server.world_mut();
         let entity = world
-            .query_filtered::<Entity, With<Player>>()
+            .query_filtered::<Entity, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>()
             .single(world)
             .unwrap();
         world.get_mut::<Player>(entity).unwrap().into()
@@ -488,6 +489,60 @@ fn robots_reach_clients() {
     assert!(rate <= 0.5, "robots upset prediction: {rate:.1}/s");
 }
 
+/// The field's fauna reach clients: grazers as bodies posed from their
+/// motion (which changes only at their pulses), where the server has them;
+/// limpets as players. Neither upsets the client's prediction.
+#[test]
+fn fauna_reach_clients() {
+    use hullbreakers::sim::SimTick;
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::fauna::Grazer;
+    use hullbreakers::sim::motion::Motion;
+    let (_guard, mut s) = session(100);
+    s.step(240);
+    let count = |app: &mut App| {
+        let world = app.world_mut();
+        let grazers = world.query_filtered::<(), With<Grazer>>().iter(world).count();
+        let limpets = world.query::<&Robot>().iter(world).filter(|k| **k == Robot::Limpet).count();
+        (grazers, limpets)
+    };
+    // Fauna stream in with the rocks, so one may be on its way to the
+    // client just now: they agree within a moment.
+    let mut counts = (count(&mut s.server), count(&mut s.client));
+    for _ in 0..6 {
+        if counts.0 == counts.1 {
+            break;
+        }
+        s.step(10);
+        counts = (count(&mut s.server), count(&mut s.client));
+    }
+    let (server, client) = counts;
+    eprintln!("fauna: server {server:?}, client {client:?}");
+    assert!(server.0 > 0 && server.1 > 0, "no fauna on the server: {server:?}");
+    assert_eq!(client, server, "the client sees {client:?} of {server:?}");
+    // At the client's tick, each grazer is where the server's motion for it
+    // puts it.
+    let tick = s.client.world().resource::<SimTick>().0;
+    let world = s.server.world_mut();
+    let truth: Vec<Vec3> = world
+        .query_filtered::<&Motion, With<Grazer>>()
+        .iter(world)
+        .map(|m| m.frame_at(tick, Vec3::ZERO).center_of_mass)
+        .collect();
+    let world = s.client.world_mut();
+    let seen: Vec<Vec3> = world
+        .query_filtered::<(&Position, &Rotation, &hullbreakers::sim::bodies::BodyInertia), With<Grazer>>()
+        .iter(world)
+        .map(|(p, r, i)| p.0 + r.0 * i.center_of_mass)
+        .collect();
+    for at in &truth {
+        let off = seen.iter().map(|q| q.distance(*at)).fold(f32::MAX, f32::min);
+        assert!(off < 0.5, "a grazer is drawn {off} m from where the server has it");
+    }
+    let rate = s.rollback_rate(300);
+    assert!(rate <= 0.5, "fauna upset prediction: {rate:.1}/s");
+}
+
 /// A site's devices reach clients: the derelict, where the server has it,
 /// its device state as the server has it, and its doors open in the
 /// client's collider once the server opens them; the mission's objective
@@ -710,7 +765,7 @@ fn a_death_where_you_stand_reaches_the_client() {
     let (_guard, mut s) = session(100);
     s.step(60);
     let world = s.server.world_mut();
-    let mut vitals = world.query_filtered::<&mut Vitals, With<Player>>().single_mut(world).unwrap();
+    let mut vitals = world.query_filtered::<&mut Vitals, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>().single_mut(world).unwrap();
     vitals.health = 0.0;
     vitals.since_hurt = 0.0;
     let mut seen = false;
@@ -720,4 +775,124 @@ fn a_death_where_you_stand_reaches_the_client() {
     }
     assert!(s.server_player().events.iter().any(|(_, e)| e == PlayerEvent::Died), "the server never killed them");
     assert!(seen, "the client never heard it died");
+}
+
+// ---------------------------------------------------------------------------
+// Measurements for docs/proposal-remote-forces.md: what a push from outside
+// the client's own input costs it today. Run with
+// `cargo test --test netplay measure_ -- --ignored --nocapture`.
+
+/// Over `frames` frames: the rollbacks, and how far the client's predicted
+/// player jumped from its own straight-line flight on rollback frames (the
+/// correction the camera has to blend over), worst and summed.
+fn watch_corrections(s: &mut Session, frames: usize) -> (u32, f32, f32) {
+    let dt = FRAME.as_secs_f32();
+    let (mut worst, mut total) = (0.0f32, 0.0f32);
+    let before = s.rollbacks();
+    for _ in 0..frames {
+        let (p0, v0) = match s.local_player().map(|p| p.mode) {
+            Some(Mode::Eva { position, velocity, .. }) => (position, velocity),
+            _ => (Vec3::ZERO, Vec3::ZERO),
+        };
+        let r0 = s.rollbacks();
+        s.step(1);
+        if s.rollbacks() > r0
+            && let Some(Mode::Eva { position, .. }) = s.local_player().map(|p| p.mode)
+        {
+            let jump = position.distance(p0 + v0 * dt);
+            worst = worst.max(jump);
+            total += jump;
+        }
+    }
+    (s.rollbacks() - before, worst, total)
+}
+
+/// Floating still, assist off, 40 m off our ship's beam.
+fn float_clear(s: &mut Session) {
+    let (_, ship, rotation) = s.server_ship();
+    s.teleport(ship + rotation * Vec3::new(40.0, 0.0, 0.0), Vec3::ZERO, Vec3::NEG_Z);
+    s.step(120);
+}
+
+/// An impulse (N s) the authority gives the player, as a hit or a blast
+/// does: only the authority knows of it.
+fn measure_kick(impulse: f32, what: &str) {
+    let (_guard, mut s) = session(100);
+    float_clear(&mut s);
+    let quiet = watch_corrections(&mut s, 60);
+    let mass = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().player_mass;
+    let tuning = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().clone();
+    s.server_player().shove(Vec3::X * impulse / mass, None, &tuning);
+    let (rollbacks, worst, total) = watch_corrections(&mut s, 120);
+    eprintln!(
+        "{what}: {impulse} N s ({:.1} m/s): {rollbacks} rollbacks in 2 s (quiet before: {}), worst correction {worst:.2} m, summed {total:.2} m",
+        impulse / mass,
+        quiet.0
+    );
+}
+
+#[test]
+#[ignore]
+fn measure_shotgun_shove() {
+    // Eight 30 g pellets at 420 m/s, all landing.
+    measure_kick(8.0 * 0.03 * 420.0, "shotgun shell, every pellet");
+}
+
+#[test]
+#[ignore]
+fn measure_blast() {
+    // A Grappler going up, 3 m away (half its 900 N s at that range).
+    measure_kick(450.0, "volatile Grappler blast at 3 m");
+}
+
+/// A robot (or a crewmate: robots are players) 12 m away hooks the client's
+/// player and winches them in at 15 m/s for half a second (its rope
+/// shortened tick by tick, as a winch does). The client sees the robot
+/// interpolated, its rope too, but doesn't solve that rope for itself.
+fn measure_rope(robot_mass_scale: f32, what: &str) {
+    use hullbreakers::sim::bots::{Affixes, Brain, Robot, new_robot};
+    use hullbreakers::sim::player::Grapple;
+    let _ = robot_mass_scale;
+    let (_guard, mut s) = session(100);
+    float_clear(&mut s);
+    let (ship, ship_at, rotation) = s.server_ship();
+    let me = s.server.world_mut().query_filtered::<Entity, (With<Player>, Without<Robot>)>().single(s.server.world()).unwrap();
+    let at = ship_at + rotation * Vec3::new(52.0, 0.0, 0.0);
+    let tuning = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().clone();
+    let mode = Mode::Eva {
+        position: at,
+        velocity: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
+        pitch: 0.0,
+    };
+    let robot = s.server.world_mut().spawn(new_robot(Robot::Grappler, Affixes::NONE, mode, ship, at, &tuning, 0)).id();
+    s.server.world_mut().get_mut::<Brain>(robot).unwrap().dormant = true;
+    s.step(60);
+    let quiet = watch_corrections(&mut s, 60);
+    s.server.world_mut().get_mut::<Player>(robot).unwrap().grapple = Some(Grapple {
+        target: me,
+        anchor: Vec3::ZERO,
+        length: 12.0,
+        tension: 0.0,
+    });
+    let before = s.rollbacks();
+    let (mut worst, mut total) = (0.0f32, 0.0f32);
+    for _ in 0..30 {
+        if let Some(g) = &mut s.server.world_mut().get_mut::<Player>(robot).unwrap().grapple {
+            g.length = (g.length - 0.25).max(4.0);
+        }
+        let (_, w, t) = watch_corrections(&mut s, 1);
+        worst = worst.max(w);
+        total += t;
+    }
+    let (_, w, t) = watch_corrections(&mut s, 150);
+    worst = worst.max(w);
+    total += t;
+    eprintln!("{what}: {} rollbacks in 3 s (quiet before: {}), worst correction {worst:.2} m, summed {total:.2} m", s.rollbacks() - before, quiet.0);
+}
+
+#[test]
+#[ignore]
+fn measure_rope_yank() {
+    measure_rope(1.0, "rope yank (winched 12 m to 4 m at 15 m/s)");
 }

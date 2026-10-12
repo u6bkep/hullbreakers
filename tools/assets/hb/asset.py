@@ -130,7 +130,60 @@ class Part(Node):
     def hull(self, points, mat=None, bevel=None):
         """Convex hull of `points` (Bevy world): every face flat, coplanar sides merged.
         For wedges and sloped plates; one hull over an L shape is mostly air, so use several."""
-        return self._add(geometry.hull(points, self._mat(mat), self._bevel(bevel)))
+        return self._add(geometry.hull(points, self._matf(mat), self._bevel(bevel)))
+
+    # ---- organic primitives (flora, fauna): see geometry.py and docs/assets.md
+
+    def _matf(self, mat):
+        """A role, or a function of a face centre (Bevy world) -> role, checked per face."""
+        if callable(mat):
+            return lambda c: self._mat(mat(c))
+        return self._mat(mat)
+
+    def _organic_segments(self, segments, radius, mat):
+        """Explicit, or the fewest even (at least 6) that keep `radius` round within the
+        detail size (half of it if `mat` is a glowing role)."""
+        if segments is not None:
+            return int(segments)
+        roles = V.load_roles()
+        # A role function never counts as glowing; give segments explicitly if its glow shows.
+        glows = isinstance(mat, str) and "emissive_strength" in roles.get(mat, {})
+        return geometry.auto_segments(radius, self.asset.detail / (2 if glows else 1), minimum=6)
+
+    def loft(self, rings, mat=None, smooth=True, crease=None):
+        """A closed organic shell through rings of points (Bevy world, same count each; the
+        first and last may be one point, a pole). smooth=True: one smooth skin (hard only
+        across edges of at least `crease` degrees, if given); False: flat triangles."""
+        return self._add(geometry.loft(rings, self._matf(mat), smooth, crease))
+
+    def blob(self, center, radii, mat=None, forward=None, up=None, noise=0.0, seed=0, frequency=1.5,
+             segments=None, smooth=True, crease=None):
+        """A (noisy) ellipsoid: radii (rx, ry, rz) in a local frame oriented by forward/up
+        (as for part()), poles on its local Y. noise is a fraction of the radius (0.2 =
+        +/-20%), seed picks the shape. segments: around; the rings are half that."""
+        rad = max(float(r) for r in radii)
+        seg = self._organic_segments(segments, rad, mat)
+        return self._add(geometry.blob(center, radii, self._matf(mat), seg, forward, up, noise, seed, frequency,
+                                       smooth, crease))
+
+    def sweep(self, path, radius, mat=None, sides=None, up=None, smooth=True, crease=None):
+        """A tube along a path of points (Bevy world). radius: one number, or a list of one per point,
+        each r or (r_side, r_up); 0 at an end makes it pointed. For tendrils, fronds,
+        siphons and stalks."""
+        if isinstance(radius, (int, float)):
+            rmax = float(radius)
+        else:
+            rmax = max(max(r) if isinstance(r, (list, tuple)) else float(r) for r in radius)
+        n = self._organic_segments(sides, rmax, mat)
+        return self._add(geometry.sweep(path, radius, self._matf(mat), n, up, smooth, crease))
+
+    def lump(self, center, radii, mat=None, forward=None, up=None, noise=0.25, seed=0, frequency=1.3,
+             subdivisions=1, floor=None, bevel=None):
+        """A rock: the convex hull of a noisy ellipsoid's icosphere points (subdivisions 1:
+        42 points, about 80 faces; 2: 162), as the game builds its asteroids. Flat faces.
+        floor: points below y = floor are raised to it (a flat base on a surface)."""
+        return self._add(geometry.lump(center, radii, self._matf(mat), self._bevel(bevel), forward, up, noise,
+                                       seed, frequency, subdivisions, floor))
 
     def points(self):
         """Every vertex of this part's primitives (Bevy world), before bevelling."""

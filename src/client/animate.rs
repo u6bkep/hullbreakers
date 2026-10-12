@@ -8,7 +8,9 @@
 //! follow its aim, and the gun kicks when it fires; a Swarmer's thruster
 //! pods tilt against its motion and it bobs as it hovers. A crewmate walks
 //! the same way, its head follows its look, and an arm with something in
-//! hand raises it to aim, kicking as it fires. Purely visual:
+//! hand raises it to aim, kicking as it fires. A limpet breathes: its foot
+//! ripples (in waves front to back as it creeps) and its shell plates lift a
+//! crack, opening wide to show its sac when it hunts. Purely visual:
 //! nothing here feeds back into the simulation.
 
 use std::collections::HashMap;
@@ -46,6 +48,8 @@ pub struct Rig {
     spin: f32,
     /// A Grappler's harpoon arm drawn back for a throw (0 to 1), eased.
     draw: f32,
+    /// A limpet's plates, lifted (0 shut to 1 wide open), eased.
+    open: f32,
 }
 
 /// What kind of body a model is.
@@ -92,6 +96,21 @@ fn parts_of(body: Body) -> &'static [&'static str] {
             "winch",
         ],
         Body::Robot(Robot::Turret) => &["head", "barrel"],
+        Body::Robot(Robot::Limpet) => &[
+            "shell",
+            "plate_l",
+            "plate_r",
+            "plate_rear",
+            "snout",
+            "skirt_0",
+            "skirt_1",
+            "skirt_2",
+            "skirt_3",
+            "skirt_4",
+            "skirt_5",
+            "skirt_6",
+            "skirt_7",
+        ],
         Body::Crew => &[
             "pelvis",
             "torso",
@@ -143,6 +162,7 @@ pub fn rig_avatars(
                 thrust: Vec3::ZERO,
                 spin: 0.0,
                 draw: 0.0,
+                open: 0.0,
             });
         }
     }
@@ -318,6 +338,37 @@ pub fn animate_avatars(
                 // aim's pitch, and the barrel recoils into it as it fires.
                 pose("head", Quat::from_rotation_x(pitch), Vec3::ZERO);
                 pose("barrel", Quat::IDENTITY, Vec3::Z * rig.kick[0] * 1.2);
+            }
+            Body::Robot(Robot::Limpet) => {
+                // Breathing, slow and uneven; hunting (its tendril out, off
+                // its rock, or creeping), faster, plates wide.
+                let hunting = player.grapple.is_some() || !booted || speed > 0.05;
+                let target = if hunting { 1.0 } else { 0.0 };
+                rig.open += (target - rig.open) * (1.0 - (-3.0 * dt).exp());
+                rig.bob += dt * (1.0 + 2.5 * rig.open);
+                let breath = (rig.bob * 0.9).sin() * 0.6 + (rig.bob * 0.37).sin() * 0.4;
+                let lift = 0.05 + 0.02 * breath + 0.4 * rig.open;
+                // Each plate lifts about its hinge (its local X: the model's
+                // parts point their local −Z from joint to free edge, and
+                // turn up about +X).
+                pose("plate_l", Quat::from_rotation_x(lift), Vec3::ZERO);
+                pose("plate_r", Quat::from_rotation_x(lift), Vec3::ZERO);
+                pose("plate_rear", Quat::from_rotation_x(lift * 0.8), Vec3::ZERO);
+                pose("shell", Quat::IDENTITY, Vec3::Y * 0.004 * breath);
+                // The foot: a wave round its rim, travelling back from the
+                // front as it creeps, a slow swell at rest.
+                rig.phase += (1.2 + speed * 25.0) * dt;
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                    // Front (k = 0) leads; the wave runs back down both sides.
+                    let behind = (std::f32::consts::PI - (a - std::f32::consts::PI).abs()) / std::f32::consts::PI;
+                    let ripple = (0.06 + 0.12 * rig.open.min(0.5)) * (rig.phase - behind * 3.0).sin();
+                    pose(&format!("skirt_{k}"), Quat::from_rotation_x(ripple), Vec3::ZERO);
+                }
+                // The snout follows the aim; on someone, it worries at them.
+                let on_someone = player.grapple.is_some_and(|g| g.length < 1.6);
+                let chew = if on_someone { 0.25 * (rig.bob * 9.0).sin().max(0.0) } else { 0.0 };
+                pose("snout", Quat::from_rotation_x((pitch * 0.7).clamp(-0.6, 0.6) - chew), Vec3::ZERO);
             }
             Body::Robot(Robot::Crawler) => {
                 // A tripod gait, quick and short: three legs swing forward,

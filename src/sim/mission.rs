@@ -370,7 +370,8 @@ pub struct Director {
     /// Whether the field's rocks are part of the field scenario (tests turn
     /// them off for a quiet ship).
     pub asteroids: bool,
-    /// Whether enemy ships carry robots (tests of other things turn them off).
+    /// Whether enemy ships carry robots, and the field has fauna (tests of
+    /// other things turn them off).
     pub robots: bool,
 }
 
@@ -725,6 +726,7 @@ pub fn switch_scenario(
         commands.entity(entity).despawn();
     }
     commands.remove_resource::<asteroids::FieldRng>();
+    commands.remove_resource::<super::fauna::FaunaField>();
     let scenario = scenarios::scenario(kind);
     let home = (scenario.build)(&mut Stage {
         commands: &mut commands,

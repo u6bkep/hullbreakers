@@ -169,21 +169,21 @@ pub fn apply_damage(
     time: Res<Time>,
     tuning: Res<Tuning>,
     mut damage: MessageReader<Damage>,
-    mut vitals: Query<(&mut Vitals, Has<Robot>, Option<&BodyTuning>, Option<(&Affixes, &mut Brain, &mut Condition)>)>,
+    mut vitals: Query<(&mut Vitals, Has<Robot>, Has<Player>, Option<&BodyTuning>, Option<(&Affixes, &mut Brain, &mut Condition)>)>,
     mut logs: Query<&mut HitLog>,
     mut hurts: Query<&mut HurtLog>,
 ) {
     let dt = time.delta_secs();
     // The crew's suits heal (to their own most: rank plates them); robots
-    // don't.
-    for (mut v, robot, own, _) in &mut vitals {
+    // and creatures don't.
+    for (mut v, robot, player, own, _) in &mut vitals {
         v.since_hurt += dt;
-        if !robot && v.since_hurt > tuning.health_regen_delay {
+        if player && !robot && v.since_hurt > tuning.health_regen_delay {
             v.health = (v.health + tuning.health_regen_rate * dt).min(tuning_of(&tuning, own).player_health);
         }
     }
     for hit in damage.read() {
-        let Ok((mut v, _, _, guard)) = vitals.get_mut(hit.target) else {
+        let Ok((mut v, _, _, _, guard)) = vitals.get_mut(hit.target) else {
             continue;
         };
         // Already dead this tick: no more hits to count.

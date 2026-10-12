@@ -82,6 +82,10 @@ impl Affix {
 
     /// Whether a kind of robot can have this.
     pub fn fits(self, kind: Robot) -> bool {
+        // Creatures are as they are.
+        if kind.fauna() {
+            return false;
+        }
         match self {
             Affix::Armoured => kind != Robot::Swarmer,
             Affix::Shielded => true,

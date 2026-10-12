@@ -14,8 +14,10 @@
   "kinds": {
     "handheld":    {"doc": "Handheld (weapon, tool)",          "tris": [1000, 4000],  "bevel": [0.002, 0.004], "default_bevel": 0.003, "near": 0.3, "detail_px": 1, "bevel_segments": 1},
     "weapon_part": {"doc": "A swappable weapon part (barrel, magazine, stock, sight, muzzle device): a handheld's piece", "tris": [40, 1200], "bevel": [0.0015, 0.004], "default_bevel": 0.002, "near": 0.3, "detail_px": 1, "bevel_segments": 1},
-    "small_robot": {"doc": "Small robot or creature (<= 1 m)", "tris": [2000, 5000],  "bevel": [0.005, 0.010], "default_bevel": 0.007, "near": 2.0, "detail_px": 2, "bevel_segments": 1},
+    "small_robot": {"doc": "Small robot (<= 1 m)", "tris": [2000, 5000],  "bevel": [0.005, 0.010], "default_bevel": 0.007, "near": 2.0, "detail_px": 2, "bevel_segments": 1},
     "large_robot": {"doc": "Large robot (2-4 m)",              "tris": [3000, 8000], "bevel": [0.01, 0.03],   "default_bevel": 0.02, "near": 3.0, "detail_px": 2, "bevel_segments": 1},
+    "small_creature": {"doc": "Small creature (<= 1 m): organic, unbevelled", "tris": [2000, 5000], "bevel": [0.0, 0.0], "default_bevel": 0.0, "near": 2.0, "detail_px": 2, "bevel_segments": 1},
+    "large_creature": {"doc": "Large creature (2-4 m): organic, unbevelled", "tris": [3000, 8000], "bevel": [0.0, 0.0],   "default_bevel": 0.0, "near": 3.0, "detail_px": 2, "bevel_segments": 1},
     "prop":        {"doc": "Prop, console, crate",             "tris": [500, 3000],   "bevel": [0.005, 0.02],  "default_bevel": 0.01, "near": 1.5, "detail_px": 2, "bevel_segments": 1},
     "flora":       {"doc": "Flora cluster (organic, no bevel)", "tris": [1000, 5000], "bevel": [0.0, 0.0],     "default_bevel": 0.0, "near": 2.0, "detail_px": 2, "bevel_segments": 1},
     "ship_module": {"doc": "Ship module",                      "tris": [5000, 30000], "bevel": [0.03, 0.15],   "default_bevel": 0.06, "near": 5.0, "detail_px": 2, "bevel_segments": 1},

@@ -42,6 +42,10 @@ fn build(stage: &mut Stage) -> Entity {
     let home = stage.commands.spawn(ship::drifting_home_ship()).id();
     if stage.robots {
         crate::sim::bots::spawn_zoo(stage.commands, stage.tuning, home, GALLERY_AT + ZOO_OFFSET, ZOO_TURN);
+        // A grazer in the limpet's row (the limpet has no affixes to fill
+        // it), bell up.
+        let at = crate::sim::bots::zoo_cell(GALLERY_AT + ZOO_OFFSET, ZOO_TURN, crate::sim::bots::Robot::Limpet, 4.0);
+        crate::sim::fauna::spawn_exhibit(stage.commands, at, Quat::IDENTITY);
     }
     home
 }
