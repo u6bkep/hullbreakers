@@ -40,6 +40,11 @@ pub struct Pickup {
     pub since: u32,
     pub items: Vec<Item>,
     pub kind: PickupKind,
+    /// Whose it is, if anyone's: the guns in it are still theirs (see
+    /// `sim::progression`), and with `owner_only` (what they left where
+    /// they died) nobody else can take it.
+    pub owner: Option<Entity>,
+    pub owner_only: bool,
 }
 
 /// What it looks like.
@@ -56,6 +61,9 @@ impl MapEntities for Pickup {
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
         if let Some(body) = &mut self.body {
             *body = mapper.get_mapped(*body);
+        }
+        if let Some(owner) = &mut self.owner {
+            *owner = mapper.get_mapped(*owner);
         }
     }
 }
@@ -75,7 +83,23 @@ impl Pickup {
             since,
             items,
             kind: PickupKind::Dropped,
+            owner: None,
+            owner_only: false,
         }
+    }
+
+    /// What `owner` left where they died: theirs alone to take back.
+    pub fn left_by(owner: Entity, place: (Option<Entity>, Vec3, Vec3), since: u32, items: Vec<Item>) -> Pickup {
+        Pickup {
+            owner: Some(owner),
+            owner_only: true,
+            ..Pickup::dropped(place, since, items)
+        }
+    }
+
+    /// Whether `player` may take from it.
+    pub fn open_to(&self, player: Entity) -> bool {
+        !self.owner_only || self.owner == Some(player)
     }
 
     pub fn half(&self) -> Vec3 {
@@ -162,12 +186,18 @@ pub struct PickupPoint {
     pub turn: Quat,
     pub half: Vec3,
     pub items: Vec<Item>,
+    /// Only this player may take from it (what they left where they died).
+    pub only: Option<Entity>,
 }
 
-/// Player simulation: takes what fits from a pickup (of a box of ammo, as
-/// many rounds as fit), skipping the items in `claimed` (taken from by
+/// Player simulation: `me` takes what fits from a pickup (of a box of ammo,
+/// as many rounds as fit), skipping the items in `claimed` (taken from by
 /// someone else this tick). Returns the items it took from (bits by index).
-pub fn take_from(player: &mut Player, pickup: &PickupPoint, claimed: u32) -> u32 {
+pub fn take_from(me: Entity, player: &mut Player, pickup: &PickupPoint, claimed: u32) -> u32 {
+    if pickup.only.is_some_and(|owner| owner != me) {
+        player.events.push(PlayerEvent::NotYours);
+        return 0;
+    }
     let before = player.loadout.held();
     let mut taken = 0u32;
     let mut partly = [None; 2];
@@ -253,6 +283,7 @@ pub fn remove_taken(
     tick: Res<SimTick>,
     players: Query<&Player>,
     mut pickups: Query<&mut Pickup>,
+    mut profiles: Query<&mut super::progression::Profile>,
     mut commands: Commands,
 ) {
     let mut taken: Vec<(Entity, u32, Vec<(u8, u16)>)> = Vec::new();
@@ -275,6 +306,18 @@ pub fn remove_taken(
     }
     for (entity, bits, partly) in taken {
         let Ok(mut pickup) = pickups.get_mut(entity) else { continue };
+        // Guns of someone's, taken back (or by a crewmate, whose they are
+        // now), aren't out in the world any more.
+        if let Some(mut profile) = pickup.owner.and_then(|o| profiles.get_mut(o).ok()) {
+            for (i, item) in pickup.items.iter().enumerate().take(32) {
+                if let Item::Weapon(w) = item
+                    && bits & (1 << i) != 0
+                    && let Some(k) = profile.out.iter().position(|o| o == w)
+                {
+                    profile.out.swap_remove(k);
+                }
+            }
+        }
         // Boxes of ammo part taken keep what's left in them.
         for (index, left) in partly {
             if let Some(Item::Ammo { rounds, .. }) = pickup.items.get_mut(index as usize) {
@@ -294,17 +337,39 @@ pub fn remove_taken(
 }
 
 /// Authority: what players put down this tick is left where they put it.
-pub fn spawn_drops(tick: Res<SimTick>, players: Query<&Player>, mut commands: Commands) {
-    for player in &players {
+/// It's still theirs until someone takes it (a crewmate taking it makes it
+/// theirs).
+pub fn spawn_drops(tick: Res<SimTick>, players: Query<(Entity, &Player)>, mut commands: Commands) {
+    for (entity, player) in &players {
         for (at, event) in player.events.iter() {
             if let PlayerEvent::Dropped(item) = event
                 && at == tick.0
             {
                 commands.spawn((
                     Name::new("Dropped item"),
-                    Pickup::dropped(dropped_where(&player.mode), tick.0, vec![item]),
+                    Pickup {
+                        owner: Some(entity),
+                        ..Pickup::dropped(dropped_where(&player.mode), tick.0, vec![item])
+                    },
                 ));
             }
+        }
+    }
+}
+
+/// Authority: guns of a player's put down in the world are still theirs:
+/// noted in their profile as out (and back in the stash if nobody picks
+/// them up by the mission's end; see `progression::settle_missions`).
+pub fn note_owned(add: On<Add, Pickup>, pickups: Query<&Pickup>, mut profiles: Query<&mut super::progression::Profile>) {
+    let Ok(pickup) = pickups.get(add.entity) else { return };
+    let Some(mut profile) = pickup.owner.and_then(|o| profiles.get_mut(o).ok()) else {
+        return;
+    };
+    for item in &pickup.items {
+        if let Item::Weapon(w) = item
+            && w.rarity != Rarity::Standard
+        {
+            profile.out.push(*w);
         }
     }
 }
@@ -352,6 +417,8 @@ pub fn stock_ship(commands: &mut Commands, ship: Entity, design: &ShipDesign, se
                 since: 0,
                 items: crate_loot(draw(seed, i as u32), luck),
                 kind: PickupKind::Crate,
+                owner: None,
+                owner_only: false,
             },
         ));
     }
@@ -385,6 +452,8 @@ pub fn debug_spawn_loot(
                 since: tick.0,
                 items: crate_loot(seed, draw(seed, 99) % 101),
                 kind: PickupKind::Crate,
+                owner: None,
+                owner_only: false,
             },
         ));
     }

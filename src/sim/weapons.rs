@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::input::TickInput;
-use super::items::{AmmoKind, Inventory, Item, Perk, WEAPON_SLOTS, Weapon};
+use super::items::{AmmoKind, Inventory, Item, MAX_WEAPON_SLOTS, Perk, Weapon};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GunKind {
@@ -159,7 +159,7 @@ impl Stance {
     /// in both hands at once.
     fn sanitized(self) -> Stance {
         let fit = |slot| match slot {
-            Slot::Gun(i) if i as usize >= WEAPON_SLOTS => Slot::Empty,
+            Slot::Gun(i) if i as usize >= MAX_WEAPON_SLOTS => Slot::Empty,
             slot => slot,
         };
         let (main, off) = (fit(self.main), fit(self.off));
@@ -237,13 +237,15 @@ impl Loadout {
         l
     }
 
-    /// The weapons locker: a standard-issue SMG and rifle, unless one of
-    /// that frame is carried already (each to its usual slot if that's
-    /// free), every ammo pool full, and every mag.
+    /// The weapons locker (the armory): every ammo pool and every mag full,
+    /// and, for someone with no gun at all, a standard-issue SMG and rifle
+    /// (each to its usual slot), so nobody is ever unarmed. (What else to
+    /// carry is chosen from the stash: see `sim::progression`.)
     pub fn restock(&mut self) {
         let before = self.held();
+        let unarmed = !GunKind::CREW.iter().any(|f| self.inventory.has_frame(*f));
         for (frame, slot) in [(GunKind::Smg, 0), (GunKind::Rifle, 1)] {
-            if self.inventory.has_frame(frame) {
+            if !unarmed {
                 continue;
             }
             let issue = Weapon::issue(frame);
@@ -737,17 +739,21 @@ mod tests {
     }
 
     #[test]
-    fn the_locker_issues_only_what_you_lack_and_fills_the_pools() {
+    fn the_locker_arms_the_unarmed_and_fills_the_pools() {
         let mut l = Loadout::base();
-        // A looted rifle in the SMG's usual slot.
+        l.restock();
+        assert_eq!(l.inventory.weapons[0], Some(Weapon::issue(GunKind::Smg)));
+        assert_eq!(l.inventory.weapons[1], Some(Weapon::issue(GunKind::Rifle)));
+        // Someone with a gun of their own gets their mags and pools filled,
+        // and nothing more (the rest is chosen at the armory).
+        let mut l = Loadout::base();
         let rifle = Weapon::new(GunKind::Rifle, 77, Rarity::Rare);
         l.inventory.weapons[0] = Some(Weapon { mag: 3, ..rifle });
         l.restock();
         let inv = &l.inventory;
         assert!(inv.weapons[0].unwrap().same_gun(&rifle), "kept the looted rifle");
         assert_eq!(inv.weapons[0].unwrap().mag, rifle.stats().mag, "its mag topped up");
-        assert_eq!(inv.weapons[1], Some(Weapon::issue(GunKind::Smg)), "an SMG in the next free slot");
-        assert_eq!(inv.weapons[2], None, "no second rifle");
+        assert_eq!(inv.weapons[1], None, "issued a gun to the armed");
         assert_eq!(inv.ammo, AmmoKind::ALL.map(AmmoKind::cap));
         // Again: nothing more.
         let before = l.inventory;

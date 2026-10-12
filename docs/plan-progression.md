@@ -83,3 +83,37 @@ armory and workbench, and the menu). The order:
 
 Tests for each, including netplay (two clients with different profiles,
 end of mission, profiles back in each client's file).
+
+## Status (2026-10-12)
+
+All five steps are built (`sim/progression.rs`, `net/profiles.rs`,
+`client/save.rs`, `client/armory.rs`, `client/workbench.rs`,
+`client/progress_hud.rs`), with tests in `tests/progression.rs` (netplay:
+two clients with their own files, a host, the armory over the network,
+pay saved, a ranked player predicting itself) and `tests/keeping.rs`.
+
+Defaults chosen in building it (the numbers are in `sim/progression.rs`):
+
+- `RECOVER_UNCLAIMED = true`: unrecovered gear is back in the stash when
+  the world changes (any scenario switch). `false` loses it.
+- A gun put down with G stays its owner's until a crewmate takes it (then
+  it's theirs); a death case is its owner's alone.
+- The locker fills ammo and mags, and issues standard guns only to someone
+  carrying none. Standard issue is free at the armory, and isn't stashed.
+- The armory and workbench work only aboard our ship.
+- Pay (salvage, xp): boarding 300/400 won, 60/120 lost; grapple run
+  150/200, 30/60; dead ship 250/350, 50/100; +25/40 per credit; +40/50 each
+  when everyone's home (scenarios where that matters); +25% for a win inside
+  par (300 s, 150 s, 420 s). The field and gallery pay nothing; abandoning a
+  mission pays nothing.
+- Tune: 120 / 350 / 900 salvage to uncommon / rare / exotic. Refit 60 a
+  part. Repaint 20. Scrap: 15 / 40 / 100 / 250 by rarity. Stash cap 40.
+- Ranks: 500 xp for rank 2, then 1000 more, 1500 more... to 10.
+- The profile is saved continuously, not only at a mission's end: the host
+  snapshots each player's profile and what they carry in one tick
+  (`SavedProfile`, replicated) whenever their gear changes (every 5 s when
+  only ammo does), and the client saves that. A host vanishing loses at most
+  a few seconds of ammo.
+- Mission cargo is left in the mission's world at a switch, and never saved.
+- A player leaving takes their guns out of the world (their save has them in
+  the stash).

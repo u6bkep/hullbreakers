@@ -20,6 +20,7 @@ pub mod motion;
 pub mod nav;
 pub mod pickups;
 pub mod player;
+pub mod progression;
 pub mod rope;
 pub mod scenarios;
 pub mod ship;
@@ -144,6 +145,7 @@ impl Plugin for PlayerSimPlugin {
             (
                 combat::update_beams.in_set(SimSystems::Beams),
                 player::player_tick.in_set(SimSystems::Players),
+                progression::tune_to_rank.before(SimSystems::Players),
                 player::pose_player_hulls.after(SimSystems::Players),
             ),
         );
@@ -177,6 +179,9 @@ impl Plugin for SimPlugin {
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
+            .add_observer(pickups::note_owned)
+            .add_observer(progression::leave_with_gear)
+            .init_resource::<progression::ProfileOrders>()
             .init_resource::<mission::NextBodyId>()
             .add_observer(mission::name_body::<ship::ShipHull>)
             .add_observer(mission::name_body::<scenarios::recovery::Pod>)
@@ -251,10 +256,17 @@ impl Plugin for SimPlugin {
                     )
                         .chain()
                         .in_set(mission::MissionSystems::Settle),
-                    (mission::handle_presses, devices::run_devices, mission::tally_crew)
+                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders, progression::open_slots)
                         .chain()
                         .in_set(mission::MissionSystems::React),
-                    (mission::return_when_decided, mission::switch_scenario, mission::arrivals)
+                    (
+                        mission::return_when_decided,
+                        progression::settle_missions,
+                        progression::leave_cargo,
+                        mission::switch_scenario,
+                        mission::arrivals,
+                        progression::snapshot_profiles,
+                    )
                         .chain()
                         .in_set(mission::MissionSystems::Switch),
                 ),

@@ -3,6 +3,7 @@
 //! actions). Which player is local is the network layer's business.
 
 pub mod animate;
+pub mod armory;
 pub mod bindings;
 pub mod camera;
 pub mod combat_fx;
@@ -20,11 +21,13 @@ pub mod pickup_look;
 pub mod profile;
 pub mod render;
 pub mod robot_fx;
+pub mod save;
 pub mod sfx;
 pub mod sky;
 pub mod stress;
 pub mod viewmodel;
 pub mod weapons_fx;
+pub mod workbench;
 
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
@@ -88,6 +91,7 @@ impl Plugin for ClientPlugin {
                     render::setup_materials,
                     bindings::load_bindings,
                     menu::load_stances,
+                    save::load_profile,
                     sky::setup_sky,
                 ),
             )
@@ -140,6 +144,7 @@ impl Plugin for ClientPlugin {
                         sfx::play_event_sounds,
                         camera::camera_fx_events,
                         camera::beam_shake,
+                        armory::open_on_press,
                     )
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),

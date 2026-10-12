@@ -21,8 +21,11 @@ use std::collections::VecDeque;
 use super::LocalPlayer;
 use super::bindings::{Action, Binding, Bindings, Button, KEYBINDS_PATH, Modifier, SLOTS};
 use super::items_hud::{self, AMBER, DIM, INK};
-use crate::sim::items::{AmmoKind, Inventory, Item, ItemOp, PACK_SLOTS, Place, WEAPON_SLOTS};
+use crate::sim::items::{AmmoKind, Inventory, Item, ItemOp, Place};
+use crate::net::ProfileRequests;
 use crate::sim::player::Player;
+use crate::sim::progression::Profile;
+use crate::sim::ship::HomeShip;
 use crate::sim::weapons::{DEFAULT_STANCES, Hand, Loadout, STANCES, Slot, Stance};
 
 pub const STANCES_PATH: &str = "stances.ron";
@@ -31,6 +34,10 @@ pub const STANCES_PATH: &str = "stances.ron";
 pub enum Tab {
     #[default]
     Inventory,
+    /// The stash, at the weapons locker (aboard our ship).
+    Armory,
+    /// Tuning, refitting, repainting and scrapping, at the workbench.
+    Workbench,
     Controls,
 }
 
@@ -47,6 +54,8 @@ pub struct Menu {
     swallow_click: bool,
     /// The inventory item chosen, to move or look at.
     chosen: Option<Place>,
+    /// What's chosen at the armory.
+    pub armory: Option<crate::sim::progression::Holding>,
 }
 
 /// Inventory changes asked for in the menu, waiting to go to the
@@ -187,8 +196,10 @@ pub fn menu(
     mut menu: ResMut<Menu>,
     mut bindings: ResMut<Bindings>,
     mut layout: ResMut<StanceLayout>,
-    player: Option<Single<&Player, With<LocalPlayer>>>,
+    player: Option<Single<(&Player, Option<&Profile>), With<LocalPlayer>>>,
+    homes: Query<(), With<HomeShip>>,
     mut ops: ResMut<ItemOps>,
+    mut requests: Option<ResMut<ProfileRequests>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut exit: MessageWriter<AppExit>,
 ) -> Result {
@@ -207,6 +218,15 @@ pub fn menu(
     // The controls list takes the screen's height, less the window around it.
     let list_height = (ctx.content_rect().height() - 48.0 - 200.0).max(160.0);
     let menu = &mut *menu;
+    let (player, profile) = match player.as_deref() {
+        Some((player, profile)) => (Some(*player), *profile),
+        None => (None, None),
+    };
+    // The armory is aboard our ship.
+    let aboard = player.is_some_and(|p| p.mode.body().is_some_and(|b| homes.contains(b)));
+    if matches!(menu.tab, Tab::Armory | Tab::Workbench) && !aboard {
+        menu.tab = Tab::Inventory;
+    }
     egui::Window::new("Hullbreakers")
         // Pinned at the top, so nothing moves when what's in it grows.
         .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
@@ -217,6 +237,10 @@ pub fn menu(
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut menu.tab, Tab::Inventory, egui::RichText::new("Inventory").size(16.0));
+                if aboard {
+                    ui.selectable_value(&mut menu.tab, Tab::Armory, egui::RichText::new("Armory").size(16.0));
+                    ui.selectable_value(&mut menu.tab, Tab::Workbench, egui::RichText::new("Workbench").size(16.0));
+                }
                 ui.selectable_value(&mut menu.tab, Tab::Controls, egui::RichText::new("Controls").size(16.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Quit game").clicked() {
@@ -232,12 +256,14 @@ pub fn menu(
                 Tab::Inventory => inventory_tab(
                     ui,
                     &mut layout,
-                    player.as_deref().copied(),
+                    player,
                     &bindings,
                     &mut menu.status,
                     &mut menu.chosen,
                     &mut ops,
                 ),
+                Tab::Armory => super::armory::armory_tab(ui, player, profile, &mut menu.armory, requests.as_deref_mut()),
+                Tab::Workbench => super::workbench::workbench_tab(ui, player, profile, &mut menu.armory, requests.as_deref_mut()),
                 Tab::Controls => controls_tab(ui, menu, &mut bindings, list_height),
             }
             if !menu.status.is_empty() {
@@ -267,8 +293,21 @@ fn ask(ops: &mut ItemOps, op: ItemOp) {
 }
 
 /// An inventory place's card, three to a row.
-const CELL: egui::Vec2 = egui::vec2(150.0, 46.0);
-const GAP: f32 = 8.0;
+/// A section's heading on the inventory, armory and workbench screens: the
+/// HUD's label style (hud-style.md: caps, spaced, dim).
+pub(super) fn heading(text: &str) -> egui::RichText {
+    use super::hud::style;
+    egui::RichText::new(text.to_uppercase()).font(style::ui(style::MICRO)).color(style::INK_DIM).extra_letter_spacing(style::MICRO * 0.08)
+}
+
+/// An item's name as the screens title it, in its colour.
+pub(super) fn title(text: impl Into<String>, color: egui::Color32) -> egui::RichText {
+    use super::hud::style;
+    egui::RichText::new(text).font(style::bold(style::TITLE)).color(color)
+}
+
+pub(super) const CELL: egui::Vec2 = egui::vec2(150.0, 46.0);
+pub(super) const GAP: f32 = 8.0;
 /// The height of the inventory above the stances (fixed, so the stances
 /// don't move as the chosen item's details change).
 const ITEMS_HEIGHT: f32 = 365.0;
@@ -276,37 +315,32 @@ const ITEMS_HEIGHT: f32 = 365.0;
 /// One place in the inventory, drawn as a card: what's there, in its
 /// colour. `chosen` is lit; `target` (where the chosen item could go) is
 /// outlined.
-fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chosen: bool, target: bool) -> egui::Response {
+pub(super) fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chosen: bool, target: bool) -> egui::Response {
+    use super::hud::style;
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    let painter = ui.painter_at(rect);
-    let color = item.as_ref().map_or(DIM, items_hud::item_color);
-    let hovered = response.hovered();
-    painter.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(if chosen { 230 } else if hovered { 200 } else { 160 }));
-    let stroke = if chosen {
-        egui::Stroke::new(2.0, color)
+    let painter = ui.painter_at(rect.expand(2.0));
+    let color = item.as_ref().map_or(style::INK_DIM, items_hud::item_color);
+    // A HUD plate (scrim, hairline, cut corners: hud-style.md), its tick
+    // in the item's colour; lit when chosen or hovered.
+    let lift = if chosen { 1.0 } else if response.hovered() { 0.85 } else { 0.7 };
+    style::plate(&painter, rect, if item.is_some() { color } else { style::INK_FAINT }, lift);
+    let outline = style::cut_rect(rect, style::CUT);
+    if chosen {
+        style::glow_line(&painter, outline, color, style::LINE, true);
     } else if target {
-        egui::Stroke::new(1.0, INK.gamma_multiply(0.45))
-    } else if item.is_some() {
-        egui::Stroke::new(1.0, color.gamma_multiply(0.6))
-    } else {
-        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(25))
-    };
-    painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
-    // A rarity edge down the left.
-    if item.is_some() {
-        painter.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())), 2.0, color);
+        painter.add(egui::Shape::closed_line(outline, egui::Stroke::new(style::HAIR, style::fade(style::SUIT, 0.6))));
     }
     let inner = rect.shrink2(egui::vec2(9.0, 5.0));
-    painter.text(inner.left_top(), egui::Align2::LEFT_TOP, tag, egui::FontId::monospace(9.0), DIM);
+    style::caps(&painter, inner.left_top(), egui::Align2::LEFT_TOP, tag, style::MICRO - 3.0, style::INK_DIM);
     let Some(item) = item else {
-        painter.text(inner.left_center() + egui::vec2(0.0, 5.0), egui::Align2::LEFT_CENTER, "empty", egui::FontId::proportional(12.0), DIM);
+        style::text(&painter, inner.left_center() + egui::vec2(0.0, 5.0), egui::Align2::LEFT_CENTER, "empty", style::ui(style::MICRO), style::fade(style::INK_DIM, 0.7));
         return response;
     };
-    let name = painter.layout_no_wrap(item.name(), egui::FontId::proportional(13.0), color);
+    let name = style::galley(&painter, item.name(), style::ui(style::SMALL), color, 0.0);
     let name = if name.size().x <= inner.width() {
         name
     } else {
-        painter.layout_no_wrap(item.name(), egui::FontId::proportional(10.5), color)
+        style::galley(&painter, item.name(), style::ui(style::MICRO - 1.0), color, 0.0)
     };
     painter.galley(inner.left_top() + egui::vec2(0.0, 11.0), name, color);
     let detail = match item {
@@ -315,7 +349,7 @@ fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chos
         Item::Cargo(c) if c.bulky() => "bulky: both hands".into(),
         Item::Cargo(_) => "cargo".into(),
     };
-    painter.text(inner.left_bottom(), egui::Align2::LEFT_BOTTOM, detail, egui::FontId::monospace(9.0), DIM);
+    style::text(&painter, inner.left_bottom(), egui::Align2::LEFT_BOTTOM, detail, style::num(style::MICRO - 3.0), style::INK_DIM);
     response
 }
 
@@ -367,13 +401,14 @@ fn inventory_tab(
     let size = egui::vec2(ui.available_width(), ITEMS_HEIGHT);
     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
         ui.set_min_height(ITEMS_HEIGHT);
-        // Left: what's carried.
-        ui.vertical(|ui| {
+        // Left: what's carried (scrolling, once rank has given more slots
+        // than fit).
+        egui::ScrollArea::vertical().id_salt("carried").max_height(ITEMS_HEIGHT).show(ui, |ui| ui.vertical(|ui| {
             ui.set_width(3.0 * CELL.x + 2.0 * GAP);
-            ui.label(egui::RichText::new("Weapon slots").strong());
+            ui.label(heading("Weapon slots"));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
-                for i in 0..WEAPON_SLOTS as u8 {
+                for i in 0..inv.weapon_slots() as u8 {
                     let place = Place::Weapon(i);
                     let in_hand = Hand::BOTH.iter().any(|h| loadout.weapon_slot(*h) == Some(i as usize));
                     let tag = if in_hand { format!("SLOT {} · IN HAND", i + 1) } else { format!("SLOT {}", i + 1) };
@@ -382,10 +417,10 @@ fn inventory_tab(
                 }
             });
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("Pack").strong());
+            ui.label(heading("Pack"));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
-                for i in 0..PACK_SLOTS as u8 {
+                for i in 0..inv.pack_slots() as u8 {
                     let place = Place::Pack(i);
                     let r = cell(ui, CELL, "PACK", inv.get(place), *chosen == Some(place), target(chosen, place));
                     click(inv, place, &r, ops, chosen);
@@ -426,7 +461,7 @@ fn inventory_tab(
                 }
                 ui.end_row();
             });
-        });
+        }));
         ui.separator();
         // Right: the chosen item.
         ui.vertical(|ui| {
@@ -446,7 +481,7 @@ fn inventory_tab(
     ui.separator();
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Stances").strong());
+        ui.label(heading("Stances"));
         ui.label(
             egui::RichText::new("A gun with the other hand empty is braced: it shoots tighter. Without the grapple in hand, a rope that's out stays out.")
                 .small()
@@ -454,7 +489,7 @@ fn inventory_tab(
         );
     });
     let mut options = vec![Slot::Empty, Slot::Grapple];
-    options.extend((0..WEAPON_SLOTS as u8).map(Slot::Gun));
+    options.extend((0..inv.weapon_slots() as u8).map(Slot::Gun));
     let before = layout.0;
     egui::Grid::new("stances").num_columns(3).spacing([16.0, 3.0]).show(ui, |ui| {
         ui.label("");
@@ -521,7 +556,7 @@ fn details(ui: &mut egui::Ui, player: Option<&Player>, chosen: &mut Option<Place
         return;
     };
     let inv = &player.loadout.inventory;
-    ui.label(egui::RichText::new(item.name()).size(17.0).strong().color(items_hud::item_color(&item)));
+    ui.label(title(item.name(), items_hud::item_color(&item)));
     match item {
         Item::Weapon(weapon) => {
             for (line, color) in items_hud::weapon_lines(&weapon) {
@@ -567,14 +602,14 @@ fn details(ui: &mut egui::Ui, player: Option<&Player>, chosen: &mut Option<Place
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         if let Item::Weapon(_) = item {
-            for i in 0..WEAPON_SLOTS as u8 {
+            for i in 0..inv.weapon_slots() as u8 {
                 let to = Place::Weapon(i);
                 if to != place && ui.small_button(format!("To slot {}", i + 1)).clicked() {
                     ask(ops, ItemOp::Move { from: place, to });
                     *chosen = Some(to);
                 }
             }
-            let pack = (0..PACK_SLOTS as u8).map(Place::Pack).find(|p| inv.get(*p).is_none());
+            let pack = (0..inv.pack_slots() as u8).map(Place::Pack).find(|p| inv.get(*p).is_none());
             if let (Place::Weapon(_), Some(to)) = (place, pack)
                 && ui.small_button("To pack").clicked()
             {

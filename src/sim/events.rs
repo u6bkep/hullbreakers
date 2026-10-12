@@ -89,6 +89,8 @@ pub enum PlayerEvent {
     },
     /// Couldn't take anything from a pickup: no room for it.
     InventoryFull,
+    /// Tried to take what someone else left where they died.
+    NotYours,
     /// Put something down (the authority leaves it as a pickup).
     Dropped(Item),
     /// A shot left a gun (a `gun` frame): from `origin` (the eye), at
@@ -150,6 +152,7 @@ impl PlayerEvent {
             PlayerEvent::Fired { .. } => return None,
             PlayerEvent::PickedUp { .. } => "picked up".into(),
             PlayerEvent::InventoryFull => "no room: drop something first".into(),
+            PlayerEvent::NotYours => "not yours: a crewmate's kit".into(),
             PlayerEvent::Dropped(item) => format!("dropped {}", item.name()),
         })
     }
@@ -177,6 +180,7 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::BeamHit
             | PlayerEvent::Died
             | PlayerEvent::InventoryFull
+            | PlayerEvent::NotYours
             | PlayerEvent::Dropped(_)
             | PlayerEvent::Fired { .. } => {}
         }

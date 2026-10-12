@@ -766,7 +766,7 @@ pub fn play_event_sounds(
             }
             // Something set down; and the pack refusing more.
             PlayerEvent::Dropped(_) => play(&mut commands, &sounds.land_hull, 0.35, pitch * 1.4),
-            PlayerEvent::InventoryFull => play(&mut commands, &sounds.click_off, 0.8, pitch * 0.7),
+            PlayerEvent::InventoryFull | PlayerEvent::NotYours => play(&mut commands, &sounds.click_off, 0.8, pitch * 0.7),
             PlayerEvent::Fired { gun, .. } => {
                 let sound = match gun {
                     GunKind::Smg | GunKind::SwarmerSprayer => &sounds.shot_smg,

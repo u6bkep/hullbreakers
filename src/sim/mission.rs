@@ -126,6 +126,8 @@ pub struct Debrief {
     pub crew: Vec<CrewCard>,
     /// The best of the score cards ("Longest swing: Player 2, 84 m").
     pub awards: Vec<String>,
+    /// What it paid each crew member (see `sim::progression`).
+    pub rewards: Vec<super::progression::Reward>,
 }
 
 /// What a marker points at, for the HUD to style.
@@ -271,6 +273,8 @@ pub struct Mission {
     pub results: Vec<(String, f32)>,
     /// The mission before this one, if it ended.
     pub debrief: Option<Debrief>,
+    /// What it paid, once it's over (for the debrief).
+    pub rewards: Vec<super::progression::Reward>,
 }
 
 impl Mission {
@@ -376,6 +380,11 @@ impl Director {
         self.next = Some(kind);
     }
 
+    /// The scenario the world switches to at the end of this tick, if it does.
+    pub fn switching(&self) -> Option<ScenarioKind> {
+        self.next
+    }
+
     pub fn with_asteroids(asteroids: bool) -> Self {
         Self {
             next: Some(ScenarioKind::Field),
@@ -428,7 +437,7 @@ pub fn handle_presses(
             }
             // The player's own simulation armed them already; the rest are
             // the scenario's and the devices'.
-            ControlAction::Armory | ControlAction::DisableShields | ControlAction::Device(_) => {}
+            ControlAction::Armory | ControlAction::Workbench | ControlAction::DisableShields | ControlAction::Device(_) => {}
         }
     }
 }
@@ -644,6 +653,7 @@ fn debrief(
         results: mission.results.clone(),
         crew: cards,
         awards,
+        rewards: mission.rewards.clone(),
     }
 }
 

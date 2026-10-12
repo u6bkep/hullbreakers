@@ -97,6 +97,16 @@ impl Rarity {
         self as u32
     }
 
+    const ALL: [Rarity; 5] = [Rarity::Standard, Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Exotic];
+
+    /// The next tier up, if there is one (standard issue has none).
+    pub fn next(self) -> Option<Rarity> {
+        match self {
+            Rarity::Standard | Rarity::Exotic => None,
+            r => Some(Rarity::ALL[r as usize + 1]),
+        }
+    }
+
     /// Perks it carries.
     fn perks(self) -> usize {
         match self {
@@ -376,7 +386,29 @@ impl Parts {
         muzzle: Muzzle::Bare,
     };
 
-    /// Every slot's variant, barrel first.
+    /// From variants in [`SLOTS`] order.
+    fn from_slots(p: [PartVariant; 5]) -> Parts {
+        match p {
+            [PartVariant::Barrel(barrel), PartVariant::Magazine(magazine), PartVariant::Stock(stock), PartVariant::Sight(sight), PartVariant::Muzzle(muzzle)] => {
+                Parts { barrel, magazine, stock, sight, muzzle }
+            }
+            _ => unreachable!("parts out of their slots"),
+        }
+    }
+
+    /// Every slot's variant, in [`SLOTS`] order.
+    pub fn slots(&self) -> [PartVariant; 5] {
+        [
+            PartVariant::Barrel(self.barrel),
+            PartVariant::Magazine(self.magazine),
+            PartVariant::Stock(self.stock),
+            PartVariant::Sight(self.sight),
+            PartVariant::Muzzle(self.muzzle),
+        ]
+    }
+
+    /// Every slot's variant, barrel first (in the order names are drawn
+    /// from: see [`Weapon::name`]).
     pub fn all(&self) -> [PartVariant; 5] {
         [
             PartVariant::Barrel(self.barrel),
@@ -686,15 +718,84 @@ impl Mods {
 
 // ---------------------------------------------------------------------------
 // Weapons.
+//
+// FROZEN: players' profiles keep their guns as (frame, seed, rarity) plus
+// their workbench changes (`sim::progression`). Everything a gun is derives
+// from those numbers here, so changing how it's derived (the hash, the
+// salts, the tables of parts, makers, perks and names, their order, or the
+// stat arithmetic) changes every gun everyone has saved. The pinned rolls
+// in this module's tests say when that's happened; if it's meant, bump
+// `ProfileFile::VERSION` and say so in the README.
 
 /// A gun as an object. See the module docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Weapon {
     pub frame: GunKind,
     pub seed: u32,
+    /// As it is now: as found, plus `tune` tiers from the workbench.
     pub rarity: Rarity,
     /// Rounds in the mag.
     pub mag: u16,
+    /// Tiers the workbench has tuned it up by.
+    #[serde(default)]
+    pub tune: u8,
+    /// Parts and paint the workbench has fitted.
+    #[serde(default)]
+    pub refit: Refit,
+}
+
+/// What the workbench has fitted to a gun, by slot (in [`SLOTS`] order):
+/// 0 for what it was made with, else a variant (its index in the slot's
+/// list, plus one). `paint` is 0 for its maker's paint, else one of
+/// [`PAINTS`] (index plus one).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Refit {
+    pub parts: [u8; 5],
+    pub paint: u8,
+}
+
+/// The part slots, in the order a gun's parts are rolled and refitted,
+/// with every variant each takes (stock first).
+pub const SLOTS: [&[PartVariant]; 5] = [
+    &[
+        PartVariant::Barrel(Barrel::Standard),
+        PartVariant::Barrel(Barrel::Long),
+        PartVariant::Barrel(Barrel::Short),
+        PartVariant::Barrel(Barrel::Heavy),
+    ],
+    &[
+        PartVariant::Magazine(Magazine::Standard),
+        PartVariant::Magazine(Magazine::Extended),
+        PartVariant::Magazine(Magazine::Drum),
+        PartVariant::Magazine(Magazine::Quick),
+    ],
+    &[PartVariant::Stock(Stock::Standard), PartVariant::Stock(Stock::Light), PartVariant::Stock(Stock::Heavy)],
+    &[PartVariant::Sight(Sight::Iron), PartVariant::Sight(Sight::Reflex), PartVariant::Sight(Sight::Scope)],
+    &[PartVariant::Muzzle(Muzzle::Bare), PartVariant::Muzzle(Muzzle::Compensator), PartVariant::Muzzle(Muzzle::Booster)],
+];
+
+/// The crew's own paint jobs, for the workbench: (name, body, accent), and
+/// the rank each comes with (see `sim::progression`).
+pub const PAINTS: [(&str, [u8; 3], [u8; 3], u8); 8] = [
+    ("Hull grey", [120, 128, 136], [230, 230, 225], 2),
+    ("Signal orange", [230, 110, 30], [40, 40, 44], 2),
+    ("Deep-space blue", [36, 60, 110], [200, 210, 230], 2),
+    ("Bone", [222, 214, 190], [70, 64, 58], 5),
+    ("Racing green", [32, 90, 56], [220, 190, 90], 5),
+    ("Gunmetal", [58, 62, 68], [180, 120, 60], 7),
+    ("Ice", [210, 236, 244], [40, 110, 150], 7),
+    ("Gold leaf", [212, 170, 60], [30, 28, 26], 9),
+];
+
+impl PartVariant {
+    /// Its slot (in [`SLOTS`] order) and index in the slot's list.
+    pub fn place(self) -> (usize, usize) {
+        SLOTS
+            .iter()
+            .enumerate()
+            .find_map(|(i, options)| Some((i, options.iter().position(|p| *p == self)?)))
+            .expect("every variant is in a slot")
+    }
 }
 
 /// What a weapon's seed made of it.
@@ -770,7 +871,14 @@ impl Weapon {
 
     /// The gun `seed` makes of `frame` at `rarity`, its mag full.
     pub fn new(frame: GunKind, seed: u32, rarity: Rarity) -> Weapon {
-        let mut w = Weapon { frame, seed, rarity, mag: 0 };
+        let mut w = Weapon {
+            frame,
+            seed,
+            rarity,
+            mag: 0,
+            tune: 0,
+            refit: Refit::default(),
+        };
         w.mag = w.stats().mag;
         w
     }
@@ -781,9 +889,14 @@ impl Weapon {
         Weapon::new(frame, draw(seed, 102), Rarity::roll(draw(seed, 103), luck))
     }
 
+    /// The rarity it was found at, before any tuning.
+    pub fn rolled(&self) -> Rarity {
+        Rarity::ALL[(self.rarity as usize).saturating_sub(self.tune as usize).max(1).min(self.rarity as usize)]
+    }
+
     /// Whether two are the same gun (whatever is in their mags).
     pub fn same_gun(&self, other: &Weapon) -> bool {
-        (self.frame, self.seed, self.rarity) == (other.frame, other.seed, other.rarity)
+        (self.frame, self.seed, self.rarity, self.tune, self.refit) == (other.frame, other.seed, other.rarity, other.tune, other.refit)
     }
 
     /// Its maker, parts and perks.
@@ -799,47 +912,23 @@ impl Weapon {
         }
         let s = self.seed;
         let maker = Maker::ROLLED[(draw(s, salt::MAKER) % Maker::ROLLED.len() as u32) as usize];
-        // Rarer guns come stock less often.
-        let plain = 40 - 8 * self.rarity.tier();
-        let part = |i: u32, options: &[PartVariant]| -> PartVariant {
+        // Rarer guns come stock less often (by the rarity it was found at:
+        // tuning it up later changes none of its parts).
+        let plain = 40 - 8 * self.rolled().tier();
+        let mut parts = [PartVariant::Barrel(Barrel::Standard); 5];
+        for (i, (part, options)) in parts.iter_mut().zip(SLOTS).enumerate() {
             // On the stack: stats are derived every tick, rollbacks too.
             let mut weighted = [(options[0], 0); 4];
             for (w, &p) in weighted.iter_mut().zip(options) {
                 *w = (p, if p.standard() { plain } else { 20 * maker.favours(p) });
             }
-            pick(draw(s, salt::PARTS + i), &weighted[..options.len()])
-        };
-        use PartVariant as P;
-        let parts = Parts {
-            barrel: match part(0, &[P::Barrel(Barrel::Standard), P::Barrel(Barrel::Long), P::Barrel(Barrel::Short), P::Barrel(Barrel::Heavy)]) {
-                P::Barrel(b) => b,
-                _ => unreachable!(),
-            },
-            magazine: match part(
-                1,
-                &[
-                    P::Magazine(Magazine::Standard),
-                    P::Magazine(Magazine::Extended),
-                    P::Magazine(Magazine::Drum),
-                    P::Magazine(Magazine::Quick),
-                ],
-            ) {
-                P::Magazine(m) => m,
-                _ => unreachable!(),
-            },
-            stock: match part(2, &[P::Stock(Stock::Standard), P::Stock(Stock::Light), P::Stock(Stock::Heavy)]) {
-                P::Stock(x) => x,
-                _ => unreachable!(),
-            },
-            sight: match part(3, &[P::Sight(Sight::Iron), P::Sight(Sight::Reflex), P::Sight(Sight::Scope)]) {
-                P::Sight(x) => x,
-                _ => unreachable!(),
-            },
-            muzzle: match part(4, &[P::Muzzle(Muzzle::Bare), P::Muzzle(Muzzle::Compensator), P::Muzzle(Muzzle::Booster)]) {
-                P::Muzzle(x) => x,
-                _ => unreachable!(),
-            },
-        };
+            *part = pick(draw(s, salt::PARTS + i as u32), &weighted[..options.len()]);
+            // A refit's part instead, if it has one here.
+            if let Some(&fitted) = self.refit.parts[i].checked_sub(1).and_then(|v| options.get(v as usize)) {
+                *part = fitted;
+            }
+        }
+        let parts = Parts::from_slots(parts);
         // Perks, all different.
         let mut perks = [None; 2];
         for i in 0..self.rarity.perks() {
@@ -926,6 +1015,11 @@ impl Weapon {
             (Maker::Issue, GunKind::Rifle) => ([214, 207, 186], [59, 70, 88]),
             _ => (body, accent),
         };
+        // Or the paint it was given at the workbench.
+        let (body, accent) = match self.refit.paint.checked_sub(1).and_then(|i| PAINTS.get(i as usize)) {
+            Some(&(_, body, accent, _)) => (body, accent),
+            None => (body, accent),
+        };
         WeaponLook {
             frame: self.frame,
             parts: build.parts,
@@ -975,10 +1069,14 @@ pub enum Taken {
     Nothing,
 }
 
-/// Weapon slots: what stances point at.
+/// Weapon slots, to start with: what stances point at. Rank adds more,
+/// up to [`MAX_WEAPON_SLOTS`] (see `sim::progression`).
 pub const WEAPON_SLOTS: usize = 3;
-/// Pack slots, for spares and small cargo.
+/// Pack slots, for spares and small cargo, to start with; up to
+/// [`MAX_PACK_SLOTS`].
 pub const PACK_SLOTS: usize = 6;
+pub const MAX_WEAPON_SLOTS: usize = 4;
+pub const MAX_PACK_SLOTS: usize = 10;
 
 /// Where in an inventory an item is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize)]
@@ -1005,17 +1103,58 @@ pub enum ItemOp {
 }
 
 /// What a player carries. See the module docs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Inventory {
-    pub weapons: [Option<Weapon>; WEAPON_SLOTS],
-    pub pack: [Option<Item>; PACK_SLOTS],
+    pub weapons: [Option<Weapon>; MAX_WEAPON_SLOTS],
+    pub pack: [Option<Item>; MAX_PACK_SLOTS],
     /// Rounds in each pool, by [`AmmoKind::index`].
     pub ammo: [u16; AmmoKind::COUNT],
     /// Bulky cargo in both hands, if any.
     pub carrying: Option<CargoKind>,
+    /// How many of the weapon slots and pack slots it has (rank gives
+    /// more).
+    pub slots: (u8, u8),
+}
+
+impl Default for Inventory {
+    fn default() -> Inventory {
+        Inventory {
+            weapons: [None; MAX_WEAPON_SLOTS],
+            pack: [None; MAX_PACK_SLOTS],
+            ammo: [0; AmmoKind::COUNT],
+            carrying: None,
+            slots: (WEAPON_SLOTS as u8, PACK_SLOTS as u8),
+        }
+    }
 }
 
 impl Inventory {
+    /// How many weapon slots it has.
+    pub fn weapon_slots(&self) -> usize {
+        (self.slots.0 as usize).min(MAX_WEAPON_SLOTS)
+    }
+
+    /// How many pack slots it has.
+    pub fn pack_slots(&self) -> usize {
+        (self.slots.1 as usize).min(MAX_PACK_SLOTS)
+    }
+
+    /// Gives it `weapons` weapon slots and `pack` pack slots (no fewer
+    /// than it has). What's past them, if it had more, is returned.
+    pub fn grow(&mut self, weapons: usize, pack: usize) {
+        self.slots.0 = self.slots.0.max(weapons.min(MAX_WEAPON_SLOTS) as u8);
+        self.slots.1 = self.slots.1.max(pack.min(MAX_PACK_SLOTS) as u8);
+    }
+
+    /// Everything outside its slots, taken out (a file from a higher rank,
+    /// say).
+    pub fn overflow(&mut self) -> Vec<Item> {
+        let (w, p) = (self.weapon_slots(), self.pack_slots());
+        let mut out: Vec<Item> = self.weapons[w..].iter_mut().filter_map(Option::take).map(Item::Weapon).collect();
+        out.extend(self.pack[p..].iter_mut().filter_map(Option::take));
+        out
+    }
+
     pub fn ammo(&self, kind: AmmoKind) -> u16 {
         self.ammo[kind.index()]
     }
@@ -1033,10 +1172,10 @@ impl Inventory {
     }
 
     /// Whether `item` can go at `place` (whatever is there now).
-    pub fn fits(place: Place, item: &Item) -> bool {
+    pub fn fits(&self, place: Place, item: &Item) -> bool {
         match place {
-            Place::Weapon(i) => (i as usize) < WEAPON_SLOTS && matches!(item, Item::Weapon(_)),
-            Place::Pack(i) => (i as usize) < PACK_SLOTS && !item.bulky() && !matches!(item, Item::Ammo { .. }),
+            Place::Weapon(i) => (i as usize) < self.weapon_slots() && matches!(item, Item::Weapon(_)),
+            Place::Pack(i) => (i as usize) < self.pack_slots() && !item.bulky() && !matches!(item, Item::Ammo { .. }),
             Place::Hands => item.bulky(),
         }
     }
@@ -1060,6 +1199,29 @@ impl Inventory {
         }
     }
 
+    /// Takes out all cargo (mission items belong to the mission: they
+    /// don't leave its world or go in a saved profile). Whether there was
+    /// any.
+    pub fn strip_cargo(&mut self) -> bool {
+        let mut any = self.carrying.take().is_some();
+        for slot in &mut self.pack {
+            if matches!(slot, Some(Item::Cargo(_))) {
+                *slot = None;
+                any = true;
+            }
+        }
+        any
+    }
+
+    /// Puts `item` at an empty `place` it fits. Whether it did.
+    pub fn put_back(&mut self, place: Place, item: Item) -> bool {
+        let ok = self.get(place).is_none() && self.fits(place, &item);
+        if ok {
+            self.put(place, Some(item));
+        }
+        ok
+    }
+
     /// Takes out what's at `place`.
     pub fn remove(&mut self, place: Place) -> Option<Item> {
         let item = self.get(place)?;
@@ -1071,11 +1233,11 @@ impl Inventory {
     /// go back to `from`. Whether anything moved.
     pub fn move_item(&mut self, from: Place, to: Place) -> bool {
         let Some(moving) = self.get(from) else { return false };
-        if from == to || !Self::fits(to, &moving) {
+        if from == to || !self.fits(to, &moving) {
             return false;
         }
         let there = self.get(to);
-        if there.is_some_and(|t| !Self::fits(from, &t)) {
+        if there.is_some_and(|t| !self.fits(from, &t)) {
             return false;
         }
         self.put(from, there);
@@ -1086,12 +1248,12 @@ impl Inventory {
     /// The first free place `item` fits: a weapon slot, else the pack (or
     /// the hands, for bulky cargo).
     pub fn free_place(&self, item: &Item) -> Option<Place> {
-        let weapons = (0..WEAPON_SLOTS as u8).map(Place::Weapon);
-        let pack = (0..PACK_SLOTS as u8).map(Place::Pack);
+        let weapons = (0..self.weapon_slots() as u8).map(Place::Weapon);
+        let pack = (0..self.pack_slots() as u8).map(Place::Pack);
         weapons
             .chain(pack)
             .chain([Place::Hands])
-            .find(|p| Self::fits(*p, item) && self.get(*p).is_none())
+            .find(|p| self.fits(*p, item) && self.get(*p).is_none())
     }
 
     /// Puts up to `rounds` of `kind` in its pool, as many as fit under its
@@ -1165,7 +1327,11 @@ impl Inventory {
                 items.push(Item::Ammo { kind, rounds });
             }
         }
-        *self = Inventory::default();
+        // The slots it had, it keeps.
+        *self = Inventory {
+            slots: self.slots,
+            ..Inventory::default()
+        };
         items
     }
 }
@@ -1383,6 +1549,49 @@ mod tests {
         }
     }
 
+    /// A few rolls of each frame, every rarity, as they were when profiles
+    /// started keeping guns. If this fails, generation changed: every saved
+    /// gun changed with it (see the note at "Weapons").
+    #[test]
+    fn saved_guns_stay_the_guns_they_were() {
+        let signature = |w: Weapon| {
+            let s = w.stats();
+            format!(
+                "{}|{:.3}|{:.3}|{}|{:.3}|{:.3}|{:.3}|{:.1}|{:.3}|{:?}",
+                w.name(),
+                s.damage,
+                s.rate,
+                s.mag,
+                s.reload,
+                s.spread_braced,
+                s.spread,
+                s.muzzle_speed,
+                s.switch,
+                s.perks
+            )
+        };
+        let rolls: Vec<String> = GunKind::CREW
+            .into_iter()
+            .flat_map(|frame| ROLLED.into_iter().enumerate().map(move |(i, r)| Weapon::new(frame, 1000 + i as u32 * 7919, r)))
+            .map(signature)
+            .collect();
+        let pinned: Vec<String> = PINNED_ROLLS.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+        if rolls != pinned {
+            panic!("generation changed; now:\n{}", rolls.join("\n"));
+        }
+    }
+
+    const PINNED_ROLLS: &str = "
+        Kessler MP-1 Pike|9.000|12.150|40|1.600|0.780|1.300|513.0|0.440|[None, None]
+        Kessler MP-2 Spyglass|11.520|11.850|40|1.600|0.756|1.940|456.0|0.440|[None, None]
+        Hoshi Type III Howler|10.530|16.350|30|1.040|1.116|1.760|475.0|0.420|[Some(Hardened), None]
+        Hoshi Type IV Frenzy|10.080|20.550|86|2.320|1.296|1.620|475.0|0.420|[Some(HotLoads), Some(Overclocked)]
+        Kessler KG-1 Reach|24.000|6.075|30|2.000|0.228|1.625|1080.0|0.440|[None, None]
+        Kessler KG-2 Watcher|30.720|5.925|30|2.000|0.220|2.425|960.0|0.440|[None, None]
+        Hoshi Type III Howler|28.080|8.175|23|1.300|0.325|2.200|1000.0|0.420|[Some(Hardened), None]
+        Hoshi Type IV Frenzy|26.880|10.275|65|2.900|0.378|2.025|1000.0|0.420|[Some(HotLoads), Some(Overclocked)]
+    ";
+
     #[test]
     fn names_vary() {
         for frame in GunKind::CREW {
@@ -1438,8 +1647,14 @@ mod tests {
         for s in 0..(WEAPON_SLOTS + PACK_SLOTS) as u32 {
             assert!(inv.take(Item::Weapon(Weapon::new(GunKind::Smg, s, Rarity::Common))));
         }
-        assert!(inv.weapons.iter().all(Option::is_some) && inv.pack.iter().all(Option::is_some));
+        assert!(inv.weapons[..WEAPON_SLOTS].iter().all(Option::is_some) && inv.pack[..PACK_SLOTS].iter().all(Option::is_some));
         assert!(!inv.take(Item::Weapon(Weapon::issue(GunKind::Rifle))));
+        // More slots, more room.
+        inv.grow(MAX_WEAPON_SLOTS, PACK_SLOTS);
+        assert!(inv.take(Item::Weapon(Weapon::issue(GunKind::Rifle))));
+        assert!(inv.weapons[MAX_WEAPON_SLOTS - 1].is_some());
+        inv.weapons[MAX_WEAPON_SLOTS - 1] = None;
+        inv.slots.0 = WEAPON_SLOTS as u8;
         // Emptied out, it's all there.
         let all = inv.empty_out();
         assert_eq!(all.len(), WEAPON_SLOTS + PACK_SLOTS);
