@@ -554,6 +554,8 @@ pub fn update_avatars(
             let (path, offset) = match kind {
                 Robot::Gunner => ("robots/gunner/gunner.glb", -tuning.capsule_height / 2.0),
                 Robot::Swarmer => ("robots/swarmer/swarmer.glb", 0.0),
+                Robot::Grappler => ("robots/grappler/grappler.glb", -tuning.capsule_height / 2.0),
+                Robot::Turret => ("robots/turret/turret.glb", -tuning.capsule_height / 2.0),
             };
             commands
                 .spawn((Name::new(kind.name()), Avatar { player: entity }, pose, Visibility::default()))

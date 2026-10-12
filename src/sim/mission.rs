@@ -347,7 +347,11 @@ pub fn switch_scenario(
                 GalleryAnchor,
                 Transform::from_translation(GALLERY_AT),
             ));
-            commands.spawn(ship::drifting_home_ship()).id()
+            let home = commands.spawn(ship::drifting_home_ship()).id();
+            if director.robots {
+                bots::spawn_zoo(&mut commands, &tuning, home, GALLERY_AT + ZOO_OFFSET);
+            }
+            home
         }
     };
     **mission = Mission {
@@ -373,6 +377,10 @@ pub fn switch_scenario(
 /// Where the model gallery starts: a row behind our ship's stern, centred
 /// on its cargo door, at standing eye height.
 pub const GALLERY_AT: Vec3 = Vec3::new(0.0, 1.5, 24.0);
+
+/// Where the gallery's robots float, from its row of models: below them,
+/// nearer the visitors.
+const ZOO_OFFSET: Vec3 = Vec3::new(0.0, -3.0, 3.0);
 
 /// Puts a player in front of the gallery's row, facing it (−Z), floating
 /// beside the others.
@@ -497,7 +505,7 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool)
         exposed_seconds: tuning.home_survival_seconds,
     });
     if robots {
-        crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick);
+        bots::crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick, BOARDING_THREAT);
     }
     home
 }
@@ -505,37 +513,8 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool)
 /// The enemy ship in a boarding action.
 pub const CARRIER: &str = "carrier";
 
-/// Puts robots at the posts of `design` aboard `ship` (flying `flight`):
-/// walkers standing on its decks, flyers holding station about it.
-fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, flight: &Flight, tick: u32) {
-    let frame = flight.frame(tick, Vec3::ZERO);
-    for (i, post) in design.posts.iter().enumerate() {
-        let mode = match post.robot {
-            Robot::Gunner => Mode::Booted {
-                body: ship,
-                feet: post.at + Vec3::Y * 0.01,
-                up: Vec3::Y,
-                velocity: Vec3::ZERO,
-                orientation: post.rotation(),
-                pitch: 0.0,
-            },
-            Robot::Swarmer => {
-                let position = frame.point_to_world(post.at);
-                Mode::Eva {
-                    position,
-                    velocity: frame.point_velocity(position),
-                    orientation: frame.rotation * post.rotation(),
-                    pitch: 0.0,
-                }
-            }
-        };
-        let home_post = match mode {
-            Mode::Booted { feet, .. } => feet,
-            Mode::Eva { .. } => post.at,
-        };
-        commands.spawn(bots::new_robot(post.robot, mode, ship, home_post, tuning, i as u32));
-    }
-}
+/// How dangerous the carrier's crew is (see [`bots::Threat`]).
+const BOARDING_THREAT: bots::Threat = bots::Threat(3);
 
 /// Authority: the replicated mission status.
 pub fn spawn_mission(mut commands: Commands) {

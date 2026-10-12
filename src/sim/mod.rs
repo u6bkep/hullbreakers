@@ -92,6 +92,7 @@ impl Plugin for SimSharedPlugin {
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
             .add_observer(bots::add_body_tuning)
+            .add_observer(bots::add_affix_tuning)
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid)
             .add_observer(mission::shape_debris);
@@ -158,6 +159,7 @@ impl Plugin for SimPlugin {
         app.add_plugins((SimSharedPlugin, PlayerSimPlugin));
         let in_field = resource_exists::<asteroids::FieldRng>;
         app.add_message::<vitals::Damage>()
+            .add_message::<bots::Detonation>()
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
@@ -195,7 +197,7 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 FixedPostUpdate,
-                (bots::debug_spawn_robots, bots::think)
+                (bots::debug_spawn_robots, bots::robot_upkeep, bots::think)
                     .chain()
                     .after(SimSystems::Beams)
                     .before(SimSystems::Players),
@@ -211,6 +213,7 @@ impl Plugin for SimPlugin {
                     pickups::remove_taken,
                     vitals::settle_deaths,
                     bots::settle_robot_deaths,
+                    bots::detonate,
                     mission::handle_presses,
                     mission::settle_battle,
                     mission::switch_scenario,

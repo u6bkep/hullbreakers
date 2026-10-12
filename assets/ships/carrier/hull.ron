@@ -89,6 +89,12 @@ Module(
         (robot: Swarmer, at: (-18.0, -4.0, 5.0)),
         (robot: Swarmer, at: (10.0, 4.0, 40.0)),
         (robot: Swarmer, at: (-10.0, 4.0, 40.0)),
+        // Hull turrets covering the approach to the hangar door: on top of
+        // each engine pod, and under the keel, facing aft. (Manned from
+        // threat 1; see `sim::bots::crew`.)
+        (robot: Turret, at: (8.5, 4.5, 27.0), facing: 180.0),
+        (robot: Turret, at: (-8.5, 4.5, 27.0), facing: 180.0),
+        (robot: Turret, at: (0.0, -0.3, 22.0), facing: 180.0),
     ],
     markers: {
         // Where boarders come in: the middle of the hangar door's sill.

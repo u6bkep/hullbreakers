@@ -26,6 +26,10 @@ pub enum GunKind {
     /// Robots' guns: weaker than the crew's, since robots come in numbers.
     GunnerRifle,
     SwarmerSprayer,
+    /// A marksman Gunner's long rifle: one slow, aimed, heavy shot.
+    MarksmanRifle,
+    /// A hull turret's cannon: slow shells, so it leads its target.
+    TurretCannon,
 }
 
 /// How a kind of gun behaves.
@@ -99,6 +103,30 @@ impl GunKind {
                 reserve: 0,
                 reload: 1.5,
                 bullet_mass: 0.005,
+            },
+            GunKind::MarksmanRifle => &GunStats {
+                name: "Marksman rifle",
+                rate: 1.5,
+                muzzle_speed: 900.0,
+                damage: 34.0,
+                spread_braced: 0.05,
+                spread: 0.05,
+                mag: 5,
+                reserve: 0,
+                reload: 2.5,
+                bullet_mass: 0.02,
+            },
+            GunKind::TurretCannon => &GunStats {
+                name: "Hull turret",
+                rate: 4.0,
+                muzzle_speed: 240.0,
+                damage: 14.0,
+                spread_braced: 0.5,
+                spread: 0.5,
+                mag: 24,
+                reserve: 0,
+                reload: 2.0,
+                bullet_mass: 0.03,
             },
         }
     }
