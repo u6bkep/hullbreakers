@@ -18,7 +18,7 @@ The crew's ship has a **mission wall** on the port side of the bridge: click
 a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
 **asteroid field**, and its button takes you back there.
-`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `gallery`) starts in
+`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `recovery`, `gallery`) starts in
 another. When a mission is decided a banner says how; back in the field, the
 **debrief** gives its report, every crew member's score card (time in vacuum,
 longest swing on one rope, presses, deaths, and what they did) and awards.
@@ -54,10 +54,23 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   take the core off its cradle (it goes in your pack), and get it and
   everyone back aboard in the 75 s before the tripped reactor goes.
 
+- **Recovery**: a ship has broken up nearby and its crew is adrift in the
+  wreckage, scattered in every direction: four suited survivors and a
+  lifeboat with four aboard, each on a clock of air (the nearest run out
+  first, from about 2:20). Their beacons ping in turn every 4 s (flashing
+  amber on the pod, red when the air is nearly gone). Rope one and tow it
+  into our hold; let go of the keys while towing and flight assist keeps
+  station with what you tow instead of braking (so it doesn't run into
+  you). A survivor is light; the lifeboat is 600 kg, so a second rope on it
+  nearly doubles the pull. Win with everyone accounted for and at least 4
+  of the 8 home; alone you can't reach them all, so split up.
+
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn
-  as small axes (red +X, green +Y, blue forward). You start floating in
-  front of it.
+  as small axes (red +X, green +Y, blue forward), with every robot model's
+  affix parts showing at once. Below it, a labelled row of live robots: each
+  kind, and each with every affix it can have. They don't fight back. You
+  start floating in front of it.
 
 You start with the base kit (your suit and its grapple) and whatever your
 profile says you carry (see **Progression**). Guns are in the **weapons
@@ -114,6 +127,11 @@ Recycler (every fourth shot is free) and Last word (the last round in the
 mag hits three times as hard). A gun's name is its maker, the maker's model
 (rarer guns have higher marks) and a word for one of its parts or perks:
 "Kessler KG-3 Longshot", "Hoshi Type II Hornet", "Corvid Scrap #4 Miser".
+A gun looks like what it rolled: it's drawn from its frame's receiver with
+each of its parts on (a long barrel is long, a drum is a drum, a quick mag
+is two taped together, a compensator is ported, a scope has a big objective
+bell), in its maker's paint, in your hands, your crewmates' and on pickups.
+The model gallery has racks of every part and a row of rolled guns.
 
 Robots drop things when destroyed (mostly ammo, sometimes a gun, better from
 tougher robots), and the enemy carrier has **loot crates** aboard, better
@@ -136,20 +154,69 @@ gun with the other hand empty is braced and shoots tighter. Bullets fly at reali
 shooter's velocity, and firing in EVA pushes you back. Only the grapple's
 hand works its rope; stow it and the rope holds its length.
 
-The carrier is crewed by robots: seven **Gunners** posted from its hangar to
-its bridge (walkers with rifle arms that keep their distance and strafe)
-and six **Swarmers** flying escort (fast, fragile
-drones that rush in and spray). Robots are players driven by a brain on the
-host, so they move, aim and shoot by the crew's rules; they see along clear
-sight lines, chase a target that ducks out of view for a few seconds, and
-are destroyed at zero health. Each has a **weak spot**, a glowing magenta
-core (the Gunner's backpack, the Swarmer's rear reactor) that takes 2.5×
-damage: flank them. Hit markers show your hits (white), weak-spot hits
-(magenta) and kills (an X); robots don't heal. The F1 panel can spawn a Gunner on our bridge
-or three Swarmers off our port side, for trying out a fight.
+The carrier is crewed by robots. Robots are players driven by a brain on
+the host, so they move, aim and shoot by the crew's rules; they see along
+clear sight lines, chase a target that ducks out of view for a few seconds,
+call to each other, and are destroyed at zero health, coming apart into
+tumbling, darkened pieces. Each has a **weak spot**, a glowing magenta core
+that takes 2.5× damage: flank them. Hit markers show your hits (white),
+weak-spot hits (magenta) and kills (an X); robots don't heal. Four kinds:
 
-Players have suit health (bottom of the screen). It comes back after a few
-seconds unhurt; at zero you respawn aboard the home ship.
+- **Gunners** (walkers with rifle arms that keep their distance and strafe),
+  posted from the hangar to the bridge. Weak spot: the backpack.
+- **Swarmers** flying escort: fast, fragile drones that rush in and spray.
+  Weak spot: the reactor between the rear thrusters.
+- **Grapplers**: heavy walkers that harpoon you (they draw back first, with
+  a ratchet), reel you off your boots and let go, flinging you out of cover
+  or off the hull. Weak spot: the winch's power cell on the back.
+- **Hull turrets** bolted to the carrier's engine pods and keel, covering the
+  approach to the hangar: a searchlight sweeps for anyone crossing, and the
+  slow shells lead you, so change your velocity. Weak spot: the coolant
+  core at the back of the base.
+
+Robots can have **affixes**, each shown on the model: **Armoured** (dark
+slabs; body hits do 30%, the weak spot is soft), **Shielded** (a shell that
+takes everything until broken, then comes back if left alone), **Overclocked**
+(radiators and stacks; fast and frantic, its lights heat up, then it stops
+to vent steam: while venting every hit is a weak-spot hit), **Volatile**
+(hazard-yellow charges; it explodes when killed, hurting and shoving
+everything near it, robots too, so blasts chain), **Marksman** (Gunners: a
+long barrel and scope; a laser and a swelling glint before each slow, heavy
+shot, its aim locking just before it fires: move then) and **Leader**
+(Gunners: an antenna mast and crest; robots near it aim and fire better, their
+lights pulsing gold with its beacon, until it dies). A ship is crewed for a
+**threat** level that sets how many affixes, and which kinds man which
+posts (`sim::bots::crew`); the boarding action's carrier is threat 3: two
+Grapplers, three turrets, a Leader on the bridge and six affixes. The model
+gallery has a row of every kind with each of its affixes, dormant but
+shootable.
+
+The F1 panel can spawn a Gunner on our bridge or three Swarmers off our
+port side, for trying out a fight.
+
+Players have suit health (bottom left). It comes back after a few seconds
+unhurt; at zero you respawn aboard the home ship, and the HUD marks where
+your kit was left.
+
+### The HUD
+
+The HUD is a suit visor projection (design: [docs/hud-style.md](docs/hud-style.md),
+code: `src/client/hud/`). Around a clear centre: the scenario strip at the
+top (the objective, the clock, the scenario's status lines, and in a ship
+fight both hulls and the carrier's shield), the event feed top left, your
+suit (health, regen, boots, assist, speed against the reference body,
+rope) bottom left, and a card per hand with the stances bottom right
+(weapon names and rarity; what's in a pickup in a card by the crosshair).
+In the world it marks our ship and hostile ones, brackets the reference
+body, and marks the scenario's markers (goals, gates, devices, the way
+home) plus the carrier's hangar, the mission wall after a win, the weapons
+locker while you're unarmed aboard, and your dropped kit; off screen
+they're arrows at the edge. Arcs round the centre point toward whatever
+just hurt you (the authority records where each hurt came from), the edge of the
+screen reddens as your health runs low, and dying shows SUIT FAILURE. It
+scales with the window's height. `HULLBREAKERS_SCENARIO=boarding
+HULLBREAKERS_SHOTS_SHIP=hud HULLBREAKERS_SHOTS=dir` screenshots it in each
+of its states.
 
 Co-op is host-authoritative: the host (or server) simulates everything and
 replicates it. Its tuning is authoritative too; each player keeps their own
@@ -265,7 +332,13 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     despawns the world, spawns the scenario's, and respawns every player on
     deck (`Respawned`, a view relocation). `Mission` is replicated for the
     HUD: the objective, a status board, markers (label, place, kind, for an
-    objective-marker list), the banner, the report and the debrief.
+    objective-marker list), the banner, the report and the debrief, and the
+    report as numbers (`results`: `won`, `seconds`, and each scenario's
+    own, such as `survivors_home`) for whatever pays out on them. Markers
+    name their body by `BodyId` (given by the authority, replicated with the
+    body) and their player by deck slot, never by entity, so a client that
+    hasn't received the body yet finds nothing rather than something
+    wrong.
   - **Devices** (`sim/devices.rs`) are placed by designs as data (see
     [docs/ships.md](docs/ships.md)) and wired by conditions over each other.
     They're pressed through the same interact path as buttons; the
@@ -337,7 +410,9 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   grapple fire/attach/release, reel whine under load, rope twang, rip-off warning.
 - Rope: grey and sagging when slack, straight pale gold when taut, orange to red
   under load with dashes running in while reeling; load gauge under the crosshair.
-- Crosshair ring + distance when a surface is within grapple range.
+- Crosshair ring + distance when a surface is within grapple range; the
+  interact prompt (key and label) beside the crosshair when a click would
+  press something.
 - Camera shake on impacts and rip-offs, a dip on landing, FOV kick on boost.
 
 ## Tuning

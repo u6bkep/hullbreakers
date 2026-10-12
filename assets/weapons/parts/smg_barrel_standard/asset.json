@@ -1,0 +1,29 @@
+{
+  "name": "smg_barrel_standard",
+  "kind": "weapon_part",
+  "brief": "SMG barrel, standard: The issue shroud: collar, finned jacket, crowned tip.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.14
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

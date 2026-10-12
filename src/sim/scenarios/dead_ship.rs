@@ -9,6 +9,8 @@
 //! derelict`): its devices and how they're wired. This module only reads
 //! their state, to tell the crew what to do next and to decide the end.
 //!
+//! Results: `core_home` (1 or 0) and `seconds_to_spare` on the overload.
+//!
 //! Releasing the clamp puts the data core (cargo, not bulky: it goes in the
 //! pack) on its cradle; it's won when the crew is home with it (see
 //! [`core_secured`]).
@@ -22,7 +24,7 @@ use crate::sim::bodies::Bodies;
 use crate::sim::bots::Robot;
 use crate::sim::design::ShipDesign;
 use crate::sim::devices::{DeviceKind, Devices};
-use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, break_up, clock, countdown, presses};
+use crate::sim::mission::{CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, break_up, clock, countdown, presses};
 use crate::sim::items::{CargoKind, Item};
 use crate::sim::pickups::{PICKUP_HALF, Pickup};
 use crate::sim::player::Player;
@@ -124,6 +126,7 @@ fn salvage(
     mut players: Query<(Entity, &mut Player, Has<Robot>)>,
     names: Query<&Name>,
     pickups: Query<&Pickup>,
+    marked: MarkedBodies,
     mission: Single<&mut Mission>,
     mut tally: ResMut<CrewTally>,
 ) {
@@ -236,6 +239,8 @@ fn salvage(
             for (who, turns) in &salvage.turns {
                 tally.credit(*who, format!("turned junctions {turns} times"));
             }
+            mission.result("core_home", if secured { 1.0 } else { 0.0 });
+            mission.result("seconds_to_spare", left.max(0.0));
             mission.decide(phase, tick.0, outcome);
             // Either way, it goes: the crew watches from home, or is thrown
             // off it.
@@ -245,22 +250,18 @@ fn salvage(
         }
     }
 
-    // What to do now, and where.
-    let device = |id: &str, kind| Marker::device(derelict, design, id, kind);
-    let (objective, markers) = match (mission.phase, step) {
+    // What to do now, and where (markers on bodies that have their names
+    // yet).
+    let derelict_id = marked.id(derelict);
+    let home_id = home.and_then(|h| marked.id(h));
+    let device = |id: &str, kind| derelict_id.map(|b| Marker::device(b, design, id, kind));
+    let (objective, markers): (String, Vec<Option<Marker>>) = match (mission.phase, step) {
         (Phase::Won, _) => ("Salvage complete".to_string(), Vec::new()),
         (Phase::Lost, _) => ("The derelict is gone".to_string(), Vec::new()),
         (_, Step::Restart) => (
             "Board the derelict and restart its reactor (engineering, aft)".to_string(),
             vec![
-                Marker {
-                    label: "Airlock".into(),
-                    kind: MarkerKind::Goal,
-                    body: Some(derelict),
-                    at: design.marker("entry") + Vec3::Y * 1.2,
-                    player: None,
-                    device: None,
-                },
+                derelict_id.map(|b| Marker::on(b, design.marker("entry") + Vec3::Y * 1.2, "Airlock", MarkerKind::Goal)),
                 device("reactor", MarkerKind::Device),
             ],
         ),
@@ -281,15 +282,11 @@ fn salvage(
         }
         (_, Step::Release) => ("Release the data core in the vault".to_string(), vec![device("core_clamp", MarkerKind::Goal)]),
         (_, Step::Escape) => {
-            let core: Vec<Marker> = cores
+            let core: Vec<Option<Marker>> = cores
                 .iter()
-                .map(|&(body, at)| Marker {
-                    label: "Data core".into(),
-                    kind: MarkerKind::Goal,
-                    body,
-                    at,
-                    player: None,
-                    device: None,
+                .map(|&(body, at)| match body {
+                    Some(body) => marked.id(body).map(|b| Marker::on(b, at, "Data core", MarkerKind::Goal)),
+                    None => Some(Marker::at(at, "Data core", MarkerKind::Goal)),
                 })
                 .collect();
             let objective = if core.is_empty() {
@@ -297,17 +294,11 @@ fn salvage(
             } else {
                 "Reactor overload — take the data core and get back to the ship!"
             };
-            let ship = home.map(|home| Marker {
-                label: "Ship".into(),
-                kind: MarkerKind::Exit,
-                body: Some(home),
-                at: Vec3::new(0.0, 1.5, 8.0),
-                player: None,
-                device: None,
-            });
-            (objective.to_string(), core.into_iter().chain(ship).collect())
+            let ship = home_id.map(|h| Marker::on(h, Vec3::new(0.0, 1.5, 8.0), "Ship", MarkerKind::Exit));
+            (objective.to_string(), core.into_iter().chain([ship]).collect())
         }
     };
+    let markers: Vec<Marker> = markers.into_iter().flatten().collect();
     let status = match salvage.released {
         Some(released) if mission.phase == Phase::Underway => {
             let left = (OVERLOAD_SECONDS - tick.0.wrapping_sub(released) as f32 / TICK_HZ as f32).max(0.0);

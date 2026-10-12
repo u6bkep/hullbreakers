@@ -24,10 +24,10 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::sim::asteroids::Asteroid;
-use crate::sim::bots::Robot;
+use crate::sim::bots::{Affixes, Condition, Robot, Wrecked};
 use crate::sim::pickups::Pickup;
 use crate::sim::combat::Combatant;
-use crate::sim::vitals::{HitLog, Vitals};
+use crate::sim::vitals::{HitLog, HurtLog, Vitals};
 use crate::sim::flight::Flight;
 use crate::sim::input::PlayerInput;
 use crate::sim::devices::Devices;
@@ -160,6 +160,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_body::<Asteroid>)
             .add_observer(replicate_body::<Debris>)
             .add_observer(replicate_body::<Site>)
+            .add_observer(replicate_body::<crate::sim::scenarios::recovery::Pod>)
             .add_observer(replicate_flight)
             .add_observer(replicate_mission)
             .add_observer(replicate_gallery)
@@ -275,16 +276,22 @@ impl Plugin for ProtocolPlugin {
         app.component::<HomeShip>().replicate_once();
         app.component::<Site>().replicate_once();
         app.component::<Devices>().replicate();
+        app.component::<crate::sim::scenarios::recovery::Pod>().replicate();
+        app.component::<crate::sim::mission::BodyId>().replicate_once();
         app.component::<Asteroid>().replicate_once();
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
         app.component::<Robot>().replicate_once();
+        app.component::<Affixes>().replicate_once();
+        app.component::<Condition>().replicate();
+        app.component::<Wrecked>().replicate_once();
         app.component::<DeckSlot>().replicate_once();
         app.component::<Pickup>().replicate();
         app.component::<Flight>().replicate();
         app.component::<Combatant>().replicate();
         app.component::<Vitals>().replicate();
         app.component::<HitLog>().replicate();
+        app.component::<HurtLog>().replicate();
         app.component::<Mission>().replicate();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();

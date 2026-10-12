@@ -620,18 +620,22 @@ mod tests {
 
     #[test]
     fn a_mission_pays_for_how_it_ended_what_you_did_and_speed() {
-        let slow = reward(ScenarioKind::DeadShip, Phase::Won, 1000.0, &[], false, "A".into()).unwrap();
+        let results = |v: &[(&str, f32)]| v.iter().map(|(k, x)| (k.to_string(), *x)).collect::<Vec<_>>();
+        let slow = reward(ScenarioKind::DeadShip, &results(&[("won", 1.0), ("seconds", 1000.0)]), &[], false, "A".into()).unwrap();
         assert_eq!((slow.salvage, slow.xp), pay_for(ScenarioKind::DeadShip).unwrap().won);
         let credits = ["restarted the reactor".to_string()];
-        let quick = reward(ScenarioKind::DeadShip, Phase::Won, 60.0, &credits, true, "A".into()).unwrap();
+        let quick = reward(ScenarioKind::DeadShip, &results(&[("won", 1.0), ("seconds", 60.0), ("core_home", 1.0)]), &credits, true, "A".into()).unwrap();
         let (w, c, h) = (pay_for(ScenarioKind::DeadShip).unwrap().won, CREDIT_PAY, ALL_HOME_PAY);
-        let base = w.0 + c.0 + h.0;
+        let base = w.0 + 100 + c.0 + h.0;
         assert_eq!(quick.salvage, base + base * QUICK_BONUS / 100, "{:#?}", quick.lines);
         assert!(quick.lines.iter().any(|l| l.starts_with("Restarted the reactor")));
-        let lost = reward(ScenarioKind::Boarding, Phase::Lost, 10.0, &[], false, "A".into()).unwrap();
+        let lost = reward(ScenarioKind::Boarding, &results(&[("won", 0.0), ("seconds", 10.0)]), &[], false, "A".into()).unwrap();
         assert_eq!(lost.salvage, pay_for(ScenarioKind::Boarding).unwrap().lost.0, "a loss got the quick bonus");
-        assert!(reward(ScenarioKind::Field, Phase::Won, 1.0, &[], true, "A".into()).is_none());
-        assert!(reward(ScenarioKind::Boarding, Phase::Underway, 1.0, &[], true, "A".into()).is_none());
+        // Recovery pays by the survivor.
+        let six = reward(ScenarioKind::Recovery, &results(&[("won", 1.0), ("seconds", 900.0), ("survivors_home", 6.0)]), &[], false, "A".into()).unwrap();
+        assert_eq!(six.salvage, pay_for(ScenarioKind::Recovery).unwrap().won.0 + 6 * 25, "{:#?}", six.lines);
+        assert!(reward(ScenarioKind::Field, &results(&[("won", 1.0)]), &[], true, "A".into()).is_none());
+        assert!(reward(ScenarioKind::Boarding, &[], &[], true, "A".into()).is_none(), "paid undecided");
     }
 
     #[test]
@@ -690,21 +694,45 @@ mod tests {
 // Mission pay.
 
 /// What a scenario pays each crew member: (salvage, experience) for a win
-/// and for a loss, and the time to beat (s) for a quick win's bonus.
+/// and for a loss, the time to beat (s) for a quick win's bonus, and pay
+/// per unit of the scenario's own results (see `Mission::result`): (the
+/// result's name, what each unit of it pays, what the debrief calls it).
 #[derive(Clone, Copy, Debug)]
 pub struct Pay {
     pub won: (u32, u32),
     pub lost: (u32, u32),
     pub par: f32,
+    pub per: &'static [(&'static str, (u32, u32), &'static str)],
 }
 
 /// The pay table. A scenario that isn't a mission (the field, the gallery)
 /// pays nothing.
 pub fn pay_for(kind: ScenarioKind) -> Option<Pay> {
     Some(match kind {
-        ScenarioKind::Boarding => Pay { won: (300, 400), lost: (60, 120), par: 300.0 },
-        ScenarioKind::GrappleRun => Pay { won: (150, 200), lost: (30, 60), par: 150.0 },
-        ScenarioKind::DeadShip => Pay { won: (250, 350), lost: (50, 100), par: 420.0 },
+        ScenarioKind::Boarding => Pay {
+            won: (300, 400),
+            lost: (60, 120),
+            par: 300.0,
+            per: &[("shield_dropped", (50, 60), "Shield dropped")],
+        },
+        ScenarioKind::GrappleRun => Pay {
+            won: (150, 200),
+            lost: (30, 60),
+            par: 150.0,
+            per: &[("finished", (15, 20), "Crew through the course")],
+        },
+        ScenarioKind::DeadShip => Pay {
+            won: (250, 350),
+            lost: (50, 100),
+            par: 420.0,
+            per: &[("core_home", (100, 100), "Data core home")],
+        },
+        ScenarioKind::Recovery => Pay {
+            won: (150, 200),
+            lost: (30, 60),
+            par: 300.0,
+            per: &[("survivors_home", (25, 30), "Survivors home")],
+        },
         ScenarioKind::Field | ScenarioKind::Gallery => return None,
     })
 }
@@ -732,21 +760,32 @@ pub struct Reward {
     pub new_rank: Vec<String>,
 }
 
-/// What a mission pays a crew member: the scenario's pay for how it
-/// ended, plus their credits, a quick win and everyone getting home.
-pub fn reward(kind: ScenarioKind, phase: Phase, seconds: f32, credits: &[String], all_home: bool, name: String) -> Option<Reward> {
+/// What a mission pays a crew member, from its results (`won`, `seconds`
+/// and the scenario's own; see `Mission::result`): the scenario's pay for
+/// how it ended and for its results, plus their credits, a quick win and
+/// everyone getting home. Nothing for a mission not decided.
+pub fn reward(kind: ScenarioKind, results: &[(String, f32)], credits: &[String], all_home: bool, name: String) -> Option<Reward> {
     let pay = pay_for(kind)?;
-    let mut items: Vec<((u32, u32), String)> = vec![match phase {
-        Phase::Won => (pay.won, "Won".into()),
-        Phase::Lost => (pay.lost, "Lost, but paid".into()),
-        Phase::Underway => return None,
+    let result = |n: &str| results.iter().find(|(k, _)| k == n).map(|(_, v)| *v);
+    let won = result("won")? > 0.5;
+    let seconds = result("seconds").unwrap_or(f32::INFINITY);
+    let mut items: Vec<((u32, u32), String)> = vec![if won {
+        (pay.won, "Won".into())
+    } else {
+        (pay.lost, "Lost, but paid".into())
     }];
+    for (what, (s, x), label) in pay.per {
+        let n = result(what).unwrap_or(0.0).max(0.0).round() as u32;
+        if n > 0 {
+            items.push(((s * n, x * n), if n == 1 { label.to_string() } else { format!("{label} ({n})") }));
+        }
+    }
     items.extend(credits.iter().map(|c| (CREDIT_PAY, capitalized(c))));
     if all_home && scenarios::scenario(kind).homecoming {
         items.push((ALL_HOME_PAY, "Everyone home".into()));
     }
     let sum = |items: &[((u32, u32), String)]| items.iter().fold((0, 0), |(s, x), ((a, b), _)| (s + a, x + b));
-    if phase == Phase::Won && seconds <= pay.par {
+    if won && seconds <= pay.par {
         let (s, x) = sum(&items);
         items.push(((s * QUICK_BONUS / 100, x * QUICK_BONUS / 100), format!("Inside {}", super::mission::clock(pay.par))));
     }
@@ -781,7 +820,6 @@ pub fn settle_missions(
         return;
     }
     let decided = mission.phase != Phase::Underway;
-    let seconds = mission.ended.unwrap_or(mission.started).wrapping_sub(mission.started) as f32 / super::TICK_HZ as f32;
     let aboard = |p: &Player| p.mode.body().is_some_and(|b| homes.contains(b));
     let all_home = crew.iter().all(|(_, p, ..)| aboard(p));
     let mut rewards = Vec::new();
@@ -792,7 +830,7 @@ pub fn settle_missions(
         }
         let credits = tally.0.get(&entity).map_or(&[][..], |s| &s.credits[..]);
         let name = name.map_or("?".to_string(), |n| n.to_string());
-        if let Some(mut r) = reward(mission.kind, mission.phase, seconds, credits, all_home, name) {
+        if let Some(mut r) = reward(mission.kind, &mission.results, credits, all_home, name) {
             let before = rank(profile.xp);
             profile.salvage = profile.salvage.saturating_add(r.salvage);
             profile.xp = profile.xp.saturating_add(r.xp);

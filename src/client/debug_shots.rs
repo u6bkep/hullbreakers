@@ -2,14 +2,21 @@
 //!
 //! `HULLBREAKERS_SHOTS=<dir> cargo run` teleports the player through a few
 //! vantage points, saves a screenshot at each, then exits.
+//! `HULLBREAKERS_SHOTS_SHIP=hud` puts the HUD through the states it has to
+//! show (armed, hurt, critical, by an objective, dying, a lost fight and
+//! its debrief); start it in the boarding scenario.
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
+use crate::sim::SimTick;
+use crate::sim::mission::{Mission, Phase};
 use crate::sim::player::{Grapple, Mode, Player};
+use crate::sim::vitals::Vitals;
 use crate::sim::devices::Devices;
 use crate::sim::scenarios::boarding::CARRIER;
 use crate::sim::scenarios::dead_ship::DERELICT;
+use crate::sim::scenarios::recovery::Pod;
 use crate::sim::ship::{HOME, ShipHull};
 
 #[derive(Resource)]
@@ -34,6 +41,12 @@ pub fn shot_script_from_env() -> Option<ShotScript> {
 
 /// Vantage points: (name, booted feet + up + facing on the ship, or EVA position relative to the ship).
 enum Vantage {
+    /// EVA `offset` (world axes) from the recovery's pod `index`, looking at
+    /// it.
+    NearPod {
+        index: u8,
+        offset: Vec3,
+    },
     Booted {
         feet: Vec3,
         up: Vec3,
@@ -65,6 +78,8 @@ fn tour() -> &'static str {
         Ok("carrier") => CARRIER,
         Ok("derelict") => DERELICT,
         Ok("course") => "course",
+        Ok("recovery") => "recovery",
+        Ok("hud") => "hud",
         _ => HOME,
     }
 }
@@ -74,6 +89,8 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
         CARRIER => return carrier_vantages(),
         DERELICT => return derelict_vantages(),
         "course" => return course_vantages(),
+        "recovery" => return recovery_vantages(),
+        "hud" => return hud_vantages(),
         _ => {}
     }
     vec![
@@ -242,6 +259,133 @@ fn course_vantages() -> Vec<(&'static str, Vantage)> {
     ]
 }
 
+/// The recovery's tour, from our ship: the wreck's crew out among the
+/// debris (survivor A, near its starting place; the shots run at the start).
+fn recovery_vantages() -> Vec<(&'static str, Vantage)> {
+    vec![
+        (
+            "recovery_stern",
+            Vantage::Eva {
+                offset: Vec3::new(8.0, 4.0, 22.0),
+                look_at: Vec3::new(-90.0, -25.0, 100.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        (
+            "recovery_survivor",
+            Vantage::NearPod {
+                index: 0,
+                offset: Vec3::new(-5.0, 2.0, 4.0),
+            },
+        ),
+        (
+            "recovery_lifeboat",
+            Vantage::NearPod {
+                index: 4,
+                offset: Vec3::new(-7.0, 3.0, 6.0),
+            },
+        ),
+    ]
+}
+
+/// The HUD tour, on our ship and (the `hud_carrier_*` shots) the carrier.
+fn hud_vantages() -> Vec<(&'static str, Vantage)> {
+    let upper = ShipHull::new(CARRIER).design().marker("upper_deck").y;
+    let booted = |feet: Vec3, forward: Vec3, pitch: f32| Vantage::Booted {
+        feet,
+        up: Vec3::Y,
+        forward,
+        pitch,
+    };
+    vec![
+        // At the mission wall: the interact prompt.
+        ("hud_deck", booted(Vec3::new(-2.2, 0.01, -7.3), Vec3::NEG_X, 0.08)),
+        ("hud_hurt", booted(Vec3::new(0.0, 0.01, 10.0), Vec3::NEG_Z, 0.0)),
+        ("hud_critical", booted(Vec3::new(1.5, 0.01, 12.0), Vec3::NEG_Z, 0.0)),
+        ("hud_cargo", booted(Vec3::new(1.5, 0.01, 12.0), Vec3::NEG_Z, 0.0)),
+        (
+            "hud_carrier_eva",
+            Vantage::Eva {
+                offset: Vec3::new(30.0, 14.0, 75.0),
+                look_at: Vec3::new(0.0, 3.0, 0.0),
+                drift: Vec3::ZERO,
+            },
+        ),
+        ("hud_carrier_console", booted(Vec3::new(0.0, upper + 0.01, -25.6), Vec3::NEG_Z, -0.38)),
+        // By a loot crate: the pickup card.
+        ("hud_carrier_crate", booted(Vec3::new(3.4, upper + 0.01, -27.4), Vec3::new(1.0, 0.0, -1.0), -0.7)),
+        ("hud_carrier_dead", booted(Vec3::new(0.0, upper + 0.01, 10.0), Vec3::NEG_Z, 0.0)),
+        ("hud_respawned", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        // The fight lost (by fiat): the banner, then back to the field
+        // after the drift, and the debrief.
+        ("hud_lost", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_lost_2", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_lost_3", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_lost_4", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("hud_debrief", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+    ]
+}
+
+/// The generated weapon of `frame` and `rarity` with the longest name of
+/// the first few hundred seeds: the hand cards' worst case.
+fn long_named(frame: crate::sim::weapons::GunKind, rarity: crate::sim::items::Rarity) -> crate::sim::items::Weapon {
+    let mut weapon = (0..400u32)
+        .map(|seed| crate::sim::items::Weapon::new(frame, seed, rarity))
+        .max_by_key(|w| w.name().chars().count())
+        .expect("seeds");
+    weapon.mag = weapon.stats().mag;
+    weapon
+}
+
+/// The state each HUD shot is in, set as the player arrives: generated
+/// guns with long names, then low ammo, a dry gun, a reload, cargo, low
+/// health, dying.
+fn hud_state(name: &str, player: &mut Player, vitals: Option<&mut Vitals>) {
+    use crate::sim::items::{AmmoKind, CargoKind, Rarity};
+    use crate::sim::weapons::GunKind;
+    if name.starts_with("hud_respawned") || name.starts_with("hud_lost") || name == "hud_debrief" {
+        return;
+    }
+    let loadout = &mut player.loadout;
+    loadout.restock();
+    loadout.inventory.weapons[0] = Some(long_named(GunKind::Smg, Rarity::Exotic));
+    loadout.inventory.weapons[1] = Some(long_named(GunKind::Rifle, Rarity::Rare));
+    loadout.inventory.carrying = None;
+    loadout.switching = 0.0;
+    let Some(vitals) = vitals else { return };
+    match name {
+        "hud_hurt" => {
+            // The rifle braced and low; hurt a moment ago.
+            loadout.current = 2;
+            if let Some(rifle) = &mut loadout.inventory.weapons[1] {
+                rifle.mag = 6;
+            }
+            vitals.health = 55.0;
+            vitals.since_hurt = 0.0;
+        }
+        "hud_critical" => {
+            // The SMG dry; nearly dead, healing.
+            loadout.current = 0;
+            if let Some(smg) = &mut loadout.inventory.weapons[0] {
+                smg.mag = 0;
+            }
+            *loadout.inventory.ammo_mut(AmmoKind::Light) = 0;
+            vitals.health = 14.0;
+            vitals.since_hurt = 4.55;
+        }
+        "hud_cargo" => {
+            loadout.current = 0;
+            loadout.inventory.carrying = Some(CargoKind::PowerCell);
+        }
+        "hud_carrier_console" => loadout.current = 1,
+        "hud_carrier_dead" => {
+            vitals.health = 0.0;
+            vitals.since_hurt = 0.0;
+        }
+        _ => {}
+    }
+}
+
 /// Debug: routes the derelict's power to its vault, as a crew would have,
 /// straight into the authority's state (the shots run on a host).
 fn power_up(hull: &ShipHull, devices: &mut Devices) {
@@ -262,18 +406,27 @@ pub fn run_shot_script(
     mut script: ResMut<ShotScript>,
     mut commands: Commands,
     mut player: Single<&mut Player, With<super::LocalPlayer>>,
+    mut vitals: Option<Single<&mut Vitals, With<super::LocalPlayer>>>,
     ships: Query<(Entity, &Transform, &ShipHull)>,
     mut devices: Query<(&ShipHull, &mut Devices)>,
+    pods: Query<(&Pod, &Transform)>,
+    mut missions: Query<&mut Mission>,
+    tick: Res<SimTick>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    let shots = vantages();
     let want = match tour() {
-        "course" => HOME,
+        "course" | "recovery" => HOME,
+        // The HUD tour's `hud_carrier_*` shots are on the carrier.
+        "hud" => match shots.get(script.next) {
+            Some((name, _)) if name.starts_with("hud_carrier") => CARRIER,
+            _ => HOME,
+        },
         ship => ship,
     };
     let Some((ship_entity, ship_transform, _)) = ships.iter().find(|(.., h)| h.0 == want) else {
         return;
     };
-    let shots = vantages();
     script.timer += time.delta_secs();
     if script.timer < SETTLE_SECONDS {
         return;
@@ -343,6 +496,16 @@ pub fn run_shot_script(
         }
         // Set up below, along with the grapple.
         Vantage::Rope { .. } => player.mode,
+        Vantage::NearPod { index, offset } => {
+            let Some((_, pod)) = pods.iter().find(|(p, _)| p.index == index) else { return };
+            let position = pod.translation + offset;
+            Mode::Eva {
+                position,
+                velocity: Vec3::ZERO,
+                orientation: Transform::from_translation(position).looking_at(pod.translation, Vec3::Y).rotation,
+                pitch: 0.0,
+            }
+        }
     };
     if let Vantage::Rope {
         offset,
@@ -373,5 +536,14 @@ pub fn run_shot_script(
     }
     // Keep the scripted drift so the prograde marker is visible.
     player.flight_assist = false;
+    if tour() == "hud" {
+        let name = shots[script.next].0;
+        hud_state(name, &mut player, vitals.as_mut().map(|v| &mut ***v));
+        if name == "hud_lost"
+            && let Ok(mut mission) = missions.single_mut()
+        {
+            mission.decide(Phase::Lost, tick.0, "SHIP LOST");
+        }
+    }
     script.next += 1;
 }

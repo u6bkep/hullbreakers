@@ -97,9 +97,11 @@ impl Plugin for SimSharedPlugin {
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
             .add_observer(bots::add_body_tuning)
+            .add_observer(bots::add_affix_tuning)
             .add_observer(ship::build_hull)
             .add_observer(asteroids::shape_asteroid)
             .add_observer(mission::shape_debris)
+            .add_observer(scenarios::recovery::shape_pod)
             // A ship's closed doors are part of its collider, wherever it is.
             .add_systems(
                 FixedPostUpdate,
@@ -171,12 +173,16 @@ impl Plugin for SimPlugin {
         app.add_plugins((SimSharedPlugin, PlayerSimPlugin));
         let in_field = resource_exists::<asteroids::FieldRng>;
         app.add_message::<vitals::Damage>()
+            .add_message::<bots::Detonation>()
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
             .add_observer(pickups::note_owned)
             .add_observer(progression::leave_with_gear)
             .init_resource::<progression::ProfileOrders>()
+            .init_resource::<mission::NextBodyId>()
+            .add_observer(mission::name_body::<ship::ShipHull>)
+            .add_observer(mission::name_body::<scenarios::recovery::Pod>)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
             .add_systems(
@@ -213,7 +219,7 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 FixedPostUpdate,
-                (bots::debug_spawn_robots, bots::think)
+                (bots::debug_spawn_robots, bots::robot_upkeep, bots::think)
                     .chain()
                     .after(SimSystems::Beams)
                     .before(SimSystems::Players),
@@ -244,6 +250,7 @@ impl Plugin for SimPlugin {
                         vitals::settle_deaths,
                         pickups::drop_robot_loot,
                         bots::settle_robot_deaths,
+                        bots::detonate,
                     )
                         .chain()
                         .in_set(mission::MissionSystems::Settle),

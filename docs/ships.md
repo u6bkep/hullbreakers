@@ -40,7 +40,8 @@ Module(
     cabins: [(center: (...), size: (...))],   // interior volumes, for light probes
     lights: [(0.0, 2.7, -27.0), ...],         // ceiling lights
     posts: [(robot: Gunner, at: (0.0, 0.0, -2.0), facing: 180.0),   // feet on a floor
-            (robot: Swarmer, at: (18.0, 6.0, -20.0))],              // station outside
+            (robot: Swarmer, at: (18.0, 6.0, -20.0)),               // station outside
+            (robot: Turret, at: (8.5, 4.5, 27.0), facing: 180.0)],  // bolted to a hull face
     markers: {"entry": (0.0, 0.0, 30.0), "objective": (0.0, 3.8, -27.0)},
 )
 ```
@@ -128,6 +129,8 @@ Gunner can. It checks:
 
 - every walker's post is a place to stand, and can be walked to from the entry;
 - every flyer's station is clear of the hull;
+- every mount (a turret's post) lies on an open hull face, which sets which
+  way it stands;
 - every control has somewhere to stand within 2 m of it (one boarders can reach,
   on an enemy);
 - an enemy has an `entry` a walker can stand at, an `objective`, and a
@@ -161,7 +164,11 @@ ship to them. A boarding target's brief, for example:
   ship's story wants (armoury, cargo, quarters).
 - **Routes:** at least one loop or alternative route; some rooms long enough
   (12–35 m) for Gunners' fighting range, with cover; vertical links by ramp.
-- **Crew:** how many walkers and flyers, spread along the routes.
+- **Crew:** how many walkers and flyers, spread along the routes, and
+  mounts covering the approach. A post names the kind of robot it's for; who
+  actually stands there (a Grappler at some walkers' posts, affixes, whether
+  mounts are manned) is rolled from the threat level when the ship is crewed
+  (`sim::bots::crew`).
 - **Outside:** surfaces to grapple and land on along the approach; turret mounts
   top and bottom; a shield that encloses it all.
 - **Look:** a silhouette readable at 400 m that shows which way it's heading;

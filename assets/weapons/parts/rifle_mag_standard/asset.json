@@ -1,0 +1,18 @@
+{
+  "name": "rifle_mag_standard",
+  "kind": "weapon_part",
+  "brief": "Rifle mag, standard: The issue curved 30-round mag.",
+  "palette": {
+    "emissive": "#c2ff4d"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "grappler",
+  "kind": "large_robot",
+  "brief": "Grappler: a heavy hostile walker, ~2.0 m, that harpoons a player on a cable, reels them in off their boots and lets go. Industrial cargo-hauler repurposed: hunched, broad-shouldered, heavier and squatter than the Gunner, wide stance, chunky mag-boot feet. Right arm a fat harpoon launcher with a barbed hook at the muzzle; a cable runs from it over the shoulder to a big winch drum on its back that spins when reeling. Left arm a heavy three-fingered claw. One sensor eye. Oxide red-brown paint, bone accents and plates, dark metal joints, pale green-white eye, amber power and winch lights. Weak spot: the winch's magenta power cell on its back under the drum, hidden from the front. Affix parts: bolted armour slabs, a shield emitter ring, overclock radiator fins and a vent, volatile canisters.",
+  "palette": {
+    "paint_primary": "#8c4a32",
+    "paint_secondary": "#d8d2c0",
+    "emissive": "#c8ffe0",
+    "emissive_secondary": "#ffb040",
+    "emissive_core": "#ff40c8"
+  },
+  "expect": {
+    "size": {"x": [1.0, 1.45], "y": [1.95, 2.05], "z": [0.9, 1.5]},
+    "parts": ["pelvis", "torso", "head", "winch",
+              "upper_arm_l", "claw_l", "upper_arm_r", "harpoon_r",
+              "thigh_l", "shin_l", "foot_l", "thigh_r", "shin_r", "foot_r",
+              "affix_armour_chest", "affix_armour_head", "affix_armour_claw",
+              "affix_armour_thigh_l", "affix_armour_thigh_r", "affix_armour_shin_l", "affix_armour_shin_r",
+              "affix_shield_emitter",
+              "affix_overclock_radiator", "affix_overclock_vent",
+              "affix_volatile_canisters", "affix_volatile_hip"],
+    "colliders": ["COL_torso", "COL_winch", "COL_pelvis", "COL_head",
+                  "COL_thigh_l", "COL_shin_l", "COL_thigh_r", "COL_shin_r"],
+    "sockets": {
+      "SOCKET_eye":    {"at": [0, 1.72, -0.525], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.02},
+      "SOCKET_muzzle": {"at": [0.50, 1.22, -0.80], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.03},
+      "SOCKET_foot_l": {"at": [-0.24, 0, -0.06], "forward": [0, -1, 0], "up": [0, 0, -1], "tol": 0.03},
+      "SOCKET_foot_r": {"at": [0.24, 0, -0.06], "forward": [0, -1, 0], "up": [0, 0, -1], "tol": 0.03},
+      "SOCKET_weak":   {"at": [0, 1.30, 0.40], "tol": 0.01}
+    },
+    "tolerance": 0.01
+  }
+}

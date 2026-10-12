@@ -1,0 +1,25 @@
+{
+  "name": "rifle_receiver",
+  "kind": "handheld",
+  "brief": "The crew rifle's body, which its parts mount on: long and lean, a faceted octagonal handguard with a vertical foregrip, an optic rail, a magwell. Bone body, slate furniture, lime status lights. Barrel, magazine, stock, sight and muzzle device are separate part models (assets/weapons/parts).",
+  "palette": {
+    "paint_primary": "#d6cfba",
+    "paint_secondary": "#3b4658",
+    "emissive_secondary": "#8cff5a"
+  },
+  "expect": {
+    "size": {"x": [0.04, 0.08], "y": [0.18, 0.24], "z": [0.5, 0.56]},
+    "parts": ["receiver", "grip", "trigger_guard", "handguard", "foregrip"],
+    "colliders": ["COL_body", "COL_barrel", "COL_grip", "COL_foregrip"],
+    "sockets": {
+      "SOCKET_grip":     {"at": [0, 0, 0], "tol": 0.001, "forward": [0, 0, -1], "up": [0, 1, 0]},
+      "SOCKET_barrel":   {"at": [0, 0.10, -0.47], "tol": 0.001, "forward": [0, 0, -1]},
+      "SOCKET_foregrip": {"at": [0, 0.02, -0.298], "tol": 0.001},
+      "SOCKET_sight":    {"at": [0, 0.131, -0.07], "tol": 0.001, "up": [0, 1, 0]},
+      "SOCKET_mag":      {"at": [0, 0.05, -0.125], "tol": 0.001},
+      "SOCKET_stock":    {"at": [0, 0.09, 0.065], "tol": 0.001},
+      "SOCKET_eject":    {"at": [0.025, 0.10, -0.05], "tol": 0.02, "forward": [1, 0, 0]}
+    },
+    "tolerance": 0.01
+  }
+}

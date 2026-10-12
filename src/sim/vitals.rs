@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use super::SimTick;
 use super::events::PlayerEvent;
-use super::bots::{BodyTuning, Robot, tuning_of};
+use super::bots::{self, Affixes, BodyTuning, Brain, Condition, Robot, tuning_of};
 use super::pickups::{Pickup, left_where};
-use super::player::{DeckSlot, Player};
+use super::combat::Beams;
+use super::player::{DeckSlot, Mode, Player};
 use super::ship::HomeShip;
 use super::tuning::Tuning;
 
@@ -43,6 +44,47 @@ pub struct Damage {
     pub source: Option<Entity>,
     /// Whether it was a weak spot.
     pub weak: bool,
+    /// Where it came from, in the world (a shot's muzzle, a beam's turret),
+    /// for the victim's [`HurtLog`].
+    pub from: Option<Vec3>,
+}
+
+/// What has recently hurt a player, and from where: their HUD's damage
+/// arcs. The authority writes it; a client can't know what hit it.
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct HurtLog {
+    /// Hurts counted so far; a reader keeps its own count to see new ones.
+    pub count: u32,
+    /// The most recent, newest last.
+    pub recent: VecDeque<Hurt>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Hurt {
+    /// Where it came from, in the world, if anywhere.
+    pub from: Option<Vec3>,
+    pub amount: f32,
+    /// It was the killing blow.
+    pub kill: bool,
+}
+
+/// How many hurts a log keeps.
+const HURT_LOG: usize = 8;
+
+impl HurtLog {
+    fn push(&mut self, hurt: Hurt) {
+        self.count = self.count.wrapping_add(1);
+        self.recent.push_back(hurt);
+        while self.recent.len() > HURT_LOG {
+            self.recent.pop_front();
+        }
+    }
+
+    /// Hurts since a reader last saw `count` of them, oldest first.
+    pub fn since(&self, count: u32) -> impl Iterator<Item = &Hurt> {
+        let new = (self.count.wrapping_sub(count) as usize).min(self.recent.len());
+        self.recent.iter().skip(self.recent.len() - new)
+    }
 }
 
 /// What a player has recently hit, for their hit markers. The authority
@@ -85,6 +127,7 @@ impl HitLog {
 pub fn beam_burns(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
+    beams: Option<Res<Beams>>,
     players: Query<(Entity, &Player)>,
     mut damage: MessageWriter<Damage>,
 ) {
@@ -94,47 +137,75 @@ pub fn beam_burns(
             .iter()
             .any(|(at, e)| at == tick.0 && e == PlayerEvent::BeamHit);
         if hit {
+            // Beams catch players in EVA: the nearest one is the turret.
+            let from = match (player.mode, beams.as_deref()) {
+                (Mode::Eva { position, .. }, Some(beams)) => beams
+                    .0
+                    .iter()
+                    .map(|b| {
+                        let d = (b.to - b.from).normalize_or_zero();
+                        let along = (position - b.from).dot(d).clamp(0.0, b.from.distance(b.to));
+                        ((position - (b.from + d * along)).length(), b.from)
+                    })
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, from)| from),
+                _ => None,
+            };
             damage.write(Damage {
                 target: entity,
                 amount: tuning.beam_damage,
                 source: None,
                 weak: false,
+                from,
             });
         }
     }
 }
 
 /// Authority: applies this tick's damage, and heals whoever has gone long
-/// enough unhurt.
+/// enough unhurt. A robot's affixes have their say first (a shell, armour:
+/// see [`bots::absorb`]).
 pub fn apply_damage(
     time: Res<Time>,
     tuning: Res<Tuning>,
     mut damage: MessageReader<Damage>,
-    mut vitals: Query<(&mut Vitals, Has<Robot>, Option<&BodyTuning>)>,
+    mut vitals: Query<(&mut Vitals, Has<Robot>, Option<&BodyTuning>, Option<(&Affixes, &mut Brain, &mut Condition)>)>,
     mut logs: Query<&mut HitLog>,
+    mut hurts: Query<&mut HurtLog>,
 ) {
     let dt = time.delta_secs();
     // The crew's suits heal (to their own most: rank plates them); robots
     // don't.
-    for (mut v, robot, own) in &mut vitals {
+    for (mut v, robot, own, _) in &mut vitals {
         v.since_hurt += dt;
         if !robot && v.since_hurt > tuning.health_regen_delay {
             v.health = (v.health + tuning.health_regen_rate * dt).min(tuning_of(&tuning, own).player_health);
         }
     }
     for hit in damage.read() {
-        let Ok((mut v, ..)) = vitals.get_mut(hit.target) else {
+        let Ok((mut v, _, _, guard)) = vitals.get_mut(hit.target) else {
             continue;
         };
         // Already dead this tick: no more hits to count.
         if v.health <= 0.0 {
             continue;
         }
-        v.health = (v.health - hit.amount).max(0.0);
+        let (amount, weak) = match guard {
+            Some((affixes, mut brain, mut condition)) => bots::absorb(*affixes, &mut brain, &mut condition, hit.source, hit.amount, hit.weak),
+            None => (hit.amount, hit.weak),
+        };
+        v.health = (v.health - amount).max(0.0);
         v.since_hurt = 0.0;
+        if let Ok(mut log) = hurts.get_mut(hit.target) {
+            log.push(Hurt {
+                from: hit.from,
+                amount,
+                kill: v.health <= 0.0,
+            });
+        }
         if let Some(mut log) = hit.source.and_then(|s| logs.get_mut(s).ok()) {
             log.push(Hit {
-                weak: hit.weak,
+                weak,
                 kill: v.health <= 0.0,
             });
         }

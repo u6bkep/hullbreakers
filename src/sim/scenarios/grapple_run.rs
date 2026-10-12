@@ -4,6 +4,9 @@
 //! keeps each runner's progress and time. It's won when the whole crew is
 //! through the last gate, lost if the clock runs out first. Best times are
 //! kept for as long as the host runs.
+//!
+//! Results: `finished` (runners through the last gate), and on a win
+//! `crew_seconds` (the last of them home).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -16,8 +19,8 @@ use crate::sim::bodies::Bodies;
 use crate::sim::bots::{BodyTuning, Robot, tuning_of};
 use crate::sim::design::{ShipDesign, design};
 use crate::sim::devices::DeviceKind;
-use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, clock, countdown};
-use crate::sim::player::Player;
+use crate::sim::mission::{CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, clock, countdown};
+use crate::sim::player::{DeckSlot, Player};
 use crate::sim::ship;
 use crate::sim::tuning::Tuning;
 use crate::sim::{SimTick, TICK_HZ, asteroids};
@@ -124,6 +127,8 @@ struct Run {
 
 struct Runner {
     name: String,
+    /// Their deck slot, which their markers go by.
+    slot: u32,
     /// The gate they're to fly next (an index into the course's gates).
     next: usize,
     /// When they flew each gate.
@@ -147,7 +152,8 @@ fn run_course(
     tuning: Res<Tuning>,
     bodies: Bodies,
     run: Option<Single<&mut Run>>,
-    players: Query<(Entity, &Player, Option<&Name>, Option<&BodyTuning>), Without<Robot>>,
+    players: Query<(Entity, &Player, Option<&Name>, Option<&BodyTuning>, Option<&DeckSlot>), Without<Robot>>,
+    marked: MarkedBodies,
     mission: Single<&mut Mission>,
     mut tally: ResMut<CrewTally>,
     mut records: ResMut<RunRecords>,
@@ -165,9 +171,10 @@ fn run_course(
     let started = mission.started;
     let time = |at: u32| at.wrapping_sub(started) as f32 / TICK_HZ as f32;
     let underway = mission.phase == Phase::Underway;
-    for (entity, player, name, own) in &players {
+    for (entity, player, name, own, slot) in &players {
         let runner = run.runners.entry(entity).or_insert_with(|| Runner {
             name: name.map_or("?".to_string(), |n| n.to_string()),
+            slot: slot.map_or(0, |s| s.0),
             next: 0,
             splits: Vec::new(),
             finished: None,
@@ -215,11 +222,14 @@ fn run_course(
             mission.report.push(line);
             records.crew = Some(records.crew.map_or(last_home, |b| b.min(last_home)));
         }
+        mission.result("finished", crew.len() as f32);
+        mission.result("crew_seconds", last_home);
         mission.decide(Phase::Won, tick.0, "COURSE CLEAR");
     } else if underway && mission.elapsed(tick.0) >= TIME_LIMIT {
         for r in crew.iter().filter(|r| r.finished.is_none()) {
             mission.report.push(format!("{}: out of time at gate {} of {}", r.name, r.next + 1, gates.len()));
         }
+        mission.result("finished", crew.iter().filter(|r| r.finished.is_some()).count() as f32);
         mission.decide(Phase::Lost, tick.0, "OUT OF TIME");
     }
     // The board: the finished by time, then everyone else by how far
@@ -239,20 +249,15 @@ fn run_course(
             None => format!("{:<10} gate {}/{}  {}", r.name, r.next, gates.len(), clock(time(*r.splits.last().unwrap()))),
         })
         .collect();
+    let course_id = marked.id(run.course);
     let markers = run
         .runners
-        .iter()
-        .filter(|(_, r)| r.finished.is_none())
-        .map(|(&who, r)| {
+        .values()
+        .filter(|r| r.finished.is_none())
+        .filter_map(|r| {
             let i = gates[r.next];
-            Marker {
-                label: course.devices[i].label.clone(),
-                kind: MarkerKind::Waypoint,
-                body: Some(run.course),
-                at: course.devices[i].at,
-                player: Some(who),
-                device: Some(i as u16),
-            }
+            let gate = Marker::device(course_id?, course, &course.devices[i].id, MarkerKind::Waypoint);
+            Some(gate.for_player(r.slot))
         })
         .collect();
     let objective = match mission.phase {

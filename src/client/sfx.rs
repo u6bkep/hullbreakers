@@ -29,13 +29,13 @@ use super::LocalPlayer;
 use crate::sim::player::{Mode, Player, PlayerTelemetry};
 use crate::sim::tuning::Tuning;
 
-const RATE: u32 = 44_100;
+pub(crate) const RATE: u32 = 44_100;
 
 /// Distance walked per footstep. Shared with the camera's head bob.
 pub const STEP_LENGTH: f32 = 1.0;
 
 /// Encodes mono samples in [-1, 1] as a 16-bit WAV file.
-fn wav(samples: &[f32]) -> Vec<u8> {
+pub(crate) fn wav(samples: &[f32]) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);
     out.extend_from_slice(b"RIFF");
@@ -57,21 +57,21 @@ fn wav(samples: &[f32]) -> Vec<u8> {
 }
 
 /// Small synthesis toolkit.
-struct Synth {
-    rng: ChaCha8Rng,
+pub(crate) struct Synth {
+    pub(crate) rng: ChaCha8Rng,
 }
 
 impl Synth {
-    fn buffer(seconds: f32) -> Vec<f32> {
+    pub(crate) fn buffer(seconds: f32) -> Vec<f32> {
         vec![0.0; (seconds * RATE as f32) as usize]
     }
 
-    fn noise(&mut self) -> f32 {
+    pub(crate) fn noise(&mut self) -> f32 {
         self.rng.random_range(-1.0..1.0)
     }
 
     /// Low-passed noise burst with an exponential decay: thuds and footfalls.
-    fn thud(&mut self, seconds: f32, decay: f32, cutoff: f32, gain: f32) -> Vec<f32> {
+    pub(crate) fn thud(&mut self, seconds: f32, decay: f32, cutoff: f32, gain: f32) -> Vec<f32> {
         let mut out = Self::buffer(seconds);
         let a = 1.0 - (-TAU * cutoff / RATE as f32).exp();
         let mut lp = 0.0;
@@ -84,7 +84,7 @@ impl Synth {
     }
 
     /// Inharmonic partials with fast decay: a metallic clank.
-    fn clank(&mut self, seconds: f32, base: f32, decay: f32, gain: f32) -> Vec<f32> {
+    pub(crate) fn clank(&mut self, seconds: f32, base: f32, decay: f32, gain: f32) -> Vec<f32> {
         let partials = [(1.0, 1.0), (2.76, 0.5), (5.4, 0.3), (8.93, 0.15)];
         let mut out = Self::buffer(seconds);
         for (i, s) in out.iter_mut().enumerate() {
@@ -99,7 +99,7 @@ impl Synth {
     }
 
     /// A pitch sweep with noise: zips and whooshes.
-    fn sweep(&mut self, seconds: f32, from: f32, to: f32, noise: f32, gain: f32) -> Vec<f32> {
+    pub(crate) fn sweep(&mut self, seconds: f32, from: f32, to: f32, noise: f32, gain: f32) -> Vec<f32> {
         let mut out = Self::buffer(seconds);
         let mut phase = 0.0;
         let n = out.len() as f32;
@@ -113,7 +113,7 @@ impl Synth {
     }
 
     /// Square-ish tone, for UI beeps.
-    fn beep(&mut self, seconds: f32, freq: f32, gain: f32) -> Vec<f32> {
+    pub(crate) fn beep(&mut self, seconds: f32, freq: f32, gain: f32) -> Vec<f32> {
         let mut out = Self::buffer(seconds);
         let n = out.len() as f32;
         for (i, s) in out.iter_mut().enumerate() {
@@ -208,7 +208,7 @@ impl Synth {
     }
 
     /// Sparse random pops ringing through a hiss: electrical crackle.
-    fn crackle(&mut self, seconds: f32, density: f32, decay_per_sample: f32) -> Vec<f32> {
+    pub(crate) fn crackle(&mut self, seconds: f32, density: f32, decay_per_sample: f32) -> Vec<f32> {
         let a = 1.0 - (-TAU * 3000.0 / RATE as f32).exp();
         let mut lp = 0.0;
         let mut pop = 0.0f32;
@@ -302,7 +302,7 @@ impl Synth {
     /// A blast: a falling sub-bass boom under a noise burst whose lowpass
     /// closes from `bright` Hz. Low `bright` is the muffled felt-through-
     /// the-hull version.
-    fn explosion(&mut self, seconds: f32, bright: f32, boom: f32) -> Vec<f32> {
+    pub(crate) fn explosion(&mut self, seconds: f32, bright: f32, boom: f32) -> Vec<f32> {
         let mut out = Self::buffer(seconds);
         let (mut lp, mut phase) = (0.0f32, 0.0f32);
         for (i, s) in out.iter_mut().enumerate() {
@@ -349,7 +349,7 @@ impl Synth {
     }
 }
 
-fn normalize(mut samples: Vec<f32>, peak: f32) -> Vec<f32> {
+pub(crate) fn normalize(mut samples: Vec<f32>, peak: f32) -> Vec<f32> {
     let max = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
     if max > 1e-6 {
         samples.iter_mut().for_each(|s| *s *= peak / max);
@@ -357,13 +357,13 @@ fn normalize(mut samples: Vec<f32>, peak: f32) -> Vec<f32> {
     samples
 }
 
-fn concat(a: Vec<f32>, b: Vec<f32>) -> Vec<f32> {
+pub(crate) fn concat(a: Vec<f32>, b: Vec<f32>) -> Vec<f32> {
     let mut a = a;
     a.extend(b);
     a
 }
 
-fn mix(a: Vec<f32>, b: Vec<f32>) -> Vec<f32> {
+pub(crate) fn mix(a: Vec<f32>, b: Vec<f32>) -> Vec<f32> {
     let n = a.len().max(b.len());
     (0..n)
         .map(|i| a.get(i).unwrap_or(&0.0) + b.get(i).unwrap_or(&0.0))
@@ -558,7 +558,7 @@ fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32, speed
 
 /// Distance (m) at which another player's sounds are as loud as your own
 /// would be at 1 m: hull plating carries sound well.
-const STRUCTURE_SCALE: f32 = 0.25;
+pub(crate) const STRUCTURE_SCALE: f32 = 0.25;
 /// Other players' sounds, relative to the same sound of your own.
 const REMOTE_GAIN: f32 = 0.7;
 
@@ -770,7 +770,7 @@ pub fn play_event_sounds(
             PlayerEvent::Fired { gun, .. } => {
                 let sound = match gun {
                     GunKind::Smg | GunKind::SwarmerSprayer => &sounds.shot_smg,
-                    GunKind::Rifle | GunKind::GunnerRifle => &sounds.shot_rifle,
+                    GunKind::Rifle | GunKind::GunnerRifle | GunKind::MarksmanRifle | GunKind::TurretCannon => &sounds.shot_rifle,
                 };
                 play(&mut commands, sound, 0.7, pitch);
             }

@@ -1,0 +1,31 @@
+{
+  "name": "smg_barrel_heavy",
+  "kind": "weapon_part",
+  "brief": "SMG barrel, heavy: Thick, with heat-sink fins all round it.",
+  "palette": {
+    "paint_primary": "#c46c2c"
+  },
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.152
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

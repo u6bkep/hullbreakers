@@ -8,7 +8,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use hullbreakers::sim::SimPlugin;
-use hullbreakers::sim::bots::{Robot, new_robot};
+use hullbreakers::sim::bots::{Affixes, Robot, new_robot};
 use hullbreakers::sim::events::PlayerEvent;
 use hullbreakers::sim::input::PlayerInput;
 use hullbreakers::sim::items::{AmmoKind, CargoKind, Item, ItemOp, PACK_SLOTS, Place, Rarity, WEAPON_SLOTS, Weapon};
@@ -287,7 +287,7 @@ fn robots_leave_something_behind() {
         orientation: Quat::IDENTITY,
         pitch: 0.0,
     };
-    let robot = app.world_mut().spawn(new_robot(Robot::Gunner, mode, ship, feet, &tuning, 0)).id();
+    let robot = app.world_mut().spawn(new_robot(Robot::Gunner, Affixes::NONE, mode, ship, feet, &tuning, 0)).id();
     ticks(&mut app, 2);
     assert!(pickups(&mut app).is_empty());
     app.world_mut().get_mut::<Vitals>(robot).unwrap().health = 0.0;

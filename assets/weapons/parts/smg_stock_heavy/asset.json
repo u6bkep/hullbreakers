@@ -1,0 +1,19 @@
+{
+  "name": "smg_stock_heavy",
+  "kind": "weapon_part",
+  "brief": "SMG stock, heavy: A solid stock with a cheek rest and a thick pad.",
+  "palette": {
+    "paint_primary": "#c46c2c",
+    "paint_secondary": "#3d4650"
+  },
+  "expect": {
+    "parts": [
+      "stock"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

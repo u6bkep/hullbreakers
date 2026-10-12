@@ -14,6 +14,9 @@ use bevy::world_serialization::WorldAssetRoot;
 use bevy_egui::{EguiContexts, egui};
 
 use super::camera::PlayerCamera;
+use super::guns::{self, GunLook, GunModels};
+use crate::sim::items::{Rarity, Weapon};
+use crate::sim::weapons::GunKind;
 use crate::sim::scenarios::gallery::{GALLERY_AT, GalleryAnchor};
 
 /// Where assets are read from: the repo's `assets/` when run from a build
@@ -76,8 +79,9 @@ const SIZE_RANGE: f32 = 12.0;
 /// How fast exhibits turn (rad/s).
 const TURN_RATE: f32 = 0.3;
 
-pub fn set_out_gallery(add: On<Add, GalleryAnchor>, assets: Res<AssetServer>, mut commands: Commands) {
-    let models = find_models(&asset_root());
+pub fn set_out_gallery(add: On<Add, GalleryAnchor>, assets: Res<AssetServer>, mut guns: ResMut<GunModels>, mut commands: Commands) {
+    // Weapon parts have racks of their own (below), not places in the row.
+    let models: Vec<String> = find_models(&asset_root()).into_iter().filter(|m| !m.starts_with(PARTS)).collect();
     let first = -(models.len().saturating_sub(1) as f32) * SPACING / 2.0;
     let mut anchor = commands.entity(add.entity);
     // The authority's anchor is placed already; a client's arrives bare.
@@ -97,6 +101,104 @@ pub fn set_out_gallery(add: On<Add, GalleryAnchor>, assets: Res<AssetServer>, mu
         }
     });
     info!("gallery: {} models", models.len());
+    set_out_armoury(add.entity, &assets, &mut guns, &mut commands);
+}
+
+/// Where weapon parts' models are (they're shown on racks, not in the row).
+const PARTS: &str = "weapons/parts/";
+
+/// Something on the armoury's racks, and its label.
+#[derive(Component)]
+pub struct RackItem(String);
+
+/// Above the row, nearer the visitors: the armoury. A rack per crew frame
+/// of every part variant, side on (muzzle to the left), grouped by slot;
+/// below them, a row of rolled guns, each put together from its parts as
+/// it's drawn in play (see `guns`).
+fn set_out_armoury(anchor: Entity, assets: &AssetServer, guns: &mut GunModels, commands: &mut Commands) {
+    let side_on = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    for (row, frame) in GunKind::CREW.into_iter().enumerate() {
+        let y = ARMOURY.y + 1.0 - row as f32 * 0.45;
+        let mut x = -RACK_WIDTH / 2.0;
+        let mut last_slot = None;
+        for part in guns::VARIANTS {
+            let Some(path) = guns::part_model(frame, part) else { continue };
+            if last_slot.is_some_and(|s| s != part.slot()) {
+                x += RACK_SLOT_GAP;
+            }
+            last_slot = Some(part.slot());
+            commands.spawn((
+                RackItem(format!("{} {}", frame.name(), part.name().to_lowercase())),
+                WorldAssetRoot(guns.get(assets, &path)),
+                Transform::from_xyz(x, y, ARMOURY.z).with_rotation(side_on),
+                ChildOf(anchor),
+            ));
+            x += RACK_SPACING;
+        }
+    }
+    // Rolled guns, each frame through every rarity.
+    let rarities = [Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Exotic, Rarity::Common, Rarity::Rare];
+    let mut x = -ROLLED_SPACING * (2 * rarities.len()) as f32 / 2.0;
+    for frame in GunKind::CREW {
+        for (i, rarity) in rarities.into_iter().enumerate() {
+            let weapon = Weapon::new(frame, 1000 + i as u32 * 7919, rarity);
+            if let Some(gun) = guns::spawn_gun(
+                commands,
+                guns,
+                assets,
+                GunLook::of(&weapon),
+                (
+                    RackItem(format!("{} ({:?})", weapon.name(), rarity)),
+                    Transform::from_xyz(x, ARMOURY.y, ARMOURY.z).with_rotation(side_on),
+                    Visibility::default(),
+                    ChildOf(anchor),
+                ),
+            ) {
+                commands.entity(gun).insert(Name::new(weapon.name()));
+            }
+            x += ROLLED_SPACING;
+        }
+    }
+}
+
+/// The armoury, from the gallery's anchor (m): the rolled guns' height and
+/// how far in front of the row; the racks above them.
+const ARMOURY: Vec3 = Vec3::new(0.0, -0.1, 5.2);
+/// Room per part on a rack, between slots, and the racks' width (m).
+const RACK_SPACING: f32 = 0.42;
+const RACK_SLOT_GAP: f32 = 0.35;
+const RACK_WIDTH: f32 = 16.0 * RACK_SPACING + 4.0 * RACK_SLOT_GAP;
+/// Room per rolled gun (m).
+const ROLLED_SPACING: f32 = 0.95;
+
+/// The armoury's labels, under what they name, when you're near.
+pub fn label_armoury(
+    mut contexts: EguiContexts,
+    camera: Single<(&Camera, &GlobalTransform), With<PlayerCamera>>,
+    items: Query<(&RackItem, &GlobalTransform)>,
+) -> Result {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    let (camera, view) = *camera;
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("armoury")));
+    for (RackItem(label), at) in &items {
+        let below = at.translation() - Vec3::Y * 0.12;
+        let distance = view.translation().distance(below);
+        if (view.translation() - below).dot(view.forward().into()) > 0.0 || distance > 6.0 {
+            continue;
+        }
+        let Ok(p) = camera.world_to_viewport(view, below) else { continue };
+        painter.text(
+            egui::pos2(p.x, p.y),
+            egui::Align2::CENTER_TOP,
+            label,
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_rgb(200, 225, 235),
+        );
+    }
+    Ok(())
 }
 
 /// Big things turn slowly: no faster at their rim than this (m/s).
@@ -179,11 +281,15 @@ const GAP: f32 = 1.5;
 
 /// Sockets as small axes: red along the socket's +X, green +Y, blue its
 /// forward (−Z).
-pub fn draw_sockets(mut gizmos: Gizmos, sockets: Query<(&Name, &GlobalTransform)>, exhibits: Query<(), With<Exhibit>>) {
-    if exhibits.is_empty() {
-        return;
-    }
-    for (name, transform) in &sockets {
+/// Only the row's exhibits': the robots and the armoury would be a thicket of
+/// them.
+pub fn draw_sockets(
+    mut gizmos: Gizmos,
+    sockets: Query<(&Name, &GlobalTransform)>,
+    exhibits: Query<Entity, With<Exhibit>>,
+    children: Query<&Children>,
+) {
+    for (name, transform) in exhibits.iter().flat_map(|e| children.iter_descendants(e)).filter_map(|e| sockets.get(e).ok()) {
         if !name.as_str().starts_with("SOCKET_") {
             continue;
         }

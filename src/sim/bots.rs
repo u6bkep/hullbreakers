@@ -5,7 +5,29 @@
 //! size, speed and toughness. On the authority a [`Brain`] writes its
 //! [`PlayerInput`] each tick, before players are simulated, from what it can
 //! see. Clients never simulate robots; they receive them like other remote
-//! players, plus the [`Robot`] kind to know what to draw.
+//! players, plus the [`Robot`] kind and its [`Affixes`] to know what to draw,
+//! and its [`Condition`] for what its affixes are doing.
+//!
+//! Kinds: the **Gunner** (walks decks, rifle arm), the **Swarmer** (a fast
+//! fragile drone), the **Grappler** (a heavy walker that harpoons a player,
+//! reels them in hard and lets go: off their feet, out of cover, off the
+//! hull) and the **Turret** (a gun on the hull, tracking EVA players with a
+//! searchlight). On top of its kind a robot may have affixes (see
+//! [`affixes`]), rolled when a ship is crewed (see [`crew`]).
+
+mod affixes;
+mod blast;
+mod crew;
+
+pub use affixes::{Affix, Affixes, Condition, absorb, robot_upkeep};
+
+/// A robot destroyed: it's gone the tick after. Inserted (and replicated,
+/// reliably, as its despawn is) so every peer knows it was destroyed and not
+/// tidied away; in its last tick it's inert (no brain, no input).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wrecked;
+pub use blast::{Detonation, blast_of, detonate};
+pub use crew::{Posting, Threat, compose_crew, crew_ship, mount, spawn_zoo};
 
 use avian3d::prelude::*;
 use bevy::ecs::entity::MapEntities;
@@ -23,7 +45,7 @@ use super::player::{Mode, Player, PlayerTelemetry, PreviousMode, capsule};
 use super::shots::Team;
 use super::tuning::Tuning;
 use super::vitals::Vitals;
-use super::weapons::{GunKind, Loadout};
+use super::weapons::{GunKind, Loadout, STANCES, Slot, Stance};
 use super::{Layer, SimTick, TICK_HZ};
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -33,6 +55,23 @@ pub enum Robot {
     Gunner,
     /// A small fast drone; rushes in and sprays at close range.
     Swarmer,
+    /// A heavy walker with a harpoon arm and a winch: hooks a player, reels
+    /// them in hard, and lets go, flinging them.
+    Grappler,
+    /// A gun on a hull, bolted down: tracks whoever crosses open space to
+    /// its ship, leading them, by a searchlight.
+    Turret,
+}
+
+/// How a kind of robot gets about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gait {
+    /// Stands on decks, walks the ship's floors.
+    Walker,
+    /// Flies about its ship.
+    Flyer,
+    /// Bolted to a hull surface; only turns.
+    Mount,
 }
 
 /// A body's own tuning, where it differs from the crew's.
@@ -45,14 +84,27 @@ pub fn tuning_of<'a>(base: &'a Tuning, own: Option<&'a BodyTuning>) -> &'a Tunin
 }
 
 impl Robot {
+    pub const ALL: [Robot; 4] = [Robot::Gunner, Robot::Swarmer, Robot::Grappler, Robot::Turret];
+
     pub fn name(self) -> &'static str {
         match self {
             Robot::Gunner => "Gunner",
             Robot::Swarmer => "Swarmer",
+            Robot::Grappler => "Grappler",
+            Robot::Turret => "Turret",
         }
     }
 
-    /// The crew's tuning, changed where this robot is built differently.
+    pub fn gait(self) -> Gait {
+        match self {
+            Robot::Gunner | Robot::Grappler => Gait::Walker,
+            Robot::Swarmer => Gait::Flyer,
+            Robot::Turret => Gait::Mount,
+        }
+    }
+
+    /// The crew's tuning, changed where this kind of robot is built
+    /// differently (before any affixes: see [`body_tuning`]).
     pub fn tuning(self, base: &Tuning) -> Tuning {
         let mut t = base.clone();
         match self {
@@ -76,6 +128,37 @@ impl Robot {
                 t.assist_max_speed = 16.0;
                 t.player_health = 30.0;
             }
+            Robot::Grappler => {
+                t.player_mass = 300.0;
+                t.capsule_radius = 0.42;
+                t.capsule_height = 2.0;
+                t.eye_height = 1.72;
+                t.walk_speed = 2.4;
+                t.sprint_speed = 3.8;
+                t.player_health = 170.0;
+                t.wall_walk = false;
+                // Its boots anchor it while it reels: the winch out-pulls
+                // anyone's boots, never its own.
+                t.adhesion_accel = 90.0;
+                t.shear_accel = 90.0;
+                t.grapple_range = GRAPPLE_REACH + 5.0;
+                t.reel_force = 14_000.0;
+                t.reel_speed = 24.0;
+                t.thrust_accel = 12.0;
+            }
+            Robot::Turret => {
+                t.player_mass = 400.0;
+                t.capsule_radius = 0.55;
+                t.capsule_height = 1.3;
+                t.eye_height = 0.95;
+                t.walk_speed = 0.0;
+                t.sprint_speed = 0.0;
+                t.player_health = 150.0;
+                t.wall_walk = false;
+                // Bolted on: no manoeuvre of its ship shakes it loose.
+                t.adhesion_accel = 1000.0;
+                t.shear_accel = 1000.0;
+            }
         }
         t
     }
@@ -87,13 +170,19 @@ impl Robot {
         match self {
             Robot::Gunner => (WEAK_GUNNER, 0.15),
             Robot::Swarmer => (WEAK_SWARMER, 0.09),
+            Robot::Grappler => (WEAK_GRAPPLER, 0.15),
+            Robot::Turret => (WEAK_TURRET, 0.17),
         }
     }
 
-    fn gun(self) -> GunKind {
+    /// Its gun, if it has one (the Grappler has its harpoon instead).
+    fn gun(self, affixes: Affixes) -> Option<GunKind> {
         match self {
-            Robot::Gunner => GunKind::GunnerRifle,
-            Robot::Swarmer => GunKind::SwarmerSprayer,
+            Robot::Gunner if affixes.has(Affix::Marksman) => Some(GunKind::MarksmanRifle),
+            Robot::Gunner => Some(GunKind::GunnerRifle),
+            Robot::Swarmer => Some(GunKind::SwarmerSprayer),
+            Robot::Grappler => None,
+            Robot::Turret => Some(GunKind::TurretCannon),
         }
     }
 
@@ -107,6 +196,8 @@ impl Robot {
                 burst_off: 1.2,
                 fire_cone: 0.1,
                 range: (12.0, 35.0),
+                lead: false,
+                calls: CALL_RANGE,
             },
             Robot::Swarmer => Mind {
                 sight: 120.0,
@@ -116,12 +207,44 @@ impl Robot {
                 burst_off: 1.4,
                 fire_cone: 0.15,
                 range: (5.0, 12.0),
+                lead: false,
+                calls: CALL_RANGE,
+            },
+            Robot::Grappler => Mind {
+                sight: 60.0,
+                turn_rate: 1.8,
+                aim_error: 0.015,
+                burst_on: 0.0,
+                burst_off: 1.0,
+                fire_cone: 0.05,
+                range: (6.0, GRAPPLE_REACH - 4.0),
+                lead: false,
+                calls: CALL_RANGE,
+            },
+            Robot::Turret => Mind {
+                sight: 320.0,
+                turn_rate: 0.9,
+                aim_error: 0.004,
+                burst_on: 0.9,
+                burst_off: 1.4,
+                fire_cone: 0.04,
+                range: (0.0, 300.0),
+                lead: true,
+                calls: CALL_RANGE,
             },
         }
     }
 }
 
+/// A robot's tuning: its kind's, changed by its affixes.
+pub fn body_tuning(kind: Robot, affixes: Affixes, base: &Tuning) -> Tuning {
+    let mut t = kind.tuning(base);
+    affixes::apply_tuning(&mut t, affixes);
+    t
+}
+
 /// How a kind of robot thinks.
+#[derive(Clone, Copy, Debug)]
 struct Mind {
     /// How far it notices the crew (m), given a clear line.
     sight: f32,
@@ -136,13 +259,36 @@ struct Mind {
     fire_cone: f32,
     /// The distance band it tries to fight from (m).
     range: (f32, f32),
+    /// Whether it aims ahead of a moving target, by its bullets' flight
+    /// time (slow shells at long range need it).
+    lead: bool,
+    /// How far its call carries when it spots someone (m).
+    calls: f32,
 }
 
-/// A robot's state of mind. Authority only.
+/// A telegraphed attack, in progress: the marksman's aimed shot, the
+/// grappler's throw.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Attack {
+    #[default]
+    Ready,
+    /// Winding up (seconds so far): the marksman holding its aim, the
+    /// grappler drawing back.
+    Winding(f32),
+    /// The grappler's hook is in someone (seconds so far).
+    Reeling(f32),
+    /// Resting before it can again (seconds left).
+    Cooldown(f32),
+}
+
+/// A robot's state of mind, and the state of its affixes. Authority only.
 #[derive(Component, Clone, Debug)]
 pub struct Brain {
     /// Who it's after.
     pub target: Option<Entity>,
+    /// On show, not fighting: it holds still and thinks nothing (the
+    /// gallery's robots). Its affixes still work.
+    pub dormant: bool,
     /// Whether it could see its target when it last looked.
     visible: bool,
     /// Where it believes its target is, in its home's frame, and seconds
@@ -172,12 +318,16 @@ pub struct Brain {
     replan: f32,
     /// Its own phase for wobble and timers, so robots don't move in lockstep.
     seed: f32,
+    attack: Attack,
+    /// What its affixes are doing (see [`affixes`]).
+    pub(crate) state: affixes::State,
 }
 
 impl Brain {
-    fn new(home: Entity, post: Vec3, index: u32) -> Brain {
+    fn new(home: Entity, post: Vec3, index: u32, state: affixes::State) -> Brain {
         Brain {
             target: None,
+            dormant: false,
             visible: false,
             lead: None,
             since_lead: 0.0,
@@ -193,6 +343,8 @@ impl Brain {
             route_goal: None,
             replan: 0.0,
             seed: index as f32 * 1.618,
+            attack: Attack::Ready,
+            state,
         }
     }
 
@@ -218,20 +370,38 @@ impl MapEntities for Brain {
         if let Some(t) = &mut self.target {
             *t = mapper.get_mapped(*t);
         }
+        if let Some(t) = &mut self.state.last_hit_by {
+            *t = mapper.get_mapped(*t);
+        }
         self.home = mapper.get_mapped(self.home);
     }
 }
 
-/// A new robot of `kind` in `mode`, guarding `home` from `post` (in home's
-/// frame), where it returns with nothing to fight. `index` varies its
-/// timing.
-pub fn new_robot(kind: Robot, mode: Mode, home: Entity, post: Vec3, base: &Tuning, index: u32) -> impl Bundle {
-    let tuning = kind.tuning(base);
-    let loadout = Loadout::robot(kind.gun());
+/// A new robot of `kind` with `affixes`, in `mode`, guarding `home` from
+/// `post` (in home's frame), where it returns with nothing to fight.
+/// `index` varies its timing.
+pub fn new_robot(kind: Robot, affixes: Affixes, mode: Mode, home: Entity, post: Vec3, base: &Tuning, index: u32) -> impl Bundle {
+    let tuning = body_tuning(kind, affixes, base);
+    let loadout = match kind.gun(affixes) {
+        Some(gun) => Loadout::robot(gun),
+        None => {
+            // The grappler's harpoon is its grapple, in its main hand.
+            let mut l = Loadout::base();
+            l.stances = [Stance {
+                main: Slot::Grapple,
+                off: Slot::Empty,
+            }; STANCES];
+            l.current = 0;
+            l
+        }
+    };
+    let state = affixes::State::fresh(affixes, &tuning);
     (
         Name::new(kind.name()),
         kind,
-        Brain::new(home, post, index),
+        affixes,
+        Condition::of(&state, affixes),
+        Brain::new(home, post, index, state),
         Player {
             mode,
             boots_on: matches!(mode, Mode::Booted { .. }),
@@ -253,11 +423,21 @@ pub fn new_robot(kind: Robot, mode: Mode, home: Entity, post: Vec3, base: &Tunin
     )
 }
 
-/// Every peer: a robot gets its own tuning and a capsule sized to it.
-pub fn add_body_tuning(add: On<Add, Robot>, robots: Query<&Robot>, base: Res<Tuning>, mut commands: Commands) {
-    let kind = *robots.get(add.entity).expect("just added");
-    let tuning = kind.tuning(&base);
-    commands.entity(add.entity).insert((capsule(&tuning), BodyTuning(tuning)));
+/// Every peer: a robot gets its own tuning and a capsule sized to it, once
+/// its kind is known (and again once its affixes are, which arrive with it
+/// on a client but may be inserted after).
+pub fn add_body_tuning(add: On<Add, Robot>, robots: Query<(&Robot, Option<&Affixes>)>, base: Res<Tuning>, commands: Commands) {
+    fit_body(add.entity, &robots, &base, commands);
+}
+
+pub fn add_affix_tuning(add: On<Add, Affixes>, robots: Query<(&Robot, Option<&Affixes>)>, base: Res<Tuning>, commands: Commands) {
+    fit_body(add.entity, &robots, &base, commands);
+}
+
+fn fit_body(entity: Entity, robots: &Query<(&Robot, Option<&Affixes>)>, base: &Tuning, mut commands: Commands) {
+    let Ok((kind, affixes)) = robots.get(entity) else { return };
+    let tuning = body_tuning(*kind, affixes.copied().unwrap_or_default(), base);
+    commands.entity(entity).insert((capsule(&tuning), BodyTuning(tuning)));
 }
 
 /// The look change (yaw right, pitch down) that turns a body (world
@@ -274,6 +454,15 @@ fn look_toward(body: Quat, pitch: f32, dir: Vec3) -> Vec2 {
 }
 
 type CrewQuery<'a> = (Entity, &'a Player, Option<&'a Team>, Option<&'a BodyTuning>);
+
+type RobotQuery<'a> = (
+    Entity,
+    &'a Robot,
+    &'a Affixes,
+    &'a Condition,
+    &'a mut Brain,
+    &'a mut PlayerInput,
+);
 
 /// Authority, before players move: every robot decides what to do this
 /// tick and writes it as input.
@@ -294,15 +483,16 @@ pub fn think(
     hulls: Query<&ShipHull>,
     mut grids: ResMut<NavGrids>,
     mut damage: MessageReader<Damage>,
-    mut robots: Query<(Entity, &Robot, &mut Brain, &mut PlayerInput)>,
+    mut robots: Query<RobotQuery>,
 ) {
     let dt = time.delta_secs();
     let now = tick.0 as f32 / TICK_HZ as f32;
-    let where_is = |e: Entity| -> Option<Vec3> {
+    let motion_of = |e: Entity| -> Option<(Vec3, Vec3)> {
         let (_, p, _, t) = everyone.get(e).ok()?;
         let f = p.mode.body().and_then(|b| bodies.frame(b));
-        Some(p.mode.world_kinematics(tuning_of(&base, t), f.as_ref()).0)
+        Some(p.mode.world_kinematics(tuning_of(&base, t), f.as_ref()))
     };
+    let where_is = |e: Entity| motion_of(e).map(|(p, _)| p);
     let crew = |team: Option<&Team>| team.copied().unwrap_or_default() != Team::Robots;
     // Gunfire from the crew this tick or last, and who hit whom.
     let shots: Vec<(Entity, Vec3)> = everyone
@@ -316,15 +506,23 @@ pub fn think(
         .filter_map(|(e, ..)| Some((e, where_is(e)?)))
         .collect();
     let hits: Vec<(Entity, Entity)> = damage.read().filter_map(|d| Some((d.target, d.source?))).collect();
-    // Robots that caught sight of someone just now, and who.
-    let mut sightings: Vec<(Vec3, Entity)> = Vec::new();
-    for (entity, kind, mut brain, mut input) in &mut robots {
+    // Robots that caught sight of someone just now: where, who, and how far
+    // their call carries.
+    let mut sightings: Vec<(Vec3, Entity, f32)> = Vec::new();
+    for (entity, kind, affixes, condition, mut brain, mut input) in &mut robots {
         let Ok((_, me, _, own)) = everyone.get(entity) else {
             continue;
         };
         let brain = &mut *brain;
+        if brain.dormant {
+            // Holding still: hands and jets idle.
+            input.movement = Vec3::ZERO;
+            input.main.held = false;
+            input.reel_in = false;
+            continue;
+        }
         let tuning = tuning_of(&base, own);
-        let mind = kind.mind();
+        let mind = affixes::mind(kind.mind(), *kind, *affixes, condition.rallied);
         let frame = me.mode.body().and_then(|b| bodies.frame(b));
         let home = bodies.frame(brain.home);
         let to_home = |w: Vec3| home.as_ref().map_or(w, |f| f.point_to_local(w));
@@ -335,7 +533,7 @@ pub fn think(
         let pitch = match me.mode {
             Mode::Booted { pitch, .. } | Mode::Eva { pitch, .. } => pitch,
         };
-        let (position, _) = me.mode.world_kinematics(tuning, frame.as_ref());
+        let (position, own_velocity) = me.mode.world_kinematics(tuning, frame.as_ref());
         let clear_line = |from: Vec3, to: Vec3| {
             let Ok(dir) = Dir3::new(to - from) else {
                 return true;
@@ -368,7 +566,7 @@ pub fn think(
             brain.visible = seen.is_some();
             if let Some((t, at)) = seen {
                 if !was_visible || brain.target != Some(t) {
-                    sightings.push((position, t));
+                    sightings.push((position, t, mind.calls));
                 }
                 brain.target = Some(t);
                 brain.since_seen = 0.0;
@@ -385,7 +583,8 @@ pub fn think(
                 };
             }
         }
-        let target_at = brain.target.and_then(where_is);
+        let target_motion = brain.target.and_then(motion_of);
+        let target_at = target_motion.map(|(p, _)| p);
         if let (Some(t), Some(at)) = (brain.target, target_at)
             && brain.since_seen < GLIMPSE
         {
@@ -414,21 +613,65 @@ pub fn think(
             brain.forget();
         }
 
-        // Aim: in sight, turn toward the target (off by a wandering error)
-        // at the robot's turn rate, and fire in bursts while on target.
+        // Aim: in sight, turn toward the target (off by a wandering error),
+        // at the robot's turn rate; a slow gun leads a moving target.
         let step = mind.turn_rate * dt;
         let turn = |want: Vec2| want.clamp(Vec2::splat(-step), Vec2::splat(step));
+        let aiming = target_motion.filter(|_| brain.visible);
+        let distance = target_at.map(|at| at.distance(position));
+        // A marksman holds its aim still for the last moment of its wind-up,
+        // so a target that moves then makes it miss.
+        let locked = matches!(brain.attack, Attack::Winding(t) if affixes.has(Affix::Marksman) && t > MARKSMAN_AIM - MARKSMAN_LOCK);
         let mut on_target = false;
-        let aiming = target_at.filter(|_| brain.visible);
-        if let Some(at) = aiming {
+        if let Some((at, velocity)) = aiming {
+            let mut aim_at = at;
+            if mind.lead
+                && let Some(speed) = me.loadout.inventory.weapons[0].map(|w| w.stats().muzzle_speed)
+            {
+                // The shell keeps the shooter's velocity: lead by the
+                // target's motion relative to ours.
+                aim_at += (velocity - own_velocity) * (at.distance(eye) / speed);
+            }
             let wobble = Vec2::new((now * 1.3 + brain.seed).sin(), (now * 0.9 + brain.seed * 2.0).cos()) * mind.aim_error;
-            let want = look_toward(body, pitch, at - eye) + wobble;
-            input.add_look(turn(want));
+            let want = look_toward(body, pitch, aim_at - eye) + wobble;
+            if !locked {
+                input.add_look(turn(want));
+            }
             on_target = want.length() < mind.fire_cone;
         }
-        brain.burst = (brain.burst + dt) % (mind.burst_on + mind.burst_off);
-        input.main.held = on_target && brain.burst < mind.burst_on;
         input.sprint = false;
+        input.reel_in = false;
+        // Fire control: in bursts while on target, or by the kind's or
+        // affix's own way of attacking.
+        let venting = brain.state.venting();
+        let marksman = affixes.has(Affix::Marksman);
+        input.main.held = false;
+        if venting {
+            // Overheated: its guns are cold until it's vented.
+            brain.attack = Attack::Ready;
+        } else if *kind == Robot::Grappler {
+            grapple_attack(brain, &mut input, me, aiming.map(|(p, _)| p), position, on_target, dt);
+        } else if marksman {
+            brain.attack = match brain.attack {
+                Attack::Ready | Attack::Reeling(_) if on_target => Attack::Winding(0.0),
+                Attack::Ready | Attack::Reeling(_) => Attack::Ready,
+                // Lost them: the shot's off.
+                Attack::Winding(_) if aiming.is_none() => Attack::Ready,
+                Attack::Winding(t) if t + dt >= MARKSMAN_AIM => {
+                    input.main.held = true;
+                    Attack::Cooldown(MARKSMAN_REST)
+                }
+                Attack::Winding(t) => Attack::Winding(t + dt),
+                Attack::Cooldown(t) if t - dt <= 0.0 => Attack::Ready,
+                Attack::Cooldown(t) => Attack::Cooldown(t - dt),
+            };
+        } else {
+            brain.burst = (brain.burst + dt) % (mind.burst_on + mind.burst_off);
+            input.main.held = on_target && brain.burst < mind.burst_on;
+        }
+        // Standing its ground: venting, or in the middle of an attack that
+        // needs it braced.
+        let braced = venting || matches!(brain.attack, Attack::Winding(_) | Attack::Reeling(_));
 
         brain.strafe_timer -= dt;
         if brain.strafe_timer <= 0.0 {
@@ -438,12 +681,11 @@ pub fn think(
         let (near, far) = mind.range;
         // Where it's going, in its home's frame: after the target, to where
         // it was last known, or back to its post.
-        let distance = target_at.map(|at| at.distance(position));
         let goal = match (aiming, brain.lead) {
             (Some(_), _) if distance.is_some_and(|d| d <= far) => None,
             (_, Some(lead)) => Some(lead),
             (None, None) => Some(brain.post),
-            (Some(at), None) => Some(to_home(at)),
+            (Some((at, _)), None) => Some(to_home(at)),
         };
         // Looking about where the trail ran cold.
         let search = |input: &mut PlayerInput, brain: &mut Brain| {
@@ -451,6 +693,20 @@ pub fn think(
             let dir = if brain.seed.sin() > 0.0 { 1.0 } else { -1.0 };
             input.add_look(Vec2::new(dir * SEARCH_TURN * dt, turn(Vec2::new(0.0, pitch)).y));
         };
+        if kind.gait() == Gait::Mount {
+            // Bolted down: it only turns. With nothing in sight its light
+            // sweeps the sky above it, back and forth.
+            input.movement = Vec3::ZERO;
+            if aiming.is_none() {
+                let sweep = if (now * SWEEP_RATE / std::f32::consts::PI + brain.seed).sin() > 0.0 { 1.0 } else { -1.0 };
+                input.add_look(Vec2::new(sweep * SWEEP_RATE * dt, turn(Vec2::new(0.0, pitch - SWEEP_PITCH)).y));
+            }
+            continue;
+        }
+        if braced {
+            input.movement = Vec3::ZERO;
+            continue;
+        }
         input.movement = match me.mode {
             Mode::Booted { body: on, feet, up, orientation, .. } => {
                 let up_w = frame.map_or(up, |f| f.rotation * up);
@@ -513,7 +769,7 @@ pub fn think(
                 match (aiming, walk) {
                     // Closing on a target in sight: walk the route, gun on it.
                     (Some(_), Walk::Toward(dir)) => to_input(dir),
-                    (Some(at), _) => {
+                    (Some((at, _)), _) => {
                         // Fighting: keep within range, strafing; walking into
                         // a wall climbs it, so a robot keeps off walls (and
                         // other robots), turning its strafe round, and won't
@@ -554,7 +810,7 @@ pub fn think(
             Mode::Eva { .. } => {
                 let goal = match aiming {
                     // Hold a point beside the target, swinging round it.
-                    Some(at) => {
+                    Some((at, _)) => {
                         let toward = (at - position).normalize_or_zero();
                         let side = toward.any_orthonormal_vector() * brain.strafe;
                         Some(at - toward * (near + far) / 2.0 + side * 4.0)
@@ -580,18 +836,62 @@ pub fn think(
         };
     }
     // A robot that catches sight of someone tells the others near it.
-    for (from, target) in sightings {
+    for (from, target, reach) in sightings {
         let Some(at) = where_is(target) else { continue };
-        for (entity, _, mut brain, _) in &mut robots {
-            if brain.visible || brain.lead.is_some() && brain.since_lead < 1.0 {
+        for (entity, _, _, _, mut brain, _) in &mut robots {
+            if brain.dormant || brain.visible || brain.lead.is_some() && brain.since_lead < 1.0 {
                 continue;
             }
-            if where_is(entity).is_some_and(|p| p.distance(from) < CALL_RANGE) {
+            if where_is(entity).is_some_and(|p| p.distance(from) < reach) {
                 let local = bodies.frame(brain.home).map_or(at, |f| f.point_to_local(at));
                 brain.hear_of(target, local);
             }
         }
     }
+}
+
+/// The grappler's attack: on target and within reach, it draws back (a
+/// moment's warning), throws its hook, and if the hook takes the target,
+/// reels them in hard until they're on top of it or it's had long enough;
+/// then it lets go and rests. A throw that misses, or takes anything else,
+/// is let go at once.
+fn grapple_attack(brain: &mut Brain, input: &mut PlayerInput, me: &Player, target: Option<Vec3>, position: Vec3, on_target: bool, dt: f32) {
+    let hooked = me.grapple.map(|g| g.target);
+    let distance = target.map(|t| t.distance(position));
+    let in_reach = distance.is_some_and(|d| d < GRAPPLE_REACH);
+    brain.attack = match brain.attack {
+        Attack::Ready if on_target && in_reach => Attack::Winding(0.0),
+        Attack::Ready => {
+            // Never holding a rope it didn't mean to.
+            if hooked.is_some() {
+                input.presses.main.press();
+            }
+            Attack::Ready
+        }
+        Attack::Winding(_) if !in_reach => Attack::Ready,
+        Attack::Winding(t) if t + dt >= GRAPPLE_WIND_UP => {
+            input.presses.main.press();
+            Attack::Reeling(0.0)
+        }
+        Attack::Winding(t) => Attack::Winding(t + dt),
+        Attack::Reeling(t) => {
+            // The throw has been made (this tick's press is seen by the hands
+            // this tick, so the hook is in by the next).
+            let on_them = hooked.is_some_and(|h| Some(h) == brain.target);
+            let done = t > GRAPPLE_REEL_SECONDS || distance.is_none_or(|d| d < GRAPPLE_LET_GO);
+            if t > 0.0 && (!on_them || done) {
+                if hooked.is_some() {
+                    input.presses.main.press();
+                }
+                Attack::Cooldown(if on_them { GRAPPLE_REST } else { GRAPPLE_REST / 2.0 })
+            } else {
+                input.reel_in = on_them;
+                Attack::Reeling(t + dt)
+            }
+        }
+        Attack::Cooldown(t) if t - dt <= 0.0 => Attack::Ready,
+        Attack::Cooldown(t) => Attack::Cooldown(t - dt),
+    };
 }
 
 /// The way to walk along `route` from `feet` (both in the grid's frame):
@@ -642,12 +942,19 @@ enum Walk {
     Arrived,
 }
 
-/// Weak spot centres (see [`Robot::weak_spot`]): the Gunner's backpack
-/// core, the Swarmer's reactor between its rear thrusters.
-// Gunner: SOCKET_weak at (0, 1.42, 0.31) from its feet, its middle 0.95 up.
+/// Weak spot centres (see [`Robot::weak_spot`]).
+// Gunner: its backpack core, SOCKET_weak at (0, 1.42, 0.31) from its feet,
+// its middle 0.95 up.
 const WEAK_GUNNER: Vec3 = Vec3::new(0.0, 0.47, 0.31);
-// Swarmer: SOCKET_weak at (0, 0.035, 0.19) from its middle (its origin).
+// Swarmer: its reactor between its rear thrusters, SOCKET_weak at
+// (0, 0.035, 0.19) from its middle (its origin).
 const WEAK_SWARMER: Vec3 = Vec3::new(0.0, 0.035, 0.19);
+// Grappler: the winch's power cell in its back, SOCKET_weak at
+// (0, 1.30, 0.40) from its feet, its middle 1.0 up.
+const WEAK_GRAPPLER: Vec3 = Vec3::new(0.0, 0.30, 0.40);
+// Turret: the coolant core behind its gun, SOCKET_weak at (0, 0.86, 0.56)
+// from its base, its middle 0.65 up.
+const WEAK_TURRET: Vec3 = Vec3::new(0.0, 0.21, 0.56);
 
 /// Damage multiplier for a hit on a weak spot.
 pub const WEAK_MULTIPLIER: f32 = 2.5;
@@ -702,6 +1009,26 @@ const AVOID_RANGE: f32 = 6.0;
 /// reached as it can be (m).
 const BEHIND_SURFACE: f32 = 12.0;
 
+/// A marksman holds its aim this long before each shot (s), keeping it
+/// still for the last part (s), and rests this long after (s).
+pub const MARKSMAN_AIM: f32 = 1.1;
+pub const MARKSMAN_LOCK: f32 = 0.3;
+const MARKSMAN_REST: f32 = 0.9;
+
+/// The grappler throws its hook at someone within this (m), after drawing
+/// back this long (s); reels them in for at most this long (s) or until
+/// they're this close (m); then rests (s).
+pub const GRAPPLE_REACH: f32 = 28.0;
+pub const GRAPPLE_WIND_UP: f32 = 0.7;
+const GRAPPLE_REEL_SECONDS: f32 = 1.3;
+const GRAPPLE_LET_GO: f32 = 3.0;
+const GRAPPLE_REST: f32 = 4.0;
+
+/// A turret with nothing in sight sweeps its light at this rate (rad/s),
+/// this far above its horizon (rad, as pitch: negative is up).
+const SWEEP_RATE: f32 = 0.35;
+const SWEEP_PITCH: f32 = -0.3;
+
 /// A world direction as jetpack input (x right, y up, z forward in the
 /// view), full strength.
 fn to_input(view: Quat, dir: Vec3) -> Vec3 {
@@ -709,12 +1036,30 @@ fn to_input(view: Quat, dir: Vec3) -> Vec3 {
     Vec3::new(local.x, local.y, -local.z)
 }
 
-/// Authority: a robot out of health is destroyed.
-pub fn settle_robot_deaths(robots: Query<(Entity, &Vitals), With<Robot>>, mut commands: Commands) {
-    for (entity, vitals) in &robots {
-        if vitals.health <= 0.0 {
+/// Authority: a robot out of health is destroyed: marked [`Wrecked`] (and
+/// stilled), and gone the tick after. A volatile one goes up (see
+/// [`blast`]).
+pub fn settle_robot_deaths(
+    base: Res<Tuning>,
+    bodies: Bodies,
+    robots: Query<(Entity, &Robot, &Affixes, &Player, &Vitals, Option<&Brain>, Option<&BodyTuning>, Has<Wrecked>)>,
+    mut detonations: MessageWriter<Detonation>,
+    mut commands: Commands,
+) {
+    for (entity, kind, affixes, player, vitals, brain, own, wrecked) in &robots {
+        if wrecked {
             commands.entity(entity).despawn();
+            continue;
         }
+        if vitals.health > 0.0 {
+            continue;
+        }
+        if affixes.has(Affix::Volatile) {
+            let frame = player.mode.body().and_then(|b| bodies.frame(b));
+            let (at, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
+            detonations.write(blast_of(*kind, at, entity, brain.and_then(|b| b.state.last_hit_by)));
+        }
+        commands.entity(entity).insert(Wrecked).remove::<(Brain, PlayerInput)>();
     }
 }
 
@@ -723,8 +1068,8 @@ pub fn settle_robot_deaths(robots: Query<(Entity, &Vitals), With<Robot>>, mut co
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SpawnRobots(pub Robot);
 
-/// Authority: a Gunner on our bridge, facing aft; or a pack of three
-/// Swarmers 40 m off our port side.
+/// Authority: a walker on our bridge, facing aft; or a pack of three
+/// Swarmers 40 m off our port side; or a turret on our roof.
 pub fn debug_spawn_robots(
     mut orders: MessageReader<SpawnRobots>,
     tuning: Res<Tuning>,
@@ -742,8 +1087,8 @@ pub fn debug_spawn_robots(
     };
     for SpawnRobots(kind) in orders.read() {
         *spawned += 1;
-        match kind {
-            Robot::Gunner => {
+        match kind.gait() {
+            Gait::Walker | Gait::Mount => {
                 let feet = Vec3::new(0.0, 0.01, -11.0);
                 let mode = Mode::Booted {
                     body: *home,
@@ -753,9 +1098,9 @@ pub fn debug_spawn_robots(
                     orientation: Quat::from_rotation_y(std::f32::consts::PI),
                     pitch: 0.0,
                 };
-                commands.spawn(new_robot(Robot::Gunner, mode, *home, feet, &tuning, *spawned));
+                commands.spawn(new_robot(*kind, Affixes::NONE, mode, *home, feet, &tuning, *spawned));
             }
-            Robot::Swarmer => {
+            Gait::Flyer => {
                 for i in 0..3 {
                     let post = Vec3::new(-40.0, 2.0 * i as f32, -4.0 + 4.0 * i as f32);
                     let position = frame.point_to_world(post);
@@ -765,7 +1110,7 @@ pub fn debug_spawn_robots(
                         orientation: frame.rotation,
                         pitch: 0.0,
                     };
-                    commands.spawn(new_robot(Robot::Swarmer, mode, *home, post, &tuning, *spawned * 3 + i));
+                    commands.spawn(new_robot(*kind, Affixes::NONE, mode, *home, post, &tuning, *spawned * 3 + i));
                 }
             }
         }

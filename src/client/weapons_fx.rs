@@ -131,7 +131,7 @@ pub fn spawn_tracers(
                 MeshMaterial3d(match gun {
                     GunKind::Smg => assets.smg.clone(),
                     GunKind::Rifle => assets.rifle.clone(),
-                    GunKind::GunnerRifle | GunKind::SwarmerSprayer => assets.robot.clone(),
+                    GunKind::GunnerRifle | GunKind::SwarmerSprayer | GunKind::MarksmanRifle | GunKind::TurretCannon => assets.robot.clone(),
                 }),
                 Transform::from_translation(start)
                     .looking_at(meet, up)

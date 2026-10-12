@@ -39,6 +39,24 @@ it.
   round-trip with the user. Pattern to watch: egui's sizing is implicit and
   layout-pass dependent, so every non-trivial window needs a screenshot to
   check.
+- 2026-10-12. The HUD wanted letter-spaced caps labels. `Painter::text`
+  has no letter spacing; every spaced label goes through a `LayoutJob`
+  with `extra_letter_spacing` (`style::galley` in `src/client/hud/style.rs`).
+  Cost: minutes; one more helper every element has to remember to use.
+- 2026-10-12. Scaling the HUD with the window (`Context::set_zoom_factor`)
+  silently breaks anything that places egui shapes from a Bevy projection:
+  `Camera::world_to_viewport` gives logical pixels and egui wants points,
+  which differ by the zoom. Every world marker goes through
+  `hud::Projector`, which divides it out. Cost: designed for up front; it
+  would have put every marker in the wrong place at any height but 1080.
+- 2026-10-12. Egui's tessellation is a real share of the HUD's cost:
+  `process_output_system` (which tessellates) went from 0.047 to 0.150 ms
+  a frame with the new HUD (traced release build, boarding at 1080p),
+  against 0.098 ms for all the HUD's own systems. Segmented bars were
+  turned into one mesh each (plain quads, no feathering) on the theory
+  that dozens of anti-aliased rects were the cost; it didn't measurably
+  move the number, so the cost is spread over text, plates and strokes.
+  Not chased further: the whole HUD is about 0.2 ms over the old one.
 - 2026-10-12. The inventory screen puts its item cards and the chosen
   item's details side by side, with `ui.separator()` between them in a
   horizontal layout. A separator there spans the *available* height, which
@@ -46,6 +64,32 @@ it.
   side-by-side part lives in an `allocate_ui_with_layout` of fixed height
   (`ITEMS_HEIGHT`, `src/client/menu.rs`). Cost: one harness round-trip.
   Same pattern as the entry above: implicit sizing, caught only on screen.
+
+## HUD (our subsystem: what it can read)
+
+- 2026-10-12. The damage-direction indicator was specified "from the hit
+  log", but `HitLog` records the hits a player *dealt* (for hit markers);
+  nothing records where a player's own damage came from. The HUD infers it
+  client-side: robots' `Fired` events are in their replicated logs, beams
+  are traced on every peer, and when your health drops the hostile shot
+  whose line passed within 2.5 m of you (or the beam you were caught in)
+  is taken as the source (`src/client/hud/vitals.rs`). Cost: an hour, and
+  a heuristic: two robots firing at once can be confused. A sim-side
+  record (the source of the last hurt on `Vitals`) would make it exact.
+  (Done the same day: `sim::vitals::HurtLog`, written where damage is
+  applied, with where each hurt came from, the killing blow included; the
+  inference is gone.)
+- 2026-10-12. The interact prompt tested the camera's rendered eye
+  against the ship's physics pose. On a flying ship those are a tick
+  apart, enough to name the neighbouring button (seen: aiming at
+  Boarding action, prompted Model gallery). It now asks the sim's view and
+  poses, as the press does (`hud/reticle.rs`). Cost: half an hour; any
+  HUD element that mixes rendered and sim poses on a moving ship has the
+  same trap.
+- 2026-10-12. A pickup gets its `Transform` from the renderer a frame
+  after it appears, so `Query<(Entity, &Transform), Added<Pickup>>` never
+  matches it (the kit marker missed every death). Query `Added<Pickup>`
+  alone and look the transform up later. Cost: one screenshot round.
 
 ## Our own: screenshot tour
 
@@ -63,6 +107,61 @@ it.
   second camera that has its own sun (d46d850). Cost: about 0.6 ms a frame
   and a two-camera setup (tonemapping, bloom and egui moved to the view
   model camera).
+
+## Our player controller (sim/player.rs)
+
+- 2026-10-12. Robots grappling the crew (the Grappler). `player_rope`, the
+  solver for a rope between two players, moved both ends by the rope
+  owner's tuning, so a 300 kg robot's rope treated the crew member as 300 kg
+  with a robot's grip. And when both ends stood on boots on the same
+  immovable body (one ship), each end's inverse mass was the ship's, zero,
+  so the solver returned nothing and a running winch never tested anyone's
+  grip: two crew on one deck couldn't reel each other either. Fix: each end
+  by its own tuning, and with both held fast a winch pulls at its full force
+  and whichever boots that beats let go. Cost: about 40 minutes, found by
+  the grappler's test. A client still doesn't predict being pulled by
+  someone else's rope (robot or crew); it's corrected.
+
+## Bevy ECS
+
+- 2026-10-12. A client system had a `Single<&Transform, With<PlayerCamera>>`
+  next to a `Query<&mut Transform, Without<RobotLook>>`: a B0001 conflict
+  that only shows as a panic when the game starts, since the tests don't run
+  client systems (`src/client/robot_fx.rs`). Cost: one harness round trip.
+  Pattern: client systems get no compile- or test-time check of their
+  queries; every new one needs one launch.
+
+## Blender pipeline (hb, the verifier, asset_view)
+
+- 2026-10-12, from building the Grappler. Bevelled clevis plates (25 mm
+  thick, 14 mm bevel) made 4 near-degenerate triangles, and the verifier
+  failed "triangle winding agrees with stored normals" without naming the
+  part; finding it (`thigh_l/r`) took a throwaway script. Fixed with
+  `bevel=0` on the plates. A 17 mm radial step under a 10 mm bevel failed flat
+  shading by 50° (the documented "bevel eats narrow steps"). A warning
+  "1 modelled-flat plane has no triangles left" on `claw_l` never said which
+  plane. Cost: maybe an hour of the agent's time.
+- 2026-10-12. Affix parts live in the robots' own models and are hidden by
+  the game, but the previews and `asset_view` always show every part, so
+  there's no way to look at a model as it's seen without them (the turret's
+  builder cut the section out of `build.py` and rebuilt to see it). Also,
+  `asset_view` given several models draws them on the same spot, overlapping.
+  Cost: a few iterations each.
+
+- 2026-10-12, weapon parts. Thirty-two part variants share their geometry, but a
+  `build.py` can't import a sibling module: Blender ignores `PYTHONPATH` and
+  `run_build.py` only puts `tools/assets` on the path. Each part's `build.py` adds its
+  parent directory to `sys.path` itself (`assets/weapons/parts/*/build.py`). Their
+  `asset.json`s are written by a script from one table (`make_parts.py`), since 32
+  hand-kept sidecars would drift. Cost: half an hour. The "bevel eats narrow steps"
+  warning came back on every barrel (collar and crown steps of 1.5–3 mm under a 2 mm
+  bevel); widened to 4 mm.
+
+## Our gallery (client/gallery.rs)
+
+- 2026-10-12. The gallery drew a socket gizmo for every `SOCKET_` node in the
+  scenario, so once it showed live robots and weapon racks, those were a thicket of
+  axes. Now only the model row's exhibits get them. Cost: one screenshot.
 
 ## Headless harness (system audio)
 
@@ -85,7 +184,8 @@ it.
   so the grapple run's course is marked "COURSE" at its origin (put at the
   first gate, where that's useful) and the derelict as a ship. Not worked
   around; the HUD's objective markers should probably replace ship markers
-  for sites.
+  for sites. (Fixed in the HUD the same day: ship markers only for our
+  ship and hostile ones; sites are marked by their scenario's markers.)
 - 2026-10-12. `ControlAction::label` returns `&'static str`, so a device's
   label (from the design's data) couldn't come from the action. Fixed by
   putting the label on the `Control` (borrowed from the `'static` design),
@@ -104,10 +204,28 @@ it.
 ## Bevy rendering (lighting)
 
 - 2026-10-12. The derelict is meant to be dark until its power is back, but
-  `GlobalAmbientLight` is global, so its unlit rooms are only as dark as
-  space's ambient (dim blue-grey walls, still readable without the lamp).
-  Its cabin's light probe is dimmed to almost nothing while its lights are
-  out (`client::devices::dim_dark_cabins`), which helps; truly dark interiors
-  would need per-region ambient (more probes, or dropping the global
-  ambient for probes everywhere). Not done; a design compromise.
+  `GlobalAmbientLight` is global, and each camera's sky fill
+  (`GeneratedEnvironmentMapLight`, 3500) lit its rooms through the walls
+  too: dimming its cabin's light probe alone changed little (the walls
+  stayed blue-grey). Fixed by lighting the eye rather than the world: inside
+  the cabin of a ship lit by its devices, the ambient light and every
+  camera's environment light are scaled to the fraction of that ship's room
+  lights that are on, eased across the threshold
+  (`client::devices::interior_ambient`). Open space and our own ship are
+  untouched. Cost: an hour, most of it finding that the camera's fill, not
+  the ambient, was the light. Limit: it's lit as the eye is, so from outside
+  you see a dark ship's insides at space's light (fine through one airlock).
+
+## Our player controller (flight assist)
+
+- 2026-10-12. Towing a survivor on a rope, letting go of the keys made
+  flight assist brake against the reference body, and the load ran into
+  the player at the tow's speed (measured 9.7 m/s). Assist already stood
+  aside while a rope was taut ("swinging"), but a coasting tow's rope has no
+  tension, so that lasted a tick. Added a tow mode: with a rope on a body
+  under 1 t and no input, assist keeps station with the load
+  (`sim/player.rs`, `TOW_MAX_MASS`; test `towing_a_survivor_is_steady`).
+  Cost: an hour with the measurement. Open: stopping a tow still means
+  braking with the load behind you (a rope can't push), which a player
+  learns to do slowly.
 

@@ -466,3 +466,29 @@ fn dropping_and_taking_back_is_predicted() {
     assert!(pickups(&mut s.server).is_empty() && pickups(&mut s.client).is_empty(), "it's still lying there");
     assert!(dropping.max(taking) <= 0.5, "items mispredicted");
 }
+
+/// Markers name their bodies by `BodyId` and their players by deck slot, so
+/// a client finds its own copy of the course under the grapple run's gate
+/// marker, and the marker is its own.
+#[test]
+fn markers_find_their_bodies_on_clients() {
+    use hullbreakers::sim::mission::{BodyId, Director, Mission, ScenarioKind};
+    use hullbreakers::sim::player::DeckSlot;
+    use hullbreakers::sim::ship::ShipHull;
+    let (_guard, mut s) = session(100);
+    s.server
+        .world_mut()
+        .resource_mut::<Director>()
+        .start(ScenarioKind::GrappleRun);
+    s.step(180);
+    let world = s.client.world_mut();
+    let mission = world.query::<&Mission>().single(world).unwrap().clone();
+    let marker = mission.markers.first().expect("no markers on the client").clone();
+    assert_eq!(marker.label, "Gate 1");
+    let body = marker.body.expect("the gate marker is on the course");
+    let found: Vec<&ShipHull> = world.query::<(&BodyId, &ShipHull)>().iter(world).filter(|(id, _)| **id == body).map(|(_, h)| h).collect();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].0, "course");
+    let slot = world.query_filtered::<&DeckSlot, With<LocalPlayer>>().single(world).unwrap().0;
+    assert_eq!(marker.player, Some(slot));
+}

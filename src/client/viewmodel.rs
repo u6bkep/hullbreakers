@@ -22,51 +22,41 @@ use super::camera::{PlayerCamera, VIEW_MODEL_LAYER};
 use super::gallery::asset_root;
 use crate::sim::events::PlayerEvent;
 use crate::sim::player::Player;
-use super::pickup_look::WeaponPaint;
-use crate::sim::items::{Paint, Rarity, Weapon};
+use super::guns::{GunLook, GunModels, spawn_gun};
+use crate::sim::items::Weapon;
 use crate::sim::weapons::{GunKind, Hand, Slot};
 
 /// What a hand shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Held {
-    /// A gun of a frame, in its paint (`None`: standard issue, as modelled).
-    Gun(GunKind, Option<Paint>),
+    /// A gun, as it looks (see `guns`).
+    Gun(GunLook),
     Grapple,
     /// The glove alone, on the foregrip of the rifle the other hand holds.
     Brace,
 }
 
-impl Held {
-    pub fn model(self) -> Option<&'static str> {
-        match self {
-            Held::Gun(frame, _) => frame_model(frame),
-            Held::Grapple => Some("weapons/grapple/grapple.glb"),
-            Held::Brace => None,
-        }
-    }
-}
-
-/// A frame's model, if it has one.
-pub fn frame_model(frame: GunKind) -> Option<&'static str> {
-    match frame {
-        GunKind::Smg => Some("weapons/smg_frame/smg_frame.glb"),
-        GunKind::Rifle => Some("weapons/rifle/rifle.glb"),
-        _ => None,
-    }
-}
+/// The grapple launcher's model.
+const GRAPPLE: &str = "weapons/grapple/grapple.glb";
 
 impl Held {
-    /// The paint a gun wears, if not its model's own.
-    pub fn paint(self) -> Option<Paint> {
-        match self {
-            Held::Gun(_, paint) => paint,
-            _ => None,
-        }
-    }
-
     /// For a weapon in hand.
     pub fn gun(weapon: &Weapon) -> Held {
-        Held::Gun(weapon.frame, (weapon.rarity != Rarity::Standard).then(|| weapon.look().paint))
+        Held::Gun(GunLook::of(weapon))
+    }
+
+    /// Shows this in a hand: spawns its model (a gun put together from its
+    /// parts, or the grapple) with `extra`.
+    pub fn spawn(self, commands: &mut Commands, models: &mut GunModels, assets: &AssetServer, extra: impl Bundle) {
+        match self {
+            Held::Gun(look) => {
+                spawn_gun(commands, models, assets, look, extra);
+            }
+            Held::Grapple => {
+                commands.spawn((WorldAssetRoot(models.get(assets, GRAPPLE)), extra));
+            }
+            Held::Brace => {}
+        }
     }
 }
 
@@ -147,7 +137,7 @@ pub fn held(player: &Player) -> [Option<Held>; 2] {
     let (main, off) = (item(Hand::Main), item(Hand::Off));
     // A rifle with the other hand free is braced on its foregrip.
     let brace = |this: Option<Held>, other: Option<Held>| match (this, other) {
-        (None, Some(Held::Gun(GunKind::Rifle, _))) => Some(Held::Brace),
+        (None, Some(Held::Gun(look))) if look.frame == GunKind::Rifle => Some(Held::Brace),
         _ => this,
     };
     [brace(main, off), brace(off, main)]
@@ -156,6 +146,7 @@ pub fn held(player: &Player) -> [Option<Held>; 2] {
 pub fn pose_view_hands(
     time: Res<Time>,
     assets: Res<AssetServer>,
+    mut gun_models: ResMut<GunModels>,
     local: Res<LocalInput>,
     player: Option<Single<&Player, With<LocalPlayer>>>,
     camera: Single<&Transform, (With<PlayerCamera>, Without<ViewHand>)>,
@@ -202,16 +193,8 @@ pub fn pose_view_hands(
                     commands.entity(child).despawn();
                 }
             }
-            if let Some(path) = item.and_then(Held::model) {
-                let mut model = commands.spawn((
-                    HandModel,
-                    WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
-                    Transform::default(),
-                    ChildOf(entity),
-                ));
-                if let Some(paint) = item.and_then(Held::paint) {
-                    model.insert(WeaponPaint(paint));
-                }
+            if let Some(item) = item {
+                item.spawn(&mut commands, &mut gun_models, &assets, (HandModel, Transform::default(), ChildOf(entity)));
             }
             if item.is_some() && asset_root().join(ARMS).is_file() {
                 commands.spawn((

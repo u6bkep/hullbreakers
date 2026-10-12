@@ -1,7 +1,7 @@
 """Blender entry point for one asset build. tools/assets/build runs this; by hand:
 
     blender --background --factory-startup --python-exit-code 1 \
-        --python tools/assets/run_build.py -- assets/weapons/smg_frame [--preview]
+        --python tools/assets/run_build.py -- assets/weapons/smg_receiver [--preview]
 
 --python-exit-code 1 matters: without it Blender exits 0 after a Python exception.
 """

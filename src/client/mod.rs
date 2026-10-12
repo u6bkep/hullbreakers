@@ -12,6 +12,7 @@ pub mod debug_shots;
 pub mod devices;
 pub mod events;
 pub mod gallery;
+pub mod guns;
 pub mod hud;
 pub mod input;
 pub mod items_hud;
@@ -20,6 +21,7 @@ pub mod pickup_look;
 pub mod profile;
 pub mod progress_hud;
 pub mod render;
+pub mod robot_fx;
 pub mod save;
 pub mod sfx;
 pub mod sky;
@@ -59,8 +61,9 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin))
+        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, robot_fx::RobotFxPlugin, hud::HudPlugin))
             .insert_resource(input::MouseCaptured(true))
+            .init_resource::<guns::GunModels>()
             .init_resource::<input::TuningOpen>()
             .init_resource::<menu::Menu>()
             .init_resource::<menu::ItemOps>()
@@ -71,11 +74,11 @@ impl Plugin for ClientPlugin {
             })
             .init_resource::<events::EventCursor>()
             .add_message::<events::Presented>()
-            .init_resource::<hud::PanelState>()
             .add_observer(render::attach_meshes)
             .add_observer(render::add_ship_lights)
             .add_observer(render::add_ship_model)
             .add_observer(devices::build_devices)
+            .add_observer(devices::fit_beacons)
             .add_observer(sky::add_sky_to_cameras)
             .add_observer(gallery::set_out_gallery)
             .add_observer(viewmodel::spawn_view_hands)
@@ -121,6 +124,7 @@ impl Plugin for ClientPlugin {
                     animate::animate_avatars,
                     camera::update_camera,
                     viewmodel::pose_view_hands,
+                    guns::assemble_guns,
                     pickup_look::paint_weapons,
                     viewmodel::dress_view_hands,
                     render::update_dust,
@@ -146,7 +150,7 @@ impl Plugin for ClientPlugin {
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
                     sfx::play_hit_sounds,
-                    (devices::show_devices, devices::dim_dark_cabins),
+                    (devices::show_devices, devices::dim_dark_cabins, devices::interior_ambient, devices::flash_beacons),
                     (gallery::hide_colliders, gallery::arrange_exhibits, gallery::turn_exhibits, gallery::draw_sockets, gallery::pulse_cores, sky::settle_environment_maps),
                     (
                         weapons_fx::spawn_tracers,
@@ -159,20 +163,7 @@ impl Plugin for ClientPlugin {
             )
             .add_systems(
                 EguiPrimaryContextPass,
-                (
-                    hud::ship_markers,
-                    hud::reference_overlay,
-                    hud::hud,
-                    hud::mission_hud,
-                    hud::vitals_hud,
-                    hud::loadout_hud,
-                    items_hud::pickup_card,
-                    progress_hud::progress_notice,
-                    gallery::label_exhibits,
-                    hud::hit_markers,
-                    menu::menu,
-                )
-                    .chain(),
+                (gallery::label_exhibits, gallery::label_armoury, menu::menu).chain().after(hud::HudSet),
             );
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
