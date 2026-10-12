@@ -58,12 +58,43 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   as small axes (red +X, green +Y, blue forward). You start floating in
   front of it.
 
-You start (and respawn) with the base kit: your suit and its grapple. Guns
-are in the **weapons locker** on the starboard wall of our ship's aft hold
-(press it with F): it issues a standard SMG and rifle if you have none of
-that kind, and fills your ammo and mags. Die, and everything you carried
-stays where you fell, in one glowing case on the deck (or drifting on, if
-you were in EVA): look at it and press F to take it back.
+You start with the base kit (your suit and its grapple) and whatever your
+profile says you carry (see **Progression**). Guns are in the **weapons
+locker** on the starboard wall of our ship's aft hold: press it (F) to fill
+your ammo and mags and open the **armory**, your stash. Anyone with no gun
+at all is issued a standard SMG and rifle; standard issue is always free at
+the armory. Die, and everything you carried stays where you fell, in one
+glowing case on the deck (or drifting on, if you were in EVA): it's yours
+alone to take back (look at it, F), and you come back aboard with the base
+kit. A scenario change keeps what you carry.
+
+### Progression
+
+What you own and earn is kept in `profile.ron` beside the game, on your own
+machine (Deep Rock style: co-op is between friends, so a client's profile is
+trusted). On joining, it goes to the host; the host keeps it while you play
+and sends it back, and your machine saves it every few seconds while it
+changes, at a mission's end, and when you quit. A missing file starts a
+fresh profile; an unreadable one is kept as `profile.ron.bad` and a fresh one
+started.
+
+- **Your guns are yours, for good.** Every gun you pick up is yours. Store
+  the ones you aren't carrying in the **armory** (up to 40). What you leave
+  where you die, or put down and nobody takes, is back in your stash when the
+  mission's over. A gun you put down (G) for a crewmate is theirs once they
+  take it; the case you leave where you die, nobody else can.
+- **Salvage** pays for upgrades. A decided mission pays each crew member
+  (more for a win, for each thing the scenario credits you with, for
+  everyone getting home, and a quarter more for a quick win); walking away
+  undecided pays nothing. Scrapping a gun pays too, more for rarer ones.
+- **The workbench**, beside the locker: **tune** a gun up a tier of rarity
+  (its parts stay; rare and up add perks), **refit** a part with one you've
+  unlocked by scrapping a gun that had it, **repaint** it in a crew paint, or
+  **scrap** it.
+- **Rank** comes with experience from missions, and each brings something you
+  can feel: paints (2, 5, 7, 9), a fourth weapon slot (3), two more pack
+  slots (4, 8), suit plating, +25 health (5, 9), a stronger jetpack (6), a
+  faster winch (7), and new frames to come (10).
 
 ### Weapons, loot and the inventory
 
@@ -88,8 +119,8 @@ colour of the best thing in it, with its best gun turning on the lid; look
 at it for what's inside and how it compares with your guns, and press F to
 take everything that fits.
 
-You carry three **weapon slots** (the stances use these, by number), a
-**pack** of six for spares and small cargo, **ammo** by kind (light rounds
+You carry three **weapon slots** (four from rank 3; the stances use these, by number), a
+**pack** of six (up to ten with rank) for spares and small cargo, **ammo** by kind (light rounds
 for SMGs, heavy for rifles; a reload draws from it), and bulky **cargo**
 such as a power cell, which takes both hands: whoever carries it can't
 shoot or grapple, so the team escorts them. G puts down what's in hand
@@ -183,9 +214,11 @@ client's title is `Hullbreakers — HOST:PORT`.
 | L            | debug: ship lurches forward         ||
 | K            | debug (host): a loot crate at your feet ||
 
-The menu (Escape) has two pages. **Inventory** shows what you carry, lets you
+The menu (Escape) has its pages. **Inventory** shows what you carry, lets you
 sort and drop it, and lets you choose which weapon slot (or the grapple) each
-stance puts in each hand; the stances are saved to `stances.ron`.
+stance puts in each hand; the stances are saved to `stances.ron`. Aboard our
+ship, **Armory** (your stash) and **Workbench** are there too (pressing the
+locker or the bench opens them).
 **Controls** remaps every action: click a binding and press the key, button or
 chord you want. Right-click clears a binding. The game goes on while the menu
 is open.
