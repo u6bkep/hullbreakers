@@ -62,7 +62,8 @@ pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Hold
 pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Holding>) {
     let inv = &player.loadout.inventory;
     ui.label(egui::RichText::new("Carried").strong());
-    ui.horizontal_wrapped(|ui| {
+    // Three rows show; more (from rank) scroll.
+    egui::ScrollArea::vertical().id_salt("carried at the armory").max_height(3.0 * (CELL.y + 6.0)).show(ui, |ui| ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
         let places = (0..inv.weapon_slots()).map(|i| (Place::Weapon(i as u8), format!("SLOT {}", i + 1)));
         let pack = (0..inv.pack_slots()).map(|i| (Place::Pack(i as u8), "PACK".to_string()));
@@ -73,7 +74,7 @@ pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Hold
                 *chosen = if *chosen == Some(here) { None } else { Some(here) };
             }
         }
-    });
+    }));
 }
 
 /// A chosen gun's details, against what it's compared with.

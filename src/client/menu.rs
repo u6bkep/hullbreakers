@@ -390,14 +390,12 @@ fn inventory_tab(
     }
     let target = |chosen: &Option<Place>, to: Place| chosen.is_some_and(|from| from != to && can_move(inv, from, to));
 
-    // Taller by a row of cards for each row rank has added.
-    let rows = |n: usize| n.div_ceil(3) as f32;
-    let height = ITEMS_HEIGHT + (rows(inv.weapon_slots()) - 1.0 + rows(inv.pack_slots()) - 2.0).max(0.0) * (CELL.y + 6.0);
-    let size = egui::vec2(ui.available_width(), height);
+    let size = egui::vec2(ui.available_width(), ITEMS_HEIGHT);
     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
-        ui.set_min_height(height);
-        // Left: what's carried.
-        ui.vertical(|ui| {
+        ui.set_min_height(ITEMS_HEIGHT);
+        // Left: what's carried (scrolling, once rank has given more slots
+        // than fit).
+        egui::ScrollArea::vertical().id_salt("carried").max_height(ITEMS_HEIGHT).show(ui, |ui| ui.vertical(|ui| {
             ui.set_width(3.0 * CELL.x + 2.0 * GAP);
             ui.label(egui::RichText::new("Weapon slots").strong());
             ui.horizontal_wrapped(|ui| {
@@ -455,7 +453,7 @@ fn inventory_tab(
                 }
                 ui.end_row();
             });
-        });
+        }));
         ui.separator();
         // Right: the chosen item.
         ui.vertical(|ui| {
