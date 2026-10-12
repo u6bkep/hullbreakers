@@ -104,10 +104,15 @@ it.
 ## Bevy rendering (lighting)
 
 - 2026-10-12. The derelict is meant to be dark until its power is back, but
-  `GlobalAmbientLight` is global, so its unlit rooms are only as dark as
-  space's ambient (dim blue-grey walls, still readable without the lamp).
-  Its cabin's light probe is dimmed to almost nothing while its lights are
-  out (`client::devices::dim_dark_cabins`), which helps; truly dark interiors
-  would need per-region ambient (more probes, or dropping the global
-  ambient for probes everywhere). Not done; a design compromise.
+  `GlobalAmbientLight` is global, and each camera's sky fill
+  (`GeneratedEnvironmentMapLight`, 3500) lit its rooms through the walls
+  too: dimming its cabin's light probe alone changed little (the walls
+  stayed blue-grey). Fixed by lighting the eye rather than the world: inside
+  the cabin of a ship lit by its devices, the ambient light and every
+  camera's environment light are scaled to the fraction of that ship's room
+  lights that are on, eased across the threshold
+  (`client::devices::interior_ambient`). Open space and our own ship are
+  untouched. Cost: an hour, most of it finding that the camera's fill, not
+  the ambient, was the light. Limit: it's lit as the eye is, so from outside
+  you see a dark ship's insides at space's light (fine through one airlock).
 

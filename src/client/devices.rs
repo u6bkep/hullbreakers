@@ -437,6 +437,24 @@ pub fn show_devices(
     }
 }
 
+/// How lit a ship's rooms are, if they're lit by its devices (a derelict):
+/// the fraction of its room lights (not alarms) that are on.
+fn lit_fraction(hull: &ShipHull, devices: Option<&Devices>) -> Option<f32> {
+    let design = hull.design();
+    let rooms: Vec<usize> = design
+        .devices
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| matches!(d.kind, DeviceKind::Lights { flash: false, .. }))
+        .map(|(i, _)| i)
+        .collect();
+    if rooms.is_empty() {
+        return None;
+    }
+    let lit = rooms.iter().filter(|&&i| devices.is_some_and(|d| d.0.get(i).is_some_and(|s| s.live))).count();
+    Some(lit as f32 / rooms.len() as f32)
+}
+
 /// A ship whose rooms are lit by its devices (a derelict) is only as bright
 /// inside as its lights: its cabins' fill light goes with how many are on.
 pub fn dim_dark_cabins(
@@ -444,19 +462,8 @@ pub fn dim_dark_cabins(
     mut probes: Query<(Option<&mut EnvironmentMapLight>, Option<&mut GeneratedEnvironmentMapLight>), With<LightProbe>>,
 ) {
     for (hull, devices, children) in &ships {
-        let design = hull.design();
-        let rooms: Vec<usize> = design
-            .devices
-            .iter()
-            .enumerate()
-            .filter(|(_, d)| matches!(d.kind, DeviceKind::Lights { flash: false, .. }))
-            .map(|(i, _)| i)
-            .collect();
-        if rooms.is_empty() {
-            continue;
-        }
-        let lit = rooms.iter().filter(|&&i| devices.is_some_and(|d| d.0.get(i).is_some_and(|s| s.live))).count();
-        let intensity = DARK_FILL + (LIT_FILL - DARK_FILL) * lit as f32 / rooms.len() as f32;
+        let Some(lit) = lit_fraction(hull, devices) else { continue };
+        let intensity = DARK_FILL + (LIT_FILL - DARK_FILL) * lit;
         for &child in children {
             let Ok((map, generated)) = probes.get_mut(child) else { continue };
             if let Some(mut map) = map
@@ -477,6 +484,78 @@ pub fn dim_dark_cabins(
 /// ship's cabins).
 const DARK_FILL: f32 = 6.0;
 const LIT_FILL: f32 = 150.0;
+
+/// What's left of space's ambient light inside a ship whose lights are all
+/// out.
+const DARK_AMBIENT: f32 = 0.0;
+
+/// The light of space at the eye. Space's ambient light and the sky's fill
+/// (each camera's environment light) are the same everywhere, so on their
+/// own they'd light a dead ship's insides through its walls: inside the
+/// cabin of a ship lit by its devices, both go with how many of that ship's
+/// lights are on (as its cabin's fill does), easing as you cross the
+/// threshold. Everywhere else (open space, our own ship) they're space's.
+pub fn interior_ambient(
+    time: Res<Time>,
+    camera: Option<Single<&Transform, With<super::camera::PlayerCamera>>>,
+    ships: Query<(&ShipHull, Option<&Devices>, &GlobalTransform)>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut sky_fill: Query<(Entity, Option<&mut EnvironmentMapLight>, Option<&mut GeneratedEnvironmentMapLight>), (With<Camera3d>, Without<LightProbe>)>,
+    mut space: Local<Option<f32>>,
+    mut fills: Local<Vec<(Entity, f32)>>,
+) {
+    let space = *space.get_or_insert(ambient.brightness);
+    let Some(camera) = camera else { return };
+    let eye = camera.translation;
+    let inside = ships.iter().find_map(|(hull, devices, pose)| {
+        let lit = lit_fraction(hull, devices)?;
+        let local = pose.affine().inverse().transform_point3(eye);
+        hull.design()
+            .cabins
+            .iter()
+            .any(|c| (local - c.center).abs().cmple(c.size / 2.0).all())
+            .then_some(lit)
+    });
+    let target = inside.map_or(space, |lit| ambient_inside(space, lit));
+    let k = 1.0 - (-time.delta_secs() * AMBIENT_EASE).exp();
+    let brightness = ambient.brightness + (target - ambient.brightness) * k;
+    if (brightness - ambient.brightness).abs() > 1e-3 {
+        ambient.brightness = brightness;
+    }
+    // The sky's fill follows the same fraction of its own full strength
+    // (each camera's, as first seen).
+    let fraction = if space > 0.0 { brightness / space } else { 1.0 };
+    for (camera, map, generated) in &mut sky_fill {
+        let full = match fills.iter().find(|(e, _)| *e == camera) {
+            Some(&(_, full)) => full,
+            None => {
+                let Some(full) = map.as_ref().map(|m| m.intensity).or(generated.as_ref().map(|g| g.intensity)) else { continue };
+                fills.push((camera, full));
+                full
+            }
+        };
+        let intensity = full * fraction;
+        if let Some(mut map) = map
+            && (map.intensity - intensity).abs() > 1e-2
+        {
+            map.intensity = intensity;
+        }
+        if let Some(mut generated) = generated
+            && (generated.intensity - intensity).abs() > 1e-2
+        {
+            generated.intensity = intensity;
+        }
+    }
+}
+
+/// How fast the ambient light follows the eye across a threshold (1/s).
+const AMBIENT_EASE: f32 = 8.0;
+
+/// The ambient light inside the cabin of a ship whose room lights are a
+/// fraction `lit` on, given space's.
+fn ambient_inside(space: f32, lit: f32) -> f32 {
+    space * (DARK_AMBIENT + (1.0 - DARK_AMBIENT) * lit)
+}
 
 /// Draws `lines` of text, left aligned, as large as fits a face of `size`
 /// (m): light `fg` on `bg`.
@@ -521,4 +600,54 @@ fn text_image(lines: &[String], size: Vec2, fg: [u8; 4], bg: [u8; 4]) -> Image {
     );
     image.sampler = ImageSampler::nearest();
     image
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use bevy::time::TimeUpdateStrategy;
+
+    use super::*;
+    use crate::client::camera::PlayerCamera;
+    use crate::sim::design::design;
+
+    /// The derelict at `at`, and a camera at `eye`; how bright the ambient
+    /// light settles to after a second.
+    fn settled_ambient(at: Vec3, eye: Vec3, lights_on: bool) -> f32 {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, TransformPlugin));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)));
+        app.insert_resource(GlobalAmbientLight {
+            brightness: 60.0,
+            ..default()
+        });
+        app.add_systems(Update, interior_ambient);
+        let derelict = design("derelict");
+        let mut devices = Devices::new(derelict);
+        if lights_on {
+            for (i, d) in derelict.devices.iter().enumerate() {
+                if matches!(d.kind, DeviceKind::Lights { flash: false, .. }) {
+                    devices.0[i].live = true;
+                }
+            }
+        }
+        app.world_mut().spawn((ShipHull::new("derelict"), devices, Transform::from_translation(at)));
+        app.world_mut().spawn((PlayerCamera, Transform::from_translation(eye)));
+        for _ in 0..60 {
+            app.update();
+        }
+        app.world().resource::<GlobalAmbientLight>().brightness
+    }
+
+    #[test]
+    fn inside_a_dead_ship_space_s_ambient_doesn_t_reach() {
+        let at = Vec3::new(0.0, 0.0, 50.0);
+        let inside = settled_ambient(at, at + Vec3::new(0.0, 1.6, 10.0), false);
+        assert!(inside < 1.0, "inside the dark derelict: {inside}");
+        let lit = settled_ambient(at, at + Vec3::new(0.0, 1.6, 10.0), true);
+        assert!(lit > 55.0, "inside, its lights all on: {lit}");
+        let outside = settled_ambient(at, at + Vec3::new(0.0, 8.0, 10.0), false);
+        assert!((outside - 60.0).abs() < 0.01, "on its roof: {outside}");
+    }
 }
