@@ -160,30 +160,43 @@ fn build(stage: &mut Stage) -> Entity {
 /// [`bots::Threat`]) and how many of its posts are manned grow with the
 /// crew, to the full complement at four. Alone, a boarder crossing on a
 /// rope at the first pass met six swarmers and three hull turrets and was
-/// dead in four seconds, 40 m short of the hangar.
+/// dead in four seconds, 40 m short of the hangar; with a lighter crew they
+/// got across, then met the hangar's gunner, who sees out of its door, the
+/// hull turrets by it, which see the way in, and the next walkers in, who
+/// came for them together: so alone, only the three deepest posts (the
+/// upper corridor and the bridge) are manned, and no turret (there's no one
+/// to draw their fire).
 pub fn carrier_crew(design: &ShipDesign, players: usize, tick: u32) -> Vec<bots::Posting> {
     let n = players.clamp(1, 4) - 1;
     let threat = bots::Threat([1, 2, 3, 3][n]);
     // Manned posts of each kind, by crew size (1 to 4 players).
     let manned = |gait: Gait| match gait {
-        Gait::Walker => [4, 5, 6, 7][n],
+        Gait::Walker => [3, 5, 6, 7][n],
         Gait::Flyer => [1, 3, 4, 6][n],
-        Gait::Mount => [1, 2, 3, 3][n],
+        Gait::Mount => [0, 1, 2, 3][n],
         _ => usize::MAX,
     };
     let entry = design.markers.get("entry").copied().unwrap_or(Vec3::ZERO);
     let crew = bots::compose_crew(design, threat, tick as u64);
     let mut kept = Vec::new();
     for gait in [Gait::Walker, Gait::Flyer, Gait::Mount, Gait::Crawler, Gait::Clinger] {
-        let mut group: Vec<bots::Posting> = crew.iter().copied().filter(|p| p.robot.gait() == gait).collect();
+        let mut group: Vec<bots::Posting> = crew
+            .iter()
+            .copied()
+            .filter(|p| p.robot.gait() == gait)
+            .collect();
         // From the way in to the deepest: keep posts spread along it, the
-        // deepest always (the leader guards the bridge).
+        // deepest always (the leader guards the bridge). Alone, the
+        // deepest only: walkers nearer the way in hear the boarder and
+        // come for them together.
         group.sort_by(|a, b| a.post.at.distance(entry).total_cmp(&b.post.at.distance(entry)));
         let (have, want) = (group.len(), manned(gait).min(group.len()));
         if want == 0 {
             continue;
         }
-        let picks: Vec<usize> = if want == 1 {
+        let picks: Vec<usize> = if want == 1 || (players == 1 && gait == Gait::Walker) {
+            (have - want..have).collect()
+        } else if want == 1 {
             vec![have - 1]
         } else {
             (0..want).map(|i| (i * (have - 1) + (want - 1) / 2) / (want - 1)).collect()

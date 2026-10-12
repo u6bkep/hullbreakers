@@ -43,9 +43,9 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   The more of the crew at home, the more goes wrong there, so it's a
   second front. A ship left empty (a lone boarder away) isn't knocked
   about, and nothing is in the first 45 s. The carrier's crew is sized to
-  ours: alone, four walkers, a swarmer and one hull turret at threat 1; four
-  players, the full complement (seven walkers, six swarmers, three
-  turrets). The fast way across is the rope: hook the carrier on a close
+  ours: alone, three walkers at the deepest posts (the upper corridor and
+  the bridge), one swarmer and no hull turrets, at threat 1; four players,
+  the full complement (seven walkers, six swarmers, three turrets). The fast way across is the rope: hook the carrier on a close
   pass (the first is 30 s in, at 100 m) and reel.
 
 - **Grapple run**: ten gates on a switchback just off our stern, lanes 8 m
@@ -78,7 +78,9 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   amber on the pod, red when the air is nearly gone). Rope one and tow it
   into our hold; let go of the keys while towing and flight assist keeps
   station with what you tow instead of braking (so it doesn't run into
-  you). A pod anywhere at the hold's mouth counts (caught on the door frame
+  you; stop a tow with the brake, X, and early). A rope on a pod doesn't
+  snap when you set off and it goes taut. A pod anywhere at the hold's
+  mouth counts (caught on the door frame
   or beside an engine pod, say): the survivors climb in. A survivor is light; the lifeboat is 600 kg, so a second rope on it
   nearly doubles the pull. Win with everyone accounted for and at least 4
   of the 8 home; alone you can't reach them all, so split up.

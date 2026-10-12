@@ -13,7 +13,7 @@ use super::camera::PlayerCamera;
 use crate::sim::mission::{MarkedBodies, Mission};
 use crate::sim::player::{Mode, Player};
 use crate::sim::ship::ShipHull;
-use crate::sim::vitals::Vitals;
+use crate::sim::vitals::{HurtLog, Vitals};
 
 #[derive(Resource)]
 pub struct Telemetry {
@@ -38,12 +38,14 @@ pub fn write_telemetry(
     time: Res<Time>,
     mut telemetry: ResMut<Telemetry>,
     camera: Option<Single<&GlobalTransform, With<PlayerCamera>>>,
-    player: Option<Single<(&Player, Option<&Vitals>), With<LocalPlayer>>>,
+    player: Option<Single<(&Player, Option<&Vitals>, Option<&HurtLog>), With<LocalPlayer>>>,
     mission: Option<Single<&Mission>>,
     hulls: Query<(&ShipHull, &GlobalTransform)>,
     poses: Query<&GlobalTransform>,
-    robots: Query<(&crate::sim::bots::Robot, &avian3d::prelude::Position, Option<&Vitals>), With<Player>>,
+    robots: Query<(&crate::sim::bots::Robot, &avian3d::prelude::Position, Option<&Vitals>, &Player)>,
     marked: MarkedBodies,
+    // Hurts already appended to `<file>.hurts`.
+    mut hurts_seen: Local<Option<u32>>,
 ) {
     telemetry.since += time.delta_secs();
     if telemetry.since < 0.03 {
@@ -51,7 +53,36 @@ pub fn write_telemetry(
     }
     telemetry.since = 0.0;
     let (Some(camera), Some(player)) = (camera, player) else { return };
-    let (player, vitals) = *player;
+    let (player, vitals, hurts) = *player;
+    // Every hurt, appended to `<file>.hurts` as it comes: when, how much,
+    // from where, and the nearest robot to there.
+    if let Some(log) = hurts {
+        let seen = hurts_seen.get_or_insert(log.count);
+        let new = log.count.wrapping_sub(*seen) as usize;
+        if new > 0 {
+            *seen = log.count;
+            let mut lines = String::new();
+            for hurt in log.recent.iter().rev().take(new).rev() {
+                let nearest = hurt.from.and_then(|from| {
+                    robots
+                        .iter()
+                        .map(|(kind, at, ..)| (*kind, at.0.distance(from)))
+                        .min_by(|a, b| a.1.total_cmp(&b.1))
+                });
+                lines += &format!(
+                    "t={:.2} hurt={:.0}{} from={} nearest={nearest:?}\n",
+                    time.elapsed_secs(),
+                    hurt.amount,
+                    if hurt.kill { " kill" } else { "" },
+                    hurt.from.map_or("?".to_string(), v)
+                );
+            }
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(telemetry.path.with_extension("hurts")) {
+                let _ = f.write_all(lines.as_bytes());
+            }
+        }
+    }
     let mut out = String::new();
     let (_, rotation, eye) = camera.to_scale_rotation_translation();
     out += &format!("t={:.2}\n", time.elapsed_secs());
@@ -78,6 +109,9 @@ pub fn write_telemetry(
     if let Some(mission) = mission {
         out += &format!("mission={:?} phase={:?}\n", mission.kind, mission.phase);
         out += &format!("objective={}\n", mission.objective);
+        for line in &mission.report {
+            out += &format!("report={line}\n");
+        }
         for line in &mission.status {
             out += &format!("status={line}\n");
         }
@@ -93,9 +127,17 @@ pub fn write_telemetry(
             }
         }
     }
-    for (kind, pose, vitals) in &robots {
+    for (kind, pose, vitals, robot) in &robots {
+        // Standing on a ship: where, in its frame (chest high), to aim by
+        // on a moving ship.
+        let on = match robot.mode {
+            Mode::Booted { body, feet, up, .. } => hulls
+                .get(body)
+                .map_or(String::new(), |(h, _)| format!(" on={} local={}", h.0, v(feet + up * 0.9))),
+            Mode::Eva { .. } => String::new(),
+        };
         out += &format!(
-            "robot={kind:?} @ {} ({:.0} m) health={:.0}\n",
+            "robot={kind:?} @ {} ({:.0} m) health={:.0}{on}\n",
             v(pose.0),
             pose.0.distance(eye),
             vitals.map_or(0.0, |v| v.health)

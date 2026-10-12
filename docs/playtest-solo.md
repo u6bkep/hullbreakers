@@ -18,6 +18,123 @@ so the human estimates are my judgement.
 | Escort | yes | 8:27 (two deaths, much fumbling) | 3–4 min | Was a death loop solo (fixed); otherwise fair |
 | Boarding | **no** (3 tries, never got aboard) | — | ? | Doesn't look soloable as tuned |
 
+## Round 2: boarding, recovery, grapple run (after the fixes)
+
+| Scenario | Result | Time |
+|---|---|---|
+| Recovery | **won** solo by real inputs (the lifeboat home: 4 of 8, enough) | hooked at 0:26, home at 2:54 (harness); 52 s for a scripted sim pilot |
+| Boarding | aboard at 0:38–0:47, 5 of 5 runs, 20–100 HP left; then my input bot lost the fight at the ramp every time | not finished |
+| Grapple run | sim pilots: 24.4 s on the rope, 31.3 s on the jetpack | — |
+
+### Boarding
+
+**(a) "Never nearer than ~150 m" was my measurement.** My wait loop stopped
+sampling at its threshold (140–170 m). The weave is exact: the first close
+pass is at 30 s, 100 m from our ship's origin, then one every 60 s.
+
+**(b) What killed me 4 s into the reel.** Robots, not beams. A sim test
+reproduces the crossing (`tests/boarding_solo.rs`). On the rope at the
+first pass, with the full crew aboard:
+- three swarmer hits (14 each), then the hull turrets (14 each), on a
+  boarder 40 m short of the hangar;
+- dead at 4.25 s;
+- no beam hurt at all.
+
+**Changes:**
+- **The carrier's crew is sized to ours** (`boarding::carrier_crew`,
+  through a new `bots::man_posts`, which splits `crew_ship` in two).
+
+  | Players | Threat | Walkers | Swarmers | Turrets |
+  |---|---|---|---|---|
+  | 1 | 1 | 3, at the deepest posts (upper corridor, bridge) | 1 | 0 |
+  | 2 | 2 | 5 | 3 | 1 |
+  | 3 | 3 | 6 | 4 | 2 |
+  | 4 | 3 | today's full crew: 7 | 6 | 3 |
+
+  The full crew also has 2 crawlers.
+- **Damage control:** no faults with nobody aboard our ship, and none in the
+  first 45 s. With a lone boarder away, our hull lasts its full 3:30.
+- `Stage` now carries the player count, counted when the scenario starts.
+
+Beams don't hold fire for ropes: they weren't what killed boarders.
+
+**What the harness runs showed** (5 runs, solo, by real inputs):
+- Mission wall to out of our door: 9–12 s.
+- The first pass at 22 s: hooked at 115–135 m, reeled across in about 5 s.
+- Under the hull to the hangar door: in at 0:38–0:47.
+- Arrived with 84–100 HP, except two runs that came straight down the door's
+  axis (20 and 36 HP).
+- Then the three walkers met me at the ramp head and killed my input bot
+  every time. They converge: robots call each other, so posting them deep
+  doesn't make a progression.
+
+My harness aim on a moving, banking carrier is poor. The best run dealt 54
+damage in 15 s, where an SMG on target does 135 per second. So the harness
+can't tell whether a human wins here. The time budget does fit:
+- aboard by 0:45;
+- about 60 m of ship to the bridge;
+- 3:30 of hull.
+
+**Recommendations:**
+- **A human playtest of boarding solo.** Alternatively I can build a sim
+  pilot that shoots, like the grapple run's pilots.
+- **For the enemies agent:** consider leashing the bridge guards to their
+  posts, so a lone boarder meets the crew in turn rather than all at once.
+
+### Recovery
+
+**The rope snapped on every tow from slack** (fixed). A rope going taut at
+speed takes the whole difference in one tick: about 1700 N·s from a
+lifeboat at 17 m/s, against an 833 N·s limit. Ropes on towable loads now
+pull at their limit instead. This was why my earlier tows "lost" their pods.
+
+**Changes:**
+- A pod anywhere at the hold's mouth counts as home: from the engine pods'
+  fronts to 8 m astern of the door, ±6.5 m wide.
+- Test: `a_pod_at_the_hold_mouth_is_home`.
+
+**Harness run (won):**
+- Lifeboat first: hooked at 0:26, 199 m out.
+- Towed round the ship's side and in through the mouth.
+- "Home: 4 of 8" at 2:54, and won once the rest were out of air.
+- Towing a 600 kg lifeboat solo is slow: I braked at 2.5 m/s² and kept to
+  10 m/s.
+
+**What a player needs to know:**
+- A tow coasts with its load when you let go of the keys, so stopping it
+  takes the brake (X), early.
+- Flying a tow straight through our ship wedges the pod on the hull. Go
+  round.
+- Tests: `alone_the_lifeboat_comes_home_in_time` (scripted pilot, 52 s).
+
+### Grapple run
+
+**The new course** is a switchback, 10 gates:
+- lanes 8 m apart, 20 m from gate to gate;
+- a hairpin round a 1 m pylon after every gate;
+- a climb and a drop by bars;
+- rocks now ring the course instead of filling it.
+
+**Gates count only flown the way they face.** The way-in face lights; the
+back stays dark. Before this, a gate could be flown backwards, which cut
+every hairpin.
+
+**Measured** (`tests/grapple_run.rs`): a scripted jetpack pilot that brakes
+for every hairpin flies it in 31.3 s; one swinging round the pylons on the
+rope flies it in 24.4 s. I haven't flown it in the harness: my tooling
+can't swing.
+
+**Measured along the way:** pylons have to be thin (1 m). Swinging round a
+2.5 m post, the rope's anchor sits on its face and the circle runs into the
+post.
+
+### Stale objective marker (dead ship)
+
+The dead ship removes the Airlock marker when its step changes. The HUD's
+3 s linger, meant for beacons between pings, kept it showing. Now, when
+the objective text changes, marks it left behind fade in 0.3 s
+(`markers.rs`, the HUD agent's file). I haven't checked this in-game.
+
 ## Fixes made
 
 - **Our ship is parked beside static sites** (`ship::parked_home_ship`, used by

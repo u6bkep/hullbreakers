@@ -341,6 +341,19 @@ it.
   by real inputs; the unit tests set `reference_body` by hand and never
   saw it. Cost: a lost playtest run.
 
+- 2026-10-12. Ropes snapped on tows, silently. The rope solver is nearly
+  rigid, so a slack rope going taut takes up the whole speed difference in
+  one tick. If that impulse is over `rope_break_force * dt`, the rope
+  snaps. Setting off from a lifeboat at full thrust, the rope goes taut at
+  about 17 m/s: m_eff ≈ 100 kg × 17 m/s ≈ 1700 N·s against the limit of
+  833 N·s. It snaps every time, and so does a survivor's (67 kg × 17). Ropes
+  on light loads (under `TOW_MAX_MASS`, not `untowable`) now pull at their
+  limit instead of snapping (`light_load` in the EVA rope step). Found with
+  a scripted sim pilot (tests/recovery_solo.rs); the tow tests start with
+  the rope taut, so they never saw it. A tow also coasts with its load when
+  you let go (tow mode), so stopping one takes the brake (X), early. Cost:
+  three playtest runs.
+
 - 2026-10-12. Playing scenarios by real inputs in the harness: set
   `HULLBREAKERS_TELEMETRY=<file>` and the client writes the player's view
   about 30 times a second (eye, forward, mode, feet in ship-local

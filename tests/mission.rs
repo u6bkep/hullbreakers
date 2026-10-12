@@ -444,12 +444,20 @@ fn the_carriers_ramp_leads_to_the_upper_deck() {
     panic!("never reached the upper deck: {:?}", player(&mut app).mode);
 }
 
-/// The carrier's robots stand at their posts on its decks.
+/// The carrier's robots stand at their posts on its decks (all seven
+/// walkers', with a crew of four to face them).
 #[test]
 fn the_carriers_gunners_stand_at_their_posts() {
+    use hullbreakers::sim::player::new_player;
     let mut app = app();
     app.world_mut().resource_mut::<Director>().robots = true;
-    start_boarding(&mut app);
+    let ship = home(&mut app);
+    for slot in 1..4 {
+        let tuning = Tuning::default();
+        app.world_mut().spawn((new_player(ship, slot), Vitals::full(&tuning)));
+    }
+    ticks(&mut app, 2);
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
     ticks(&mut app, 120);
     let world = app.world_mut();
     let gunners: Vec<Mode> = world
@@ -463,7 +471,7 @@ fn the_carriers_gunners_stand_at_their_posts() {
             p.mode
         })
         .collect();
-    let crew: Vec<_> = world.query_filtered::<&Player, Without<Robot>>().single(world).unwrap().events.iter().collect();
+    let crew: Vec<_> = world.query_filtered::<&Player, Without<Robot>>().iter(world).flat_map(|p| p.events.iter().collect::<Vec<_>>()).collect();
     eprintln!("crew events: {crew:?}");
     assert_eq!(gunners.len(), 7);
     for mode in gunners {
@@ -1084,8 +1092,9 @@ fn a_hit_knocks_out_our_power_and_someone_resets_it() {
     start_boarding(&mut app);
     let ship = home(&mut app);
     let mut waited = 0;
+    // Nothing's knocked out in the first 45 s.
     while knocked_out(&mut app, ship).is_empty() {
-        assert!(waited < 20 * 60, "no hit knocked anything out in 20 s");
+        assert!(waited < 65 * 60, "no hit knocked anything out in 65 s");
         ticks(&mut app, 1);
         waited += 1;
     }
