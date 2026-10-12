@@ -41,6 +41,9 @@ use crate::sim::bodies::Bodies;
 use crate::sim::{PlayerSimPlugin, SimPlugin, SimSharedPlugin, SimSystems, SimTick, TICK_HZ};
 
 mod extrapolate;
+mod profiles;
+
+pub use profiles::ProfileRequests;
 
 pub const DEFAULT_PORT: u16 = 5888;
 const PROTOCOL_ID: u64 = 0x5ace_9a3e;
@@ -163,7 +166,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_robot)
             .add_observer(replicate_pickup)
             .add_systems(Startup, spawn_host_tuning)
-            .add_systems(Update, (publish_tuning, spawn_players))
+            .add_systems(Update, (publish_tuning, spawn_players, profiles::receive_profiles))
             .add_systems(
                 FixedPostUpdate,
                 extrapolate::track_motion.after(SimSystems::Players),
@@ -218,6 +221,9 @@ impl Plugin for NetPlugin {
             // Required by lightyear's client input pipeline (input history
             // for rollback), even before anything is predicted.
             app.init_resource::<LocalInput>()
+                .init_resource::<ProfileRequests>()
+                .add_systems(Update, profiles::send_profile(mode.is_authority()))
+                .add_systems(Last, profiles::save_profile)
                 .insert_resource(PredictionManager::default())
                 // A client can't simulate its player before its clock (and
                 // so the bodies around it) is in step with the authority.
@@ -263,6 +269,7 @@ struct ProtocolPlugin;
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(InputPlugin::<PlayerInput>::default());
+        profiles::register(app);
         app.component::<Name>().replicate();
         app.component::<ShipHull>().replicate_once();
         app.component::<HomeShip>().replicate_once();

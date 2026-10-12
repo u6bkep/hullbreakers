@@ -20,6 +20,7 @@ pub mod motion;
 pub mod nav;
 pub mod pickups;
 pub mod player;
+pub mod progression;
 pub mod rope;
 pub mod scenarios;
 pub mod ship;
@@ -172,6 +173,7 @@ impl Plugin for SimPlugin {
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
+            .init_resource::<progression::ProfileOrders>()
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
             .add_systems(
@@ -242,7 +244,7 @@ impl Plugin for SimPlugin {
                     )
                         .chain()
                         .in_set(mission::MissionSystems::Settle),
-                    (mission::handle_presses, devices::run_devices, mission::tally_crew)
+                    (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders)
                         .chain()
                         .in_set(mission::MissionSystems::React),
                     (mission::return_when_decided, mission::switch_scenario, mission::arrivals)

@@ -18,6 +18,7 @@ pub mod menu;
 pub mod pickup_look;
 pub mod profile;
 pub mod render;
+pub mod save;
 pub mod sfx;
 pub mod sky;
 pub mod stress;
@@ -85,6 +86,7 @@ impl Plugin for ClientPlugin {
                     render::setup_materials,
                     bindings::load_bindings,
                     menu::load_stances,
+                    save::load_profile,
                     sky::setup_sky,
                 ),
             )

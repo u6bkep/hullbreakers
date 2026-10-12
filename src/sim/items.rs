@@ -686,6 +686,14 @@ impl Mods {
 
 // ---------------------------------------------------------------------------
 // Weapons.
+//
+// FROZEN: players' profiles keep their guns as (frame, seed, rarity) plus
+// their workbench changes (`sim::progression`). Everything a gun is derives
+// from those numbers here, so changing how it's derived (the hash, the
+// salts, the tables of parts, makers, perks and names, their order, or the
+// stat arithmetic) changes every gun everyone has saved. The pinned rolls
+// in this module's tests say when that's happened; if it's meant, bump
+// `ProfileFile::VERSION` and say so in the README.
 
 /// A gun as an object. See the module docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1382,6 +1390,49 @@ mod tests {
             assert!(name.chars().count() <= 26, "{name}");
         }
     }
+
+    /// A few rolls of each frame, every rarity, as they were when profiles
+    /// started keeping guns. If this fails, generation changed: every saved
+    /// gun changed with it (see the note at "Weapons").
+    #[test]
+    fn saved_guns_stay_the_guns_they_were() {
+        let signature = |w: Weapon| {
+            let s = w.stats();
+            format!(
+                "{}|{:.3}|{:.3}|{}|{:.3}|{:.3}|{:.3}|{:.1}|{:.3}|{:?}",
+                w.name(),
+                s.damage,
+                s.rate,
+                s.mag,
+                s.reload,
+                s.spread_braced,
+                s.spread,
+                s.muzzle_speed,
+                s.switch,
+                s.perks
+            )
+        };
+        let rolls: Vec<String> = GunKind::CREW
+            .into_iter()
+            .flat_map(|frame| ROLLED.into_iter().enumerate().map(move |(i, r)| Weapon::new(frame, 1000 + i as u32 * 7919, r)))
+            .map(signature)
+            .collect();
+        let pinned: Vec<String> = PINNED_ROLLS.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
+        if rolls != pinned {
+            panic!("generation changed; now:\n{}", rolls.join("\n"));
+        }
+    }
+
+    const PINNED_ROLLS: &str = "
+        Kessler MP-1 Pike|9.000|12.150|40|1.600|0.780|1.300|513.0|0.440|[None, None]
+        Kessler MP-2 Spyglass|11.520|11.850|40|1.600|0.756|1.940|456.0|0.440|[None, None]
+        Hoshi Type III Howler|10.530|16.350|30|1.040|1.116|1.760|475.0|0.420|[Some(Hardened), None]
+        Hoshi Type IV Frenzy|10.080|20.550|86|2.320|1.296|1.620|475.0|0.420|[Some(HotLoads), Some(Overclocked)]
+        Kessler KG-1 Reach|24.000|6.075|30|2.000|0.228|1.625|1080.0|0.440|[None, None]
+        Kessler KG-2 Watcher|30.720|5.925|30|2.000|0.220|2.425|960.0|0.440|[None, None]
+        Hoshi Type III Howler|28.080|8.175|23|1.300|0.325|2.200|1000.0|0.420|[Some(Hardened), None]
+        Hoshi Type IV Frenzy|26.880|10.275|65|2.900|0.378|2.025|1000.0|0.420|[Some(HotLoads), Some(Overclocked)]
+    ";
 
     #[test]
     fn names_vary() {
