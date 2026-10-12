@@ -8,7 +8,12 @@
 //! - [`RobotView`]: its pose (the mode), its rope, its boots and its beams,
 //!   quantised on the wire (millimetres, centimetres a second, 1/32767 of a
 //!   unit), interpolated like a player. It's rewritten only when it's moved
-//!   by more than the quantisation, so an idle robot costs nothing.
+//!   by more than the quantisation, so an idle robot costs nothing. A robot
+//!   in EVA is posed in its ship's frame (its reference body), as one on a
+//!   deck is: a client blends it there and draws it on the ship as drawn
+//!   ([`DrawnIn`]), so one flying beside a moving ship keeps its place by
+//!   it (in the world it would be drawn where it was an interpolation delay
+//!   ago, metres behind a fast ship, and step as unevenly as its samples).
 //! - [`RobotLog`]: the recent entries of its event log (shots, landings,
 //!   ropes), rewritten only when there's a new one.
 //!
@@ -21,8 +26,10 @@ use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::sim::bodies::Bodies;
 use crate::sim::bots::Robot;
 use crate::sim::events::EventLog;
+use crate::sim::frame::BodyFrame;
 use crate::sim::motion::rotation_error;
 use crate::sim::player::{Grapple, Mode, Player};
 use crate::sim::weapons::{Beam, Loadout};
@@ -34,6 +41,9 @@ use crate::sim::weapons::{Beam, Loadout};
 #[serde(into = "WireView", from = "WireView")]
 #[component(map_entities)]
 pub struct RobotView {
+    /// In EVA, posed in this body's frame (position, velocity relative to
+    /// it, orientation), if it has one.
+    pub frame: Option<Entity>,
     pub mode: Mode,
     pub grapple: Option<Grapple>,
     pub boots_on: bool,
@@ -48,14 +58,31 @@ impl MapEntities for RobotView {
         if let Some(grapple) = &mut self.grapple {
             grapple.target = mapper.get_mapped(grapple.target);
         }
+        if let Some(frame) = &mut self.frame {
+            *frame = mapper.get_mapped(*frame);
+        }
     }
 }
 
 impl RobotView {
-    /// The view of `player`, as the wire would carry it.
-    pub fn of(player: &Player) -> Self {
+    /// The view of `player`, as the wire would carry it; in EVA, in
+    /// `frame` (its reference body's) if given.
+    pub fn of(player: &Player, frame: Option<(Entity, BodyFrame)>) -> Self {
+        let (frame, mode) = match (player.mode, frame) {
+            (Mode::Eva { position, velocity, orientation, pitch }, Some((body, f))) => (
+                Some(body),
+                Mode::Eva {
+                    position: f.point_to_local(position),
+                    velocity: f.dir_to_local(velocity - f.point_velocity(position)),
+                    orientation: f.rotation.inverse() * orientation,
+                    pitch,
+                },
+            ),
+            (mode, _) => (None, mode),
+        };
         RobotView {
-            mode: player.mode,
+            frame,
+            mode,
             grapple: player.grapple,
             boots_on: player.boots_on,
             beams: [player.loadout.hands[0].beam, player.loadout.hands[1].beam],
@@ -71,7 +98,8 @@ impl RobotView {
     /// what anyone could see): a robot jittering in the last bits (boots
     /// re-seating on a turning rock) isn't re-sent.
     pub fn near(&self, other: &RobotView) -> bool {
-        near_mode(&self.mode, &other.mode)
+        self.frame == other.frame
+            && near_mode(&self.mode, &other.mode)
             && self.boots_on == other.boots_on
             && self.beams == other.beams
             && match (self.grapple, other.grapple) {
@@ -134,15 +162,17 @@ pub const ROBOT_LOG_TICKS: u32 = 30;
 /// Authority, after players move: each robot's view and log, rewritten
 /// only when they've changed by more than the wire would show.
 pub fn publish_robots(
+    bodies: Bodies,
     mut robots: Query<(Entity, &Player, Option<&mut RobotView>, Option<&mut RobotLog>), With<Robot>>,
     mut commands: Commands,
 ) {
     for (entity, player, view, log) in &mut robots {
+        let frame = player.reference_body.and_then(|b| bodies.frame(b).map(|f| (b, f)));
+        let now = RobotView::of(player, frame);
         let (Some(mut view), Some(mut log)) = (view, log) else {
-            commands.entity(entity).insert((RobotView::of(player), RobotLog(player.events.since(ROBOT_LOG_TICKS))));
+            commands.entity(entity).insert((now, RobotLog(player.events.since(ROBOT_LOG_TICKS))));
             continue;
         };
-        let now = RobotView::of(player);
         if !now.near(&view) {
             *view = now;
         }
@@ -152,26 +182,69 @@ pub fn publish_robots(
     }
 }
 
+/// On a client, a robot in EVA posed in a body's frame: where it is in it,
+/// for drawing it on the body as drawn (see `client::render::update_avatars`).
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct DrawnIn {
+    pub body: Entity,
+    /// Its capsule's centre, and its orientation, in the body's frame.
+    pub position: Vec3,
+    pub orientation: Quat,
+}
+
+/// A view's mode in the world: an EVA pose in a body's frame placed by
+/// where that body is here (`frame`).
+fn world_mode(view: &RobotView, frame: Option<BodyFrame>) -> Mode {
+    match (view.mode, frame) {
+        (Mode::Eva { position, velocity, orientation, pitch }, Some(f)) => {
+            let at = f.point_to_world(position);
+            Mode::Eva {
+                position: at,
+                velocity: f.point_velocity(at) + f.dir_to_world(velocity),
+                orientation: f.rotation * orientation,
+                pitch,
+            }
+        }
+        (mode, _) => mode,
+    }
+}
+
 /// A remote client, as the interpolation is written: each robot's
 /// `Player`, from its view and log, for presentation (and aiming) to read.
 /// What a client doesn't get (the loadout but for its beams, the input
-/// cursor) stays at rest.
+/// cursor) stays at rest. One in EVA posed in a body's frame is put in the
+/// world by where the body is here, and drawn in the body as drawn.
 pub fn present_robots(
-    mut robots: Query<(Entity, &RobotView, Option<&RobotLog>, Option<&mut Player>), With<Robot>>,
+    bodies: Bodies,
+    mut robots: Query<(Entity, &RobotView, Option<&RobotLog>, Option<&mut Player>, Option<&DrawnIn>), With<Robot>>,
     mut commands: Commands,
 ) {
-    for (entity, view, log, player) in &mut robots {
+    for (entity, view, log, player, drawn) in &mut robots {
+        let frame = view.frame.and_then(|b| bodies.frame(b));
+        let mode = world_mode(view, frame);
+        match (view.frame, view.mode, frame) {
+            (Some(body), Mode::Eva { position, orientation, .. }, Some(_)) => {
+                let d = DrawnIn { body, position, orientation };
+                if drawn != Some(&d) {
+                    commands.entity(entity).insert(d);
+                }
+            }
+            _ if drawn.is_some() => {
+                commands.entity(entity).remove::<DrawnIn>();
+            }
+            _ => {}
+        }
         let Some(mut player) = player else {
             let mut loadout = Loadout::default();
             for (hand, beam) in loadout.hands.iter_mut().zip(view.beams) {
                 hand.beam = beam;
             }
             commands.entity(entity).insert(Player {
-                mode: view.mode,
+                mode,
                 boots_on: view.boots_on,
                 flight_assist: false,
                 grapple: view.grapple,
-                reference_body: view.mode.body(),
+                reference_body: view.frame.or(view.mode.body()),
                 detach_timer: 0.0,
                 loadout,
                 input: default(),
@@ -180,10 +253,10 @@ pub fn present_robots(
             continue;
         };
         let player = &mut *player;
-        player.mode = view.mode;
+        player.mode = mode;
         player.boots_on = view.boots_on;
         player.grapple = view.grapple;
-        player.reference_body = view.mode.body();
+        player.reference_body = view.frame.or(view.mode.body());
         for (hand, beam) in player.loadout.hands.iter_mut().zip(view.beams) {
             hand.beam = beam;
         }
@@ -195,9 +268,13 @@ pub fn present_robots(
     }
 }
 
-/// Interpolates a robot's view as a player's is (`interpolate_mode`); the
-/// rest is taken from the nearer end.
+/// Interpolates a robot's view as a player's is (`interpolate_mode`), in
+/// the frame both ends are in (else it's the nearer end); the rest is taken
+/// from the nearer end.
 pub fn interpolate_view(start: RobotView, end: RobotView, t: f32) -> RobotView {
+    if start.frame != end.frame {
+        return snap(start, end, t);
+    }
     let mode = super::interpolate_mode(start.mode, end.mode, t);
     let mut view = if t < 0.5 { start } else { end };
     view.mode = mode;
@@ -281,6 +358,7 @@ struct WireGrapple {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct WireView {
+    frame: Option<Entity>,
     mode: WireMode,
     grapple: Option<WireGrapple>,
     boots_on: bool,
@@ -306,6 +384,7 @@ impl From<RobotView> for WireView {
             },
         };
         WireView {
+            frame: v.frame,
             mode,
             grapple: v.grapple.map(|g| WireGrapple {
                 target: g.target,
@@ -338,6 +417,7 @@ impl From<WireView> for RobotView {
             },
         };
         RobotView {
+            frame: w.frame,
             mode,
             grapple: w.grapple.map(|g| Grapple {
                 target: g.target,
@@ -357,6 +437,7 @@ mod tests {
 
     fn booted(feet: Vec3) -> RobotView {
         RobotView {
+            frame: None,
             mode: Mode::Booted {
                 body: Entity::from_raw_u32(7).unwrap(),
                 feet,

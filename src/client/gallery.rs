@@ -297,19 +297,35 @@ const BIG: f32 = 5.0;
 
 /// Once every exhibit has loaded, sets them out by size: a row of the
 /// smaller ones, side by side with room to turn, and the big ones (ships)
-/// behind them.
+/// behind them. The same on every peer: an exhibit is measured only once
+/// its model and everything it uses have loaded and every mesh in it has
+/// its bounds (measured from the first part to have bounds, a ship still
+/// loading came out small, and went in the front row on one peer and not
+/// another), and the gallery is set out afresh on each visit.
 pub fn arrange_exhibits(
-    mut exhibits: Query<(Entity, &mut Exhibit, &mut Transform)>,
+    assets: Res<AssetServer>,
+    mut exhibits: Query<(Entity, &mut Exhibit, &mut Transform, &WorldAssetRoot)>,
     children: Query<&Children>,
     meshes: Query<(&GlobalTransform, &Aabb)>,
+    parts: Query<Has<Aabb>, With<Mesh3d>>,
     globals: Query<&GlobalTransform>,
     mut arranged: Local<bool>,
 ) {
-    if *arranged || exhibits.is_empty() {
+    if exhibits.is_empty() {
+        // Gone with the gallery: the next visit's are set out anew.
+        *arranged = false;
         return;
     }
-    for (entity, mut exhibit, _) in &mut exhibits {
-        if exhibit.radius.is_some() {
+    if *arranged {
+        return;
+    }
+    for (entity, mut exhibit, _, root) in &mut exhibits {
+        if exhibit.radius.is_some() || !assets.is_loaded_with_dependencies(&root.0) {
+            continue;
+        }
+        // Spawned, and every mesh in it bounded.
+        let mut meshes_in = children.iter_descendants(entity).filter_map(|e| parts.get(e).ok()).peekable();
+        if meshes_in.peek().is_none() || !meshes_in.all(|bounded| bounded) {
             continue;
         }
         let Ok(at) = globals.get(entity) else { continue };
@@ -334,26 +350,33 @@ pub fn arrange_exhibits(
             exhibit.radius = Some(reach);
         }
     }
-    if exhibits.iter().any(|(_, e, _)| e.radius.is_none()) {
+    if exhibits.iter().any(|(_, e, ..)| e.radius.is_none()) {
         return;
     }
-    let mut small: Vec<_> = exhibits.iter_mut().filter(|(_, e, _)| e.radius.unwrap() <= BIG).collect();
-    let width: f32 = small.iter().map(|(_, e, _)| 2.0 * e.radius.unwrap() + GAP).sum();
+    // In the order they were set out in (sorted paths), not the query's.
+    let mut small: Vec<_> = exhibits.iter_mut().filter(|(_, e, ..)| e.radius.unwrap() <= BIG).collect();
+    small.sort_by_key(|(_, e, ..)| e.index);
+    let width: f32 = small.iter().map(|(_, e, ..)| 2.0 * e.radius.unwrap() + GAP).sum();
     let mut x = -width / 2.0;
-    for (_, e, t) in &mut small {
+    for (_, e, t, _) in &mut small {
         let r = e.radius.unwrap();
         t.translation = Vec3::new(x + r + GAP / 2.0, 0.0, 0.0);
         x += 2.0 * r + GAP;
     }
-    let big: Vec<_> = exhibits.iter_mut().filter(|(_, e, _)| e.radius.unwrap() > BIG).collect();
-    let width: f32 = big.iter().map(|(_, e, _)| 2.0 * e.radius.unwrap() + GAP).sum();
+    let mut big: Vec<_> = exhibits.iter_mut().filter(|(_, e, ..)| e.radius.unwrap() > BIG).collect();
+    big.sort_by_key(|(_, e, ..)| e.index);
+    let width: f32 = big.iter().map(|(_, e, ..)| 2.0 * e.radius.unwrap() + GAP).sum();
     let mut x = -width / 2.0;
-    for (_, e, mut t) in big {
+    for (_, e, mut t, _) in big {
         let r = e.radius.unwrap();
         t.translation = Vec3::new(x + r + GAP / 2.0, 0.0, -(r + 6.0));
         x += 2.0 * r + GAP;
     }
     *arranged = true;
+    // What went where, to compare peers by.
+    let mut placed: Vec<_> = exhibits.iter().map(|(_, e, t, _)| (e.index, format!("{} {:.1},{:.1} r{:.1}", e.label, t.translation.x, t.translation.z, e.radius.unwrap_or(0.0)))).collect();
+    placed.sort_by_key(|(i, _)| *i);
+    info!("gallery: arranged: {}", placed.into_iter().map(|(_, p)| p).collect::<Vec<_>>().join("; "));
 }
 
 /// Room between exhibits (m).

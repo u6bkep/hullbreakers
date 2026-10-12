@@ -67,7 +67,7 @@ enum Place {
     /// In EVA by the first pod, roped to it.
     Pod,
     /// In EVA a few metres in front of the gallery's `kind` with `affix`
-    /// (and `side` metres to its right), facing it.
+    /// (and `side` metres to one side along the zoo's table), facing it.
     Robot { kind: Robot, affix: Affix, side: f32 },
     /// In EVA off the nearest limpet's rock, looking at it, `side` metres
     /// to the right of straight out from it.
@@ -519,7 +519,9 @@ fn put(place: Place, player: &mut Player, places: &Places, died_at: Option<Vec3>
                 _ => None,
             });
             if let Some(target) = found {
-                let position = target + Vec3::new(side, 0.0, 6.0);
+                // The zoo is a table facing +X, its cells 3 m apart along Z
+                // and Y: in front of it, not in the next cell along.
+                let position = target + Vec3::new(6.0, 0.0, side);
                 player.mode = Mode::Eva {
                     position,
                     velocity: Vec3::ZERO,
