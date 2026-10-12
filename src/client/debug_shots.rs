@@ -426,6 +426,10 @@ fn power_vantages() -> Vec<(&'static str, Vantage)> {
     vec![
         ("power_board", booted(Vec3::new(1.4, 0.01, -9.0), Vec3::X, 0.0)),
         ("power_hold", booted(Vec3::new(-1.0, 0.01, 1.5), Vec3::new(-1.0, 0.0, 0.7), -0.05)),
+        ("power_spawn", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.0)),
+        ("power_spawn_up", booted(Vec3::new(0.0, 0.01, 5.0), Vec3::NEG_Z, 0.7)),
+        ("power_hold_aft", booted(Vec3::new(1.5, 0.01, 2.0), Vec3::new(-0.4, 0.0, 1.0), 0.35)),
+        ("power_bridge", booted(Vec3::new(1.0, 0.01, -2.0), Vec3::new(-0.3, 0.0, -1.0), 0.25)),
     ]
 }
 

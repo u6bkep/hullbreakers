@@ -149,7 +149,7 @@ impl Plugin for ClientPlugin {
                         .after(events::present_events),
                     sfx::play_combat_sounds.after(sfx::play_event_sounds),
                     sfx::play_hit_sounds,
-                    (devices::show_devices, devices::dim_dark_cabins, devices::interior_ambient, devices::flash_beacons),
+                    (devices::show_devices, devices::glow_cables, devices::dim_dark_cabins, devices::interior_ambient, devices::flash_beacons),
                     (gallery::hide_colliders, gallery::arrange_exhibits, gallery::turn_exhibits, gallery::draw_sockets, gallery::pulse_cores, sky::settle_environment_maps),
                     (
                         weapons_fx::spawn_tracers,
