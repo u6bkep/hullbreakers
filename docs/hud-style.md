@@ -106,6 +106,9 @@ Nothing moves at rest. Motion only ever means "this just changed".
 - **Blinking** is for a state you must fix now (an empty mag, critical
   health): `pulse` at 1.6 Hz while it lasts, never otherwise.
 - **Hits**: markers last 0.25 s (0.5 s for a kill); a damage arc 1.2 s.
+- **Marks that go linger**: a world mark that disappears (a beacon between
+  pings, a goal just done) stays where it was last seen for 3 s, fading
+  from 75%; one that appears opens a ring round itself (0.5 s).
 - No sliding, bouncing or spinning.
 
 ## Layout
@@ -147,7 +150,9 @@ Reference frame 1920x1080 points; margins `EDGE` = 24 pt.
 - **The edge** of the screen is for off-screen arrows and the low-health
   vignette.
 
-World markers can be anywhere but fade out as they cross the centre
+No mark, glyph or label, sits on a HUD block: a mark behind one is drawn
+as an edge arrow instead, and edge arrows slide along the edge past the
+blocks. World markers can be anywhere else, but fade out as they cross the centre
 circle, so they never sit on the crosshair. Their labels sit on a small
 scrim and never overlap: marks draw most important first (objectives,
 the reference body, ships), and a later label that would land on an
@@ -159,6 +164,17 @@ screen).
 Pick its zone, use the tokens and painters, give it a scrim if it has
 more than one line, check it over black space and over the lit hull at
 1280x720 and 1920x1080 (`HULLBREAKERS_SHOTS_SHIP=hud` tours the HUD's
-states), and keep its frame cost down: the whole HUD measured about
-0.2 ms a frame over egui's own (see the commit that added it). Bars are
-one mesh each; prefer that over many small shapes.
+states), and keep its frame cost down. Bars are one mesh each; prefer
+that over many small shapes.
+
+**Measured cost** (traced release build, boarding action at 1920x1080,
+vsync, 15 s; `bevy_egui` pass + tessellation + render, which includes the
+HUD's own systems):
+
+| | HUD systems | egui pass | tessellation | egui render | total |
+|---|---|---|---|---|---|
+| The old HUD (8a88503) | 0.073 ms | 0.219 | 0.047 | 0.104 | 0.37 ms |
+| This HUD, on main 8b420f6 | 0.114 ms | 0.353 | 0.161 | 0.126 | 0.64 ms |
+
+So the HUD costs about 0.27 ms a frame more than the old one. The
+biggest of its systems is `objective_markers` (0.03 ms).

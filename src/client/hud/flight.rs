@@ -126,9 +126,10 @@ pub fn event_feed(
         // Where the menus are: key caps and what they open.
         let mut x = screen.min.x + EDGE;
         let dim = style::fade(INK_DIM, 0.85);
-        for (action, what) in [(Action::Menu, "Menu"), (Action::Loadout, "Loadout"), (Action::TuningPanel, "Tuning")] {
+        // The actions' own names and bindings, so renames and rebinds show.
+        for action in [Action::Menu, Action::Loadout, Action::TuningPanel] {
             let cap = style::key_cap(&painter, pos2(x, y + 10.0), &bindings.label(action), dim);
-            let r = style::caps(&painter, pos2(cap.max.x + 6.0, y + 10.0), Align2::LEFT_CENTER, what, MICRO, dim);
+            let r = style::caps(&painter, pos2(cap.max.x + 6.0, y + 10.0), Align2::LEFT_CENTER, action.name(), MICRO, dim);
             x = r.max.x + 16.0;
         }
         y += 30.0;

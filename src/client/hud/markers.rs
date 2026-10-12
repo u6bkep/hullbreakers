@@ -3,6 +3,8 @@
 //! objectives, and the case your kit was left in. Off screen, each becomes
 //! an arrow at the edge of the view.
 
+use std::collections::HashMap;
+
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use avian3d::prelude::ColliderAabb;
@@ -37,11 +39,17 @@ fn clear_of_centre(screen: Rect, p: Pos2) -> f32 {
 /// clear of them. Marks draw most important first: objectives, the
 /// reference body, then ships.
 #[derive(Default)]
-pub struct Labels(Vec<Rect>);
+pub struct Labels {
+    /// Labels placed this frame.
+    taken: Vec<Rect>,
+    /// The HUD's own blocks, which no mark may cover.
+    blocks: Vec<Rect>,
+}
 
 impl Labels {
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.taken.clear();
+        self.blocks.clear();
     }
 
     /// Marks the HUD's fixed blocks taken (generously: their sizes vary):
@@ -50,14 +58,22 @@ impl Labels {
     pub fn reserve(&mut self, screen: Rect) {
         let bottom = screen.max.y - EDGE;
         let suit = super::vitals::SUIT_BLOCK;
-        self.0.push(Rect::from_min_max(pos2(screen.min.x, bottom - suit.y - 110.0), pos2(screen.min.x + EDGE + suit.x + 8.0, screen.max.y)));
+        self.blocks.push(Rect::from_min_max(pos2(screen.min.x, bottom - suit.y - 110.0), pos2(screen.min.x + EDGE + suit.x + 8.0, screen.max.y)));
         let hands = super::hands::BLOCK;
-        self.0.push(Rect::from_min_max(pos2(screen.max.x - EDGE - hands.x - 8.0, bottom - hands.y - 8.0), screen.max));
-        self.0.push(Rect::from_center_size(pos2(screen.center().x, screen.min.y + 50.0), vec2(700.0, 100.0)));
+        self.blocks.push(Rect::from_min_max(pos2(screen.max.x - EDGE - hands.x - 8.0, bottom - hands.y - 8.0), screen.max));
+        self.blocks.push(Rect::from_center_size(pos2(screen.center().x, screen.min.y + 50.0), vec2(820.0, 100.0)));
+        // The key hint and the event feed.
+        self.blocks.push(Rect::from_min_size(screen.min, vec2(EDGE + 360.0, EDGE + 40.0)));
+    }
+
+    /// Whether a point is under one of the HUD's blocks (a mark there is
+    /// drawn at the edge instead).
+    pub fn blocked(&self, p: Pos2) -> bool {
+        self.blocks.iter().any(|b| b.expand(10.0).contains(p))
     }
 
     fn free(&self, rect: Rect) -> bool {
-        !self.0.iter().any(|r| r.intersects(rect))
+        !self.taken.iter().chain(&self.blocks).any(|r| r.intersects(rect))
     }
 }
 
@@ -81,7 +97,7 @@ fn tag(painter: &egui::Painter, labels: &mut Labels, above: Pos2, below: Pos2, n
     if !labels.free(name_r) || !labels.free(range_r) {
         return;
     }
-    labels.0.extend([name_r, range_r]);
+    labels.taken.extend([name_r, range_r]);
     backed(painter, name_r.shrink2(vec2(4.0, 1.0)), name_g, color);
     backed(painter, range_r.shrink2(vec2(4.0, 1.0)), range_g, ink);
 }
@@ -90,14 +106,27 @@ fn tag(painter: &egui::Painter, labels: &mut Labels, above: Pos2, below: Pos2, n
 /// name and range inward of it, stepped along the edge clear of the
 /// labels already there.
 fn edge_mark(painter: &egui::Painter, labels: &mut Labels, screen: Rect, dir: egui::Vec2, name: &str, range: &str, color: Color32) {
-    let tip = style::edge_point(screen, dir, EDGE + 4.0);
+    let mut tip = style::edge_point(screen, dir, EDGE + 4.0);
+    // Off the HUD's blocks: slide along the edge, toward its middle, past
+    // any block the arrow would sit on.
+    let inner = screen.shrink(EDGE + 6.0);
+    let side = tip.x <= inner.min.x || tip.x >= inner.max.x;
+    for _ in 0..labels.blocks.len() {
+        let arrow = Rect::from_center_size(tip, vec2(30.0, 30.0));
+        let Some(block) = labels.blocks.iter().find(|b| b.intersects(arrow)).copied() else {
+            break;
+        };
+        if side {
+            tip.y = if block.center().y > screen.center().y { block.min.y - 18.0 } else { block.max.y + 18.0 };
+        } else {
+            tip.x = if block.center().x > screen.center().x { block.min.x - 18.0 } else { block.max.x + 18.0 };
+        }
+    }
     style::edge_arrow(painter, tip, dir, 13.0, color);
     let align = style::inward(dir);
     let g = style::galley(painter, format!("{}  {range}", name.to_uppercase()), style::ui(MICRO + 1.0), color, 1.0);
     // On a side edge, step up or down; on the top or bottom, across; either
     // way toward the middle of the edge, so labels stay on screen.
-    let inner = screen.shrink(EDGE + 6.0);
-    let side = tip.x <= inner.min.x || tip.x >= inner.max.x;
     let toward = screen.center() - tip;
     let step = if side {
         vec2(0.0, (g.size().y + 3.0).copysign(toward.y))
@@ -111,7 +140,7 @@ fn edge_mark(painter: &egui::Painter, labels: &mut Labels, screen: Rect, dir: eg
         }
         rect = rect.translate(step);
     }
-    labels.0.push(rect.expand(1.0));
+    labels.taken.push(rect.expand(1.0));
     backed(painter, rect, g, color);
 }
 
@@ -152,7 +181,7 @@ pub fn ship_markers(
         // The middle of the hull.
         let center = transform.translation + transform.rotation * Vec3::new(0.0, 1.5, 0.0);
         let range = distance_label(center.distance(cam.translation));
-        match view.to_screen(center).filter(|p| screen.shrink(EDGE).contains(*p)) {
+        match view.to_screen(center).filter(|p| screen.shrink(EDGE).contains(*p) && !labels.blocked(*p)) {
             Some(p) => {
                 let color = style::fade(color, clear_of_centre(screen, p));
                 let r = 7.0;
@@ -260,8 +289,14 @@ pub fn reference_overlay(
     Ok(())
 }
 
+/// How long a mark lingers after it goes (s): a beacon's marker lasts
+/// until about its next ping.
+const LINGER: f32 = 3.0;
+/// How long a new mark's ring takes to open (s).
+const APPEAR_RING: f32 = 0.5;
+
 /// What a mark marks; sets how it's drawn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MarkKind {
     /// What to do: the mission's goal.
     Objective,
@@ -388,12 +423,15 @@ pub fn objective_markers(
     mut memory: ResMut<HudMemory>,
     pickups: Query<&Transform, With<Pickup>>,
     camera: CameraView,
+    // Each mark by name: as last seen, when, and when it appeared.
+    mut seen: Local<HashMap<(String, MarkKind), (Objective, f32, f32)>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let (camera, cam) = *camera;
     let view = Projector::new(camera, cam, ctx);
     let screen = ctx.content_rect();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("objectives")));
+    let now = memory.now;
     let (me, player) = *player;
     let mut marks = objectives.list(me, player);
     match memory.kit.map(|kit| pickups.get(kit)) {
@@ -406,19 +444,46 @@ pub fn objective_markers(
         Some(Err(_)) => memory.kit = None,
         None => {}
     }
+    // A mark that goes (a beacon between pings, a goal just done) lingers
+    // where it was last seen, fading; one that comes back (the next ping)
+    // is fresh, and announces itself with a ring.
     for mark in &marks {
+        let key = (mark.label.clone(), mark.kind);
+        let first = seen.get(&key).filter(|(_, last, _)| now - last < LINGER).map_or(now, |(.., first)| *first);
+        seen.insert(key, (mark.clone(), now, first));
+    }
+    seen.retain(|_, (_, last, _)| now - *last < LINGER);
+    let shown: Vec<(Objective, f32, f32)> = seen
+        .values()
+        .map(|(mark, last, first)| {
+            let gone = now - last;
+            let alpha = if gone <= 0.0 { 1.0 } else { 0.75 * (1.0 - gone / LINGER) };
+            (mark.clone(), alpha, now - first)
+        })
+        .collect();
+    // Most important first, as the label rule wants: live, then lingering.
+    let mut shown = shown;
+    shown.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.label.cmp(&b.0.label)));
+    for (mark, alpha, age) in &shown {
+        let (alpha, age) = (*alpha, *age);
         let color = match mark.kind {
             MarkKind::Objective | MarkKind::Waypoint => OBJECTIVE,
             MarkKind::Device | MarkKind::Supply => INK,
             MarkKind::Exit => FRIENDLY,
             MarkKind::Kit => SUIT,
         };
+        let color = style::fade(color, alpha);
         let range = distance_label(mark.position.distance(cam.translation));
-        let Some(p) = view.to_screen(mark.position).filter(|p| screen.shrink(EDGE).contains(*p)) else {
+        let Some(p) = view.to_screen(mark.position).filter(|p| screen.shrink(EDGE).contains(*p) && !memory.labels.blocked(*p)) else {
             edge_mark(&painter, &mut memory.labels, screen, view.edge_dir(mark.position), &mark.label, &range, color);
             continue;
         };
         let color = style::fade(color, clear_of_centre(screen, p));
+        // Just appeared: a ring opening out from it.
+        if age < APPEAR_RING && alpha >= 1.0 {
+            let k = age / APPEAR_RING;
+            painter.circle_stroke(p, 10.0 + 26.0 * k, Stroke::new(LINE, style::fade(color, 1.0 - k)));
+        }
         let r = match mark.kind {
             MarkKind::Objective => {
                 // A diamond in chevrons: the loudest mark in the HUD.
