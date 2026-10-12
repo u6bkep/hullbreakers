@@ -53,10 +53,9 @@ COVER = 0.04                                  # a face point within this of anot
 W, UP, TOP = 6.0, 3.3, 6.3
 INTERIOR = (np.array([-W, 0.0, -30.3]), np.array([W, TOP, 30.3]))
 
-# Ceiling lights the game places (src/client/render.rs add_ship_lights).
-LAMPS = ([(0, 2.7, z) for z in (-27, -16, -4, 8)] + [(x, 2.7, z) for x in (-4, 4) for z in (-12, 6)]
-         + [(0, 5.9, z) for z in (18, 26)]
-         + [(0, 6.0, z) for z in (-26, -14, -2, 9)] + [(x, 6.0, z) for x in (-4, 4) for z in (-8, 8)])
+# Ceiling lights the game places (the design's lights, in layout.json).
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout.json")) as _f:
+    LAMPS = [tuple(p) for p in json.load(_f)["lights"]]
 
 # Doorways: (name, normal axis, wall slab along it, opening along the other horizontal axis, y range).
 DOORS = [

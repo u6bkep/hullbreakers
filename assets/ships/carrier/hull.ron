@@ -1,0 +1,101 @@
+// The carrier, from the stern in: a double-height hangar behind a 6 m
+// door; a ramp up its port wall to the upper deck. Below, a corridor runs
+// forward between side rooms to a forward room. Above, the ramp's door
+// opens into the port room, from which a corridor runs forward to the
+// bridge, where the shield console is: the deepest point of the ship.
+//
+// Lower deck y = 0 to 3, upper y = 3.3 to 6.3. Inside it's 12 m wide
+// (x = +-6) and 60 m long (z = -30, the bow, to +30, the stern).
+//
+// The order of parts is the order of boxes in layout.json, which the
+// model's build.py relies on: add new parts at the end.
+Module(
+    parts: [
+        // Floor, roof, sides.
+        Span(lo: (-6.3, -0.3, -30.3), hi: (6.3, 0.0, 30.3)),
+        Span(lo: (-6.3, 6.3, -30.3), hi: (6.3, 6.6, 30.3)),
+        Span(lo: (-6.3, 0.0, -30.0), hi: (-6.0, 6.3, 30.0)),
+        Span(lo: (6.0, 0.0, -30.0), hi: (6.3, 6.3, 30.0)),
+        // The deck between, forward of the hangar (on under the hangar's
+        // bulkhead, to meet the ramp's landing).
+        Span(lo: (-6.0, 3.0, -30.0), hi: (6.0, 3.3, 14.15)),
+        // Bow: a window slit across the bridge. (Bow and stern walls run
+        // out to the outer skin, closing the corners.)
+        Span(lo: (-6.3, 0.0, -30.3), hi: (6.3, 4.5, -30.0)),
+        Span(lo: (-6.3, 5.3, -30.3), hi: (6.3, 6.3, -30.0)),
+        // Stern: the hangar door, 6 m wide and 2.8 m high.
+        WallAcross(z: 30.15, x: (-6.3, 6.3), y: (0.0, 6.3), thickness: 0.3, doors: [(-3.0, 3.0, 2.8)]),
+        // Hangar's forward bulkhead: a door to the lower deck, and one to
+        // the upper deck at the top of the ramp.
+        WallAcross(z: 14.0, x: (-6.0, 6.0), y: (0.0, 3.0), thickness: 0.3, doors: [(-1.0, 1.0, 2.4)]),
+        WallAcross(z: 14.0, x: (-6.0, 6.0), y: (3.3, 6.3), thickness: 0.3, doors: [(-5.8, -3.8, 5.7)]),
+        // The ramp, up the hangar's port wall from z = 27 (floor) to
+        // z = 15 (upper deck), and a landing to the door.
+        Ramp(foot: (-4.8, 0.0, 27.0), top: (-4.8, 3.3, 15.0), width: 2.4, thickness: 0.3),
+        Span(lo: (-6.0, 3.0, 14.15), hi: (-3.6, 3.3, 15.2)),
+        // Lower deck: a corridor (x = +-2) from the hangar to a forward
+        // room (z < -24), doors into the side rooms, which are split at
+        // z = 0.
+        WallAlong(x: -2.0, z: (-24.0, 14.0), y: (0.0, 3.0), thickness: 0.2, doors: [(-7.0, -5.4, 2.2), (7.0, 8.6, 2.2)]),
+        WallAlong(x: 2.0, z: (-24.0, 14.0), y: (0.0, 3.0), thickness: 0.2, doors: [(-7.0, -5.4, 2.2), (7.0, 8.6, 2.2)]),
+        WallAcross(z: 0.0, x: (-6.0, -2.0), y: (0.0, 3.0), thickness: 0.2),
+        WallAcross(z: 0.0, x: (2.0, 6.0), y: (0.0, 3.0), thickness: 0.2),
+        // Upper deck: the bridge (z < -22) behind a bulkhead; a corridor
+        // (x = +-2) aft of it, doors into the side rooms.
+        WallAcross(z: -22.0, x: (-6.0, 6.0), y: (3.3, 6.3), thickness: 0.3, doors: [(-1.0, 1.0, 5.5)]),
+        WallAlong(x: -2.0, z: (-22.0, 14.0), y: (3.3, 6.3), thickness: 0.2, doors: [(-13.0, -11.4, 5.5), (3.0, 4.6, 5.5)]),
+        WallAlong(x: 2.0, z: (-22.0, 14.0), y: (3.3, 6.3), thickness: 0.2, doors: [(-13.0, -11.4, 5.5), (3.0, 4.6, 5.5)]),
+        // Furniture: the bridge console; crates in the hangar and rooms.
+        Box(center: (0.0, 3.8, -27.0), size: (4.0, 1.0, 0.8), material: Trim),
+        Box(center: (3.0, 0.75, 20.0), size: (1.5, 1.5, 1.5), material: Trim),
+        Box(center: (4.4, 0.6, 24.5), size: (1.2, 1.2, 1.2), material: Trim),
+        Box(center: (1.5, 0.5, 26.0), size: (1.0, 1.0, 1.4), material: Trim),
+        Box(center: (-4.0, 0.6, 6.0), size: (1.2, 1.2, 2.0), material: Trim),
+        Box(center: (4.0, 3.9, -6.0), size: (1.6, 1.2, 1.2), material: Trim),
+        // Outside: engines at the stern, on pylons; a dorsal spine.
+        Box(center: (-8.5, 3.0, 24.0), size: (3.0, 3.0, 14.0)),
+        Box(center: (8.5, 3.0, 24.0), size: (3.0, 3.0, 14.0)),
+        Box(center: (-6.65, 3.0, 24.0), size: (0.7, 0.6, 6.0), material: Trim),
+        Box(center: (6.65, 3.0, 24.0), size: (0.7, 0.6, 6.0), material: Trim),
+        Box(center: (0.0, 7.1, -2.0), size: (3.0, 1.0, 30.0), material: Trim),
+    ],
+    // A big button on top of the bridge console.
+    controls: [(action: DisableShields, center: (0.0, 4.36, -27.0), half_size: (0.35, 0.06, 0.3))],
+    // The inside, out to the middle of its walls, for its light probe.
+    cabins: [(center: (0.0, 3.15, 0.0), size: (12.3, 6.6, 60.3))],
+    lights: [
+        // Lower deck: the corridor, the side rooms, the forward room.
+        (0.0, 2.7, -27.0), (0.0, 2.7, -16.0), (0.0, 2.7, -4.0), (0.0, 2.7, 8.0),
+        (-4.0, 2.7, -12.0), (-4.0, 2.7, 6.0), (4.0, 2.7, -12.0), (4.0, 2.7, 6.0),
+        // The hangar, high up.
+        (0.0, 5.9, 18.0), (0.0, 5.9, 26.0),
+        // Upper deck: the bridge, the corridor, the side rooms.
+        (0.0, 6.0, -26.0), (0.0, 6.0, -14.0), (0.0, 6.0, -2.0), (0.0, 6.0, 9.0),
+        (-4.0, 6.0, -8.0), (-4.0, 6.0, 8.0), (4.0, 6.0, -8.0), (4.0, 6.0, 8.0),
+    ],
+    // Gunners posted along the way from the hangar door to the bridge,
+    // facing aft (toward boarders); Swarmers flying escort outside.
+    posts: [
+        (robot: Gunner, at: (-2.5, 0.0, 19.0), facing: 180.0),  // the hangar
+        (robot: Gunner, at: (3.5, 0.0, 17.0), facing: 180.0),
+        (robot: Gunner, at: (0.0, 0.0, -2.0), facing: 180.0),   // the lower corridor
+        (robot: Gunner, at: (-4.0, 3.3, 8.0), facing: 180.0),   // upper port room, inside the ramp's door
+        (robot: Gunner, at: (0.0, 3.3, -10.0), facing: 180.0),  // the upper corridor
+        (robot: Gunner, at: (-2.5, 3.3, -25.0), facing: 180.0), // the bridge
+        (robot: Gunner, at: (2.5, 3.3, -25.0), facing: 180.0),
+        (robot: Swarmer, at: (18.0, 6.0, -20.0)),
+        (robot: Swarmer, at: (-18.0, 6.0, -20.0)),
+        (robot: Swarmer, at: (18.0, -4.0, 5.0)),
+        (robot: Swarmer, at: (-18.0, -4.0, 5.0)),
+        (robot: Swarmer, at: (10.0, 4.0, 40.0)),
+        (robot: Swarmer, at: (-10.0, 4.0, 40.0)),
+    ],
+    markers: {
+        // Where boarders come in: the middle of the hangar door's sill.
+        "entry": (0.0, 0.0, 30.0),
+        // The shield console (its middle; the button is on top).
+        "objective": (0.0, 3.8, -27.0),
+        // A point on the upper deck's floor.
+        "upper_deck": (0.0, 3.3, 0.0),
+    },
+)

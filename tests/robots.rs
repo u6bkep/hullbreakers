@@ -179,11 +179,11 @@ fn a_gunner_stays_on_its_feet() {
 
 /// A carrier, holding still well clear of our ship.
 fn carrier(app: &mut App) -> Entity {
-    use hullbreakers::sim::ship::{HullKind, ShipHull};
+    use hullbreakers::sim::ship::ShipHull;
     let carrier = app
         .world_mut()
         .spawn((
-            ShipHull(HullKind::Carrier),
+            ShipHull::new("carrier"),
             RigidBody::Kinematic,
             Position(Vec3::new(0.0, 0.0, 300.0)),
             Rotation::default(),
@@ -220,7 +220,7 @@ fn feet(app: &App, e: Entity) -> Vec3 {
 
 #[test]
 fn a_gunner_hears_gunfire_on_the_deck_above_and_goes_up_the_ramp_to_it() {
-    use hullbreakers::sim::ship::carrier::UPPER;
+    let upper = hullbreakers::sim::design::design("carrier").marker("upper_deck").y;
     use hullbreakers::sim::weapons::Loadout;
     let mut app = app();
     let carrier = carrier(&mut app);
@@ -230,7 +230,7 @@ fn a_gunner_hears_gunfire_on_the_deck_above_and_goes_up_the_ramp_to_it() {
     let me = crew(&mut app);
     {
         let mut p = app.world_mut().get_mut::<Player>(me).unwrap();
-        p.mode = booted(carrier, Vec3::new(0.0, UPPER + 0.01, -12.0), 0.0);
+        p.mode = booted(carrier, Vec3::new(0.0, upper + 0.01, -12.0), 0.0);
         p.loadout = Loadout::default();
     }
     app.world_mut().get_mut::<PlayerInput>(me).unwrap().main.held = true;
@@ -245,7 +245,7 @@ fn a_gunner_hears_gunfire_on_the_deck_above_and_goes_up_the_ramp_to_it() {
             break;
         }
     }
-    assert!(highest > UPPER - 0.1, "never got upstairs (highest {highest}, now at {})", feet(&app, gunner));
+    assert!(highest > upper - 0.1, "never got upstairs (highest {highest}, now at {})", feet(&app, gunner));
     assert!(lowest < full - 15.0, "never hurt them (at {lowest}); gunner at {}", feet(&app, gunner));
 }
 

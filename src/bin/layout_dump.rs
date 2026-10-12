@@ -1,5 +1,5 @@
-//! Writes a hull kind's layout as JSON, the ground truth a model of the
-//! ship is built on (its collision stays the code's boxes):
+//! Writes a ship design's layout as JSON, the ground truth a model of the
+//! ship is built on (its collision stays the design's boxes):
 //!
 //!   cargo run --bin layout_dump -- carrier > assets/ships/carrier/layout.json
 //!
@@ -7,27 +7,27 @@
 
 use bevy::prelude::*;
 use hullbreakers::sim::SimMaterial;
-use hullbreakers::sim::ship::{HullKind, controls, hull_pieces};
+use hullbreakers::sim::design::{design, designs};
 
 fn v(v: Vec3) -> String {
     format!("[{:.4}, {:.4}, {:.4}]", v.x, v.y, v.z)
 }
 
 fn main() {
-    let kind = match std::env::args().nth(1).as_deref() {
-        Some("carrier") => HullKind::Carrier,
-        Some("home") => HullKind::Home,
-        other => {
-            eprintln!("usage: layout_dump carrier|home (got {other:?})");
-            std::process::exit(2);
-        }
+    let ids: Vec<&str> = designs().map(|d| d.id.as_str()).collect();
+    let Some(id) = std::env::args().nth(1).filter(|a| ids.contains(&a.as_str())) else {
+        eprintln!("usage: layout_dump <design> (one of {})", ids.join(", "));
+        std::process::exit(2);
     };
+    let ship = design(&id);
     let mut out = String::from("{\n");
-    out += "  \"doc\": \"Ship coordinates, metres, +Y up, bow toward -Z. boxes: the collision (center, full size, rotation as an [x, y, z, w] quaternion, material: hull = structure, trim = fittings and furniture). Walls are boxes; doorways are the gaps between them. controls: buttons (center, half size). turrets: mount points. shield: ellipsoid center and radii.\",\n";
+    out += "  \"doc\": \"Ship coordinates, metres, +Y up, bow toward -Z. boxes: the collision (center, full size, rotation as an [x, y, z, w] quaternion, material: hull = structure, trim = fittings and furniture). Walls are boxes; doorways are the gaps between them. controls: buttons (center, half size). turrets: mount points. shield: ellipsoid center and radii. lights: the ceiling lights.\",\n";
     out += "  \"boxes\": [\n";
-    let boxes: Vec<String> = hull_pieces(kind)
-        .into_iter()
-        .map(|(center, size, rotation, material)| {
+    let boxes: Vec<String> = ship
+        .boxes
+        .iter()
+        .map(|b| {
+            let (center, size, rotation, material) = (b.center, b.size, b.rotation, b.material);
             let material = match material {
                 SimMaterial::Trim => "trim",
                 SimMaterial::Hull | SimMaterial::HostileHull => "hull",
@@ -46,17 +46,20 @@ fn main() {
         .collect();
     out += &boxes.join(",\n");
     out += "\n  ],\n  \"controls\": [\n";
-    let controls: Vec<String> = controls(kind)
-        .into_iter()
-        .map(|(action, center, half)| {
+    let controls: Vec<String> = ship
+        .controls
+        .iter()
+        .map(|&(action, center, half)| {
             format!("    {{\"label\": \"{}\", \"center\": {}, \"half_size\": {}}}", action.label(), v(center), v(half))
         })
         .collect();
     out += &controls.join(",\n");
     out += "\n  ],\n";
-    let mounts: Vec<String> = kind.turret_mounts().into_iter().map(v).collect();
+    let mounts: Vec<String> = ship.turrets.iter().copied().map(v).collect();
     out += &format!("  \"turrets\": [{}],\n", mounts.join(", "));
-    let (c, r) = kind.shield();
+    let lights: Vec<String> = ship.lights.iter().copied().map(v).collect();
+    out += &format!("  \"lights\": [{}],\n", lights.join(", "));
+    let (c, r) = (ship.shield.center, ship.shield.radii);
     out += &format!("  \"shield\": {{\"center\": {}, \"radii\": {}}}\n}}\n", v(c), v(r));
     print!("{out}");
 }

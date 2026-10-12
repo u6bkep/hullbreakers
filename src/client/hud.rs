@@ -18,7 +18,7 @@ use crate::sim::bodies::Bodies;
 use crate::sim::combat::Combatant;
 use crate::sim::mission::{Mission, Phase, ScenarioKind};
 use crate::sim::player::{CONTROL_REACH, Mode, Player};
-use crate::sim::ship::{Control, HomeShip, HullKind, ShipCommand, ShipHull};
+use crate::sim::ship::{Control, HomeShip, ShipCommand, ShipHull};
 use crate::sim::{Layer, SimTick, TICK_HZ};
 use crate::sim::tuning::{TUNING_PATH, Tuning};
 
@@ -316,7 +316,8 @@ pub fn ship_markers(
     let font = egui::FontId::monospace(13.0);
     for (entity, hull, transform, visibility) in &ships {
         // Not the ship you're on or in.
-        let (shield_center, shield_radii) = hull.0.shield();
+        let ship = hull.design();
+        let (shield_center, shield_radii) = (ship.shield.center, ship.shield.radii);
         let inside = ((transform.rotation.inverse() * (cam.translation - transform.translation) - shield_center)
             / shield_radii)
             .length()
@@ -324,10 +325,11 @@ pub fn ship_markers(
         if player.mode.body() == Some(entity) || inside || *visibility == Visibility::Hidden {
             continue;
         }
-        let name = hull.0.name();
-        let color = match hull.0 {
-            HullKind::Home => egui::Color32::from_rgb(110, 230, 160),
-            HullKind::Carrier => egui::Color32::from_rgb(255, 95, 80),
+        let name = ship.name.as_str();
+        let color = if ship.hostile {
+            egui::Color32::from_rgb(255, 95, 80)
+        } else {
+            egui::Color32::from_rgb(110, 230, 160)
         };
         // The middle of the hull.
         let center = transform.translation + transform.rotation * Vec3::new(0.0, 1.5, 0.0);

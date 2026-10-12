@@ -4,11 +4,12 @@
         --python assets/ships/carrier/render_views.py [-- view ...]
 
 Imports the exported carrier.glb (so it shows what the game loads), puts a point light at
-each of the game's ceiling lights (src/client/render.rs add_ship_lights), a dim sun
+each of the game's ceiling lights (the design's, from layout.json), a dim sun
 outside, and renders each view to preview/view_<name>.png (git-ignored). Like the hb
 previews these are for form and colour blocking: Cycles, no bloom, emissives shown at
 strength 1 so their hue reads. Judge the real look in-engine.
 """
+import json
 import math
 import os
 import sys
@@ -19,9 +20,9 @@ from mathutils import Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "preview")
 
-LAMPS = ([(0, 2.7, z) for z in (-27, -16, -4, 8)] + [(x, 2.7, z) for x in (-4, 4) for z in (-12, 6)]
-         + [(0, 5.9, z) for z in (18, 26)]
-         + [(0, 6.0, z) for z in (-26, -14, -2, 9)] + [(x, 6.0, z) for x in (-4, 4) for z in (-8, 8)])
+# The game's ceiling lights (the design's lights, in layout.json).
+with open(os.path.join(HERE, "layout.json")) as _f:
+    LAMPS = [tuple(p) for p in json.load(_f)["lights"]]
 
 # name: (eye, look at, vertical fov in degrees, outside?) in Bevy space (+Y up, bow -Z).
 VIEWS = {

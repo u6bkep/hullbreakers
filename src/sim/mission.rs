@@ -22,7 +22,8 @@ use super::events::PlayerEvent;
 use super::flight::{Duel, Flight, Path};
 use super::bots::{self, Robot};
 use super::player::{DeckSlot, Mode, Player, PreviousMode};
-use super::ship::{self, ControlAction, HomeShip, HullKind, ShipCommand, ShipHull};
+use super::design::ShipDesign;
+use super::ship::{self, ControlAction, HomeShip, ShipCommand, ShipHull};
 use super::tuning::Tuning;
 use super::{SimMaterial, SimTick, TICK_HZ};
 
@@ -194,16 +195,16 @@ pub fn settle_battle(
     mut ships: Query<(Entity, &mut Combatant, &ShipHull, Has<HomeShip>, Option<&mut Flight>)>,
     mut players: Query<(Entity, &mut Player, Has<Robot>)>,
 ) {
-    let wrecked: Vec<(Entity, HullKind, bool)> = ships
+    let wrecked: Vec<(Entity, &'static ShipDesign, bool)> = ships
         .iter()
         .filter(|(_, c, ..)| c.integrity <= 0.0)
-        .map(|(e, _, hull, home, _)| (e, hull.0, home))
+        .map(|(e, _, hull, home, _)| (e, hull.design(), home))
         .collect();
     for (ship, kind, home) in wrecked {
         let Some(frame) = bodies.frame(ship) else {
             continue;
         };
-        info!("{kind:?} ship destroyed");
+        info!("{} destroyed", kind.id);
         wreck(&mut commands, ship, kind, &frame, tick.0);
         for (entity, mut player, robot) in &mut players {
             // Robots aboard go down with their ship.
@@ -239,9 +240,10 @@ pub fn settle_battle(
 }
 
 /// Breaks a ship into tumbling pieces of its hull.
-fn wreck(commands: &mut Commands, ship: Entity, kind: HullKind, frame: &super::frame::BodyFrame, tick: u32) {
+fn wreck(commands: &mut Commands, ship: Entity, kind: &ShipDesign, frame: &super::frame::BodyFrame, tick: u32) {
     let mut rng = ChaCha8Rng::seed_from_u64(tick as u64);
-    for (center, size, turn, material) in ship::hull_pieces(kind) {
+    for b in &kind.boxes {
+        let (center, size, turn, material) = (b.center, b.size, b.rotation, b.material);
         if material == SimMaterial::Trim && size.max_element() < 1.5 {
             continue;
         }
@@ -261,7 +263,7 @@ fn wreck(commands: &mut Commands, ship: Entity, kind: HullKind, frame: &super::f
             Name::new("Debris"),
             Debris {
                 size,
-                hostile: kind == HullKind::Carrier,
+                hostile: kind.hostile,
             },
             RigidBody::Dynamic,
             SleepingDisabled,
@@ -469,14 +471,14 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool)
         .spawn((
             Name::new("Ship"),
             HomeShip,
-            ShipHull(HullKind::Home),
+            ShipHull::new(ship::HOME),
             flying(orbit),
         ))
         .id();
     let carrier = commands
         .spawn((
             Name::new("Carrier"),
-            ShipHull(HullKind::Carrier),
+            ShipHull::new(CARRIER),
             flying(weave),
             Combatant {
                 target: Some(home),
@@ -495,62 +497,43 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool)
         exposed_seconds: tuning.home_survival_seconds,
     });
     if robots {
-        crew_the_carrier(commands, tuning, carrier, &weave, tick);
+        crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick);
     }
     home
 }
 
-/// Gunners posted along the way from the carrier's hangar door to its
-/// bridge, facing aft (toward boarders), and Swarmers flying escort.
-fn crew_the_carrier(commands: &mut Commands, tuning: &Tuning, carrier: Entity, flight: &Flight, tick: u32) {
-    use ship::carrier::UPPER;
-    let aft = Quat::from_rotation_y(std::f32::consts::PI);
-    let posts = [
-        // The hangar.
-        Vec3::new(-2.5, 0.0, 19.0),
-        Vec3::new(3.5, 0.0, 17.0),
-        // The lower corridor.
-        Vec3::new(0.0, 0.0, -2.0),
-        // The upper port room, inside the ramp's door.
-        Vec3::new(-4.0, UPPER, 8.0),
-        // The upper corridor.
-        Vec3::new(0.0, UPPER, -10.0),
-        // The bridge.
-        Vec3::new(-2.5, UPPER, -25.0),
-        Vec3::new(2.5, UPPER, -25.0),
-    ];
-    for (i, post) in posts.into_iter().enumerate() {
-        let feet = post + Vec3::Y * 0.01;
-        let mode = Mode::Booted {
-            body: carrier,
-            feet,
-            up: Vec3::Y,
-            velocity: Vec3::ZERO,
-            orientation: aft,
-            pitch: 0.0,
-        };
-        commands.spawn(bots::new_robot(Robot::Gunner, mode, carrier, feet, tuning, i as u32));
-    }
+/// The enemy ship in a boarding action.
+pub const CARRIER: &str = "carrier";
+
+/// Puts robots at the posts of `design` aboard `ship` (flying `flight`):
+/// walkers standing on its decks, flyers holding station about it.
+fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, flight: &Flight, tick: u32) {
     let frame = flight.frame(tick, Vec3::ZERO);
-    for (i, post) in [
-        Vec3::new(18.0, 6.0, -20.0),
-        Vec3::new(-18.0, 6.0, -20.0),
-        Vec3::new(18.0, -4.0, 5.0),
-        Vec3::new(-18.0, -4.0, 5.0),
-        Vec3::new(10.0, 4.0, 40.0),
-        Vec3::new(-10.0, 4.0, 40.0),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let position = frame.point_to_world(post);
-        let mode = Mode::Eva {
-            position,
-            velocity: frame.point_velocity(position),
-            orientation: frame.rotation,
-            pitch: 0.0,
+    for (i, post) in design.posts.iter().enumerate() {
+        let mode = match post.robot {
+            Robot::Gunner => Mode::Booted {
+                body: ship,
+                feet: post.at + Vec3::Y * 0.01,
+                up: Vec3::Y,
+                velocity: Vec3::ZERO,
+                orientation: post.rotation(),
+                pitch: 0.0,
+            },
+            Robot::Swarmer => {
+                let position = frame.point_to_world(post.at);
+                Mode::Eva {
+                    position,
+                    velocity: frame.point_velocity(position),
+                    orientation: frame.rotation * post.rotation(),
+                    pitch: 0.0,
+                }
+            }
         };
-        commands.spawn(bots::new_robot(Robot::Swarmer, mode, carrier, post, tuning, 10 + i as u32));
+        let home_post = match mode {
+            Mode::Booted { feet, .. } => feet,
+            Mode::Eva { .. } => post.at,
+        };
+        commands.spawn(bots::new_robot(post.robot, mode, ship, home_post, tuning, i as u32));
     }
 }
 

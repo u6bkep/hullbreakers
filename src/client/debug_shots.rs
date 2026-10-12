@@ -7,7 +7,8 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::sim::player::{Grapple, Mode, Player};
-use crate::sim::ship::{HullKind, ShipHull};
+use crate::sim::mission::CARRIER;
+use crate::sim::ship::{HOME, ShipHull};
 
 #[derive(Resource)]
 pub struct ShotScript {
@@ -137,7 +138,7 @@ fn vantages() -> Vec<(&'static str, Vantage)> {
 }
 
 fn carrier_vantages() -> Vec<(&'static str, Vantage)> {
-    use crate::sim::ship::carrier::UPPER;
+    let upper = ShipHull::new(CARRIER).design().marker("upper_deck").y;
     let booted = |feet: Vec3, forward: Vec3, pitch: f32| Vantage::Booted {
         feet,
         up: Vec3::Y,
@@ -156,9 +157,9 @@ fn carrier_vantages() -> Vec<(&'static str, Vantage)> {
         ("carrier_door", booted(Vec3::new(0.0, 0.01, 29.0), Vec3::NEG_Z, 0.15)),
         ("carrier_ramp", booted(Vec3::new(3.0, 0.01, 25.0), Vec3::new(-1.0, 0.0, -0.6), 0.3)),
         ("carrier_lower", booted(Vec3::new(0.0, 0.01, 12.0), Vec3::NEG_Z, 0.0)),
-        ("carrier_upper_room", booted(Vec3::new(-4.8, UPPER + 0.01, 12.5), Vec3::NEG_Z, 0.0)),
-        ("carrier_upper", booted(Vec3::new(0.0, UPPER + 0.01, 10.0), Vec3::NEG_Z, 0.0)),
-        ("carrier_bridge", booted(Vec3::new(0.0, UPPER + 0.01, -21.0), Vec3::NEG_Z, -0.2)),
+        ("carrier_upper_room", booted(Vec3::new(-4.8, upper + 0.01, 12.5), Vec3::NEG_Z, 0.0)),
+        ("carrier_upper", booted(Vec3::new(0.0, upper + 0.01, 10.0), Vec3::NEG_Z, 0.0)),
+        ("carrier_bridge", booted(Vec3::new(0.0, upper + 0.01, -21.0), Vec3::NEG_Z, -0.2)),
     ]
 }
 
@@ -172,7 +173,7 @@ pub fn run_shot_script(
     ships: Query<(Entity, &Transform, &ShipHull)>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let want = if carrier_tour() { HullKind::Carrier } else { HullKind::Home };
+    let want = if carrier_tour() { CARRIER } else { HOME };
     let Some((ship_entity, ship_transform, _)) = ships.iter().find(|(.., h)| h.0 == want) else {
         return;
     };

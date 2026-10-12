@@ -13,7 +13,7 @@ use hullbreakers::sim::flight::Flight;
 use hullbreakers::sim::input::PlayerInput;
 use hullbreakers::sim::mission::{Debris, Director, Mission, Phase, ScenarioKind};
 use hullbreakers::sim::player::{Mode, Player};
-use hullbreakers::sim::ship::{HomeShip, HullKind, ShipHull};
+use hullbreakers::sim::ship::{HOME, HomeShip, ShipHull};
 use hullbreakers::sim::tuning::Tuning;
 use hullbreakers::sim::vitals::Vitals;
 
@@ -69,7 +69,7 @@ fn mission(app: &mut App) -> Mission {
     world.query::<&Mission>().single(world).unwrap().clone()
 }
 
-fn ship_of(app: &mut App, kind: HullKind) -> Option<Entity> {
+fn ship_of(app: &mut App, kind: &str) -> Option<Entity> {
     let world = app.world_mut();
     world
         .query::<(Entity, &ShipHull)>()
@@ -135,7 +135,7 @@ fn the_mission_wall_starts_a_boarding_action() {
     assert_eq!(mission(&mut app).kind, ScenarioKind::Boarding);
     let new_home = home(&mut app);
     assert_ne!(new_home, old_home, "the world wasn't rebuilt");
-    assert!(ship_of(&mut app, HullKind::Carrier).is_some());
+    assert!(ship_of(&mut app, "carrier").is_some());
     let p = player(&mut app);
     assert_eq!(p.mode.body(), Some(new_home), "not put back aboard");
     assert!(p.events.iter().any(|(_, e)| e == PlayerEvent::Respawned));
@@ -166,7 +166,7 @@ fn the_carrier_hits_us_slowly() {
     ticks(&mut app, 20 * 60);
     let home = home(&mut app);
     let ours = *app.world().get::<Combatant>(home).unwrap();
-    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
+    let carrier = ship_of(&mut app, "carrier").unwrap();
     let theirs = *app.world().get::<Combatant>(carrier).unwrap();
     let survival = Tuning::default().home_survival_seconds;
     // About 20 s of a survival time's worth of fire.
@@ -179,9 +179,9 @@ fn the_carrier_hits_us_slowly() {
 fn dropping_the_shield_wins_and_blows_the_crew_clear() {
     let mut app = app();
     start_boarding(&mut app);
-    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
+    let carrier = ship_of(&mut app, "carrier").unwrap();
     // On the carrier's bridge, looking down at the shield console.
-    let console = hullbreakers::sim::ship::carrier::CONSOLE;
+    let console = hullbreakers::sim::design::design("carrier").marker("objective");
     let feet = Vec3::new(0.0, console.y - 0.5 + 0.01, console.z + 2.0);
     let button = console + Vec3::Y * 0.6;
     stand(&mut app, carrier, feet, button - (feet + Vec3::Y * eye_height()));
@@ -345,7 +345,7 @@ fn a_player_can_cross_to_the_carrier() {
     // Coming up on the first close pass (half a pass in).
     let pass = Tuning::default().carrier_pass_seconds;
     ticks(&mut app, (pass * 0.45 * 60.0) as usize);
-    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
+    let carrier = ship_of(&mut app, "carrier").unwrap();
     let home = home(&mut app);
     let ours = frame(&mut app, home);
     let theirs = frame(&mut app, carrier);
@@ -404,14 +404,14 @@ fn a_player_can_cross_to_the_carrier() {
 fn the_carriers_ramp_leads_to_the_upper_deck() {
     let mut app = app();
     start_boarding(&mut app);
-    let carrier = ship_of(&mut app, HullKind::Carrier).unwrap();
+    let carrier = ship_of(&mut app, "carrier").unwrap();
     stand(&mut app, carrier, Vec3::new(-4.8, 0.01, 28.5), Vec3::NEG_Z);
     {
         let world = app.world_mut();
         let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
         input.movement = Vec3::Z;
     }
-    let upper = hullbreakers::sim::ship::carrier::UPPER;
+    let upper = hullbreakers::sim::design::design("carrier").marker("upper_deck").y;
     for second in 0..12 {
         ticks(&mut app, 60);
         let Mode::Booted { body, feet, up, .. } = player(&mut app).mode else {

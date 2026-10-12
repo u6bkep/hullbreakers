@@ -1,8 +1,8 @@
 """Carrier: the enemy ship of the boarding mission. Bevy space: +Y up, bow toward -Z,
 origin = the layout origin (the middle of the lower deck's floor, amidships).
 
-The game collides against the boxes in layout.json (generated from src/sim/ship.rs
-`carrier_layout`) and draws this model instead of them, so:
+The game collides against the boxes in layout.json (generated from the design,
+assets/ships/carrier/*.ron) and draws this model instead of them, so:
   - every surface a player walks on or bumps into is a layout box face, to within 2 cm;
     the structural boxes below are read straight from layout.json (and asserted, so a
     layout change fails the build instead of drifting);

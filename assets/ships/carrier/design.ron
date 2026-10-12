@@ -1,0 +1,13 @@
+// The carrier: the enemy in a boarding action. A big, slow, two-decked
+// ship crewed by robots, its shield console on the bridge at the far end
+// from its hangar door. Ship coordinates, metres: +Y up, bow toward -Z.
+// See docs/ships.md.
+Design(
+    name: "CARRIER",
+    hostile: true,
+    model: Some("ships/carrier/carrier.glb"),
+    shield: (center: (0.0, 3.2, 0.0), radii: (11.0, 8.0, 36.0)),
+    // On top of the dorsal spine (whose top is at y = 7.6), and under the keel.
+    turrets: [(0.0, 8.1, -8.0), (0.0, -0.8, 4.0)],
+    modules: [(module: "carrier/hull")],
+)

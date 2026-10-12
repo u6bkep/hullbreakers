@@ -121,7 +121,7 @@ pub fn attach_meshes(
     if part.is_some()
         && parent
             .and_then(|p| hulls.get(p.parent()).ok())
-            .is_some_and(|h| ship_model(h.0).is_some())
+            .is_some_and(|h| ship_model(h).is_some())
     {
         return;
     }
@@ -170,9 +170,9 @@ pub struct ShipLight {
     pub intensity: f32,
 }
 
-/// A hull kind's model, if it has one and it's been built.
-pub fn ship_model(kind: crate::sim::ship::HullKind) -> Option<&'static str> {
-    let path = kind.model()?;
+/// A hull's model, if its design has one and it's been built.
+pub fn ship_model(hull: &crate::sim::ship::ShipHull) -> Option<&'static str> {
+    let path = hull.design().model.as_deref()?;
     super::gallery::asset_root().join(path).exists().then_some(path)
 }
 
@@ -183,7 +183,7 @@ pub fn add_ship_model(
     assets: Res<AssetServer>,
     mut commands: Commands,
 ) {
-    let Some(path) = hulls.get(add.entity).ok().and_then(|h| ship_model(h.0)) else {
+    let Some(path) = hulls.get(add.entity).ok().and_then(ship_model) else {
         return;
     };
     commands.entity(add.entity).with_child((
@@ -193,49 +193,26 @@ pub fn add_ship_model(
     ));
 }
 
-/// Interior lights ride along with the ship.
+/// Interior lights ride along with the ship: a light probe for each of its
+/// cabins, and its ceiling lights.
 pub fn add_ship_lights(
     add: On<Add, crate::sim::ship::ShipHull>,
     hulls: Query<&crate::sim::ship::ShipHull>,
     sky: Res<super::sky::Sky>,
     mut commands: Commands,
 ) {
-    use crate::sim::ship::HullKind;
     let ship = add.entity;
     let Ok(hull) = hulls.get(ship) else { return };
-    // The inside, out to the middle of its walls (see `ship::hull_layout`),
-    // and the ceiling lights.
-    let (cabin_center, cabin_size, lamps): (Vec3, Vec3, Vec<Vec3>) = match hull.0 {
-        HullKind::Home => (
-            Vec3::new(0.0, 1.5, 0.0),
-            Vec3::new(7.8, 3.3, 29.8),
-            [-10.0, -4.0, 5.0, 11.0].map(|z| Vec3::new(0.0, 2.7, z)).to_vec(),
-        ),
-        HullKind::Carrier => {
-            let upper = crate::sim::ship::carrier::UPPER;
-            let mut lamps: Vec<Vec3> = Vec::new();
-            // Lower deck: the corridor, the side rooms, the forward room.
-            lamps.extend([-27.0, -16.0, -4.0, 8.0].map(|z| Vec3::new(0.0, 2.7, z)));
-            lamps.extend([-12.0, 6.0].map(|z| Vec3::new(-4.0, 2.7, z)));
-            lamps.extend([-12.0, 6.0].map(|z| Vec3::new(4.0, 2.7, z)));
-            // The hangar, high up.
-            lamps.extend([18.0, 26.0].map(|z| Vec3::new(0.0, upper + 2.6, z)));
-            // Upper deck: the bridge, the corridor, the side rooms.
-            lamps.extend([-26.0, -14.0, -2.0, 9.0].map(|z| Vec3::new(0.0, upper + 2.7, z)));
-            lamps.extend([-8.0, 8.0].map(|z| Vec3::new(-4.0, upper + 2.7, z)));
-            lamps.extend([-8.0, 8.0].map(|z| Vec3::new(4.0, upper + 2.7, z)));
-            (Vec3::new(0.0, (upper + 3.0) / 2.0, 0.0), Vec3::new(12.3, upper + 3.3, 60.3), lamps)
-        }
-    };
-    let cabin = commands
-        .spawn(super::sky::interior_light(&sky, cabin_center, cabin_size))
-        .id();
-    commands.entity(ship).add_child(cabin);
+    let design = hull.design();
+    for cabin in &design.cabins {
+        let probe = commands.spawn(super::sky::interior_light(&sky, cabin.center, cabin.size)).id();
+        commands.entity(ship).add_child(probe);
+    }
     let normal = ShipLight {
         color: Color::srgb(1.0, 0.92, 0.8),
         intensity: 60_000.0,
     };
-    for at in lamps {
+    for &at in &design.lights {
         let light = commands
             .spawn((
                 normal,

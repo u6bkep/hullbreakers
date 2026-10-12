@@ -11,14 +11,15 @@
 //! straight wherever a straight walk stays on them.
 //!
 //! The grid comes from the same boxes the collider is built from
-//! ([`super::ship::hull_pieces`]), so it is exactly the ship that's simulated.
+//! ([`super::design::ShipDesign::boxes`]), so it is exactly the ship that's
+//! simulated.
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
 use bevy::prelude::*;
 
-use super::ship::{HullKind, hull_pieces};
+use super::design::{ShipDesign, design};
 
 /// Grid spacing (m).
 pub const CELL: f32 = 0.5;
@@ -131,10 +132,12 @@ fn blocked(solids: &[Solid], x: f32, z: f32, y0: f32, y1: f32) -> bool {
 const AROUND: [(i32, i32); 8] = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
 
 impl NavGrid {
-    pub fn for_hull(kind: HullKind) -> NavGrid {
-        let solids: Vec<Solid> = hull_pieces(kind)
-            .into_iter()
-            .map(|(center, size, rotation, _)| {
+    pub fn for_design(ship: &ShipDesign) -> NavGrid {
+        let solids: Vec<Solid> = ship
+            .boxes
+            .iter()
+            .map(|b| {
+                let (center, size, rotation) = (b.center, b.size, b.rotation);
                 let half = size / 2.0;
                 // The box's reach in x and z, whatever its turn.
                 let m = Mat3::from_quat(rotation);
@@ -321,6 +324,53 @@ impl NavGrid {
         best.map(|(_, n)| n)
     }
 
+    /// A floor plan of the places with floors between heights `y0` and
+    /// `y1`, bow at the top, port on the left, one character a cell: `.`
+    /// where a walker can get from `from`, `,` places it can't, and `marks`
+    /// (points and their letters) over them.
+    pub fn plan(&self, y0: f32, y1: f32, from: Option<Vec3>, marks: &[(Vec3, char)]) -> String {
+        let region = from.and_then(|f| self.standing_on(f)).map(|n| self.region[n as usize]);
+        let mut rows: Vec<Vec<char>> = (0..self.size.1)
+            .map(|k| {
+                (0..self.size.0)
+                    .map(|i| {
+                        let here = self.column(i, k).iter().find(|&&n| (y0..y1).contains(&self.nodes[n as usize].y));
+                        match here {
+                            None => ' ',
+                            Some(&n) if Some(self.region[n as usize]) == region => '.',
+                            Some(_) => ',',
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        for &(p, c) in marks {
+            let (i, k) = self.cell_of(p);
+            if (y0..y1).contains(&p.y) && i >= 0 && k >= 0 && i < self.size.0 && k < self.size.1 {
+                rows[k as usize][i as usize] = c;
+            }
+        }
+        let mut out = String::new();
+        for row in rows {
+            out.extend(row.iter());
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Where a walker could stand within `reach` of `p` (m).
+    pub fn places_near(&self, p: Vec3, reach: f32) -> Vec<Vec3> {
+        let (ci, ck) = self.cell_of(p);
+        let r = (reach / CELL).ceil() as i32 + 1;
+        let mut out = Vec::new();
+        for k in ck - r..=ck + r {
+            for i in ci - r..=ci + r {
+                out.extend(self.column(i, k).iter().map(|&n| self.point(n)).filter(|q| q.distance(p) <= reach));
+            }
+        }
+        out
+    }
+
     /// The node in `region` nearest `p`, anywhere: searched outward a ring
     /// of cells at a time, until no further ring could hold a nearer one.
     fn nearest_in(&self, region: u32, p: Vec3) -> Option<u32> {
@@ -467,16 +517,16 @@ impl NavGrid {
     }
 }
 
-/// Authority: each kind of hull's grid, baked the first time a walker
+/// Authority: each ship design's grid, baked the first time a walker
 /// needs it.
 #[derive(Resource, Default)]
-pub struct NavGrids(HashMap<HullKind, NavGrid>);
+pub struct NavGrids(HashMap<String, NavGrid>);
 
 impl NavGrids {
-    pub fn get(&mut self, kind: HullKind) -> &NavGrid {
-        self.0.entry(kind).or_insert_with(|| {
-            let grid = NavGrid::for_hull(kind);
-            info!("nav: {} has {} standing places", kind.name(), grid.len());
+    pub fn get(&mut self, id: &str) -> &NavGrid {
+        self.0.entry(id.to_string()).or_insert_with(|| {
+            let grid = NavGrid::for_design(design(id));
+            info!("nav: {id} has {} standing places", grid.len());
             grid
         })
     }
@@ -485,22 +535,24 @@ impl NavGrids {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::ship::carrier::{CONSOLE, HANGAR_DOOR, UPPER};
 
     fn carrier() -> NavGrid {
-        NavGrid::for_hull(HullKind::Carrier)
+        NavGrid::for_design(design("carrier"))
     }
 
     #[test]
     fn the_bridge_is_reached_from_the_hangar_by_the_ramp() {
         let grid = carrier();
-        let start = HANGAR_DOOR + Vec3::new(0.0, 0.0, -2.0);
-        let goal = Vec3::new(0.0, UPPER, CONSOLE.z + 1.5);
+        let ship = design("carrier");
+        let upper = ship.marker("upper_deck").y;
+        let start = ship.marker("entry") + Vec3::new(0.0, 0.0, -2.0);
+        let goal = Vec3::new(0.0, upper, ship.marker("objective").z + 1.5);
         let path = grid.path(start, goal).expect("on the grid");
         let end = *path.last().unwrap();
         assert!(end.distance(goal) < 0.8, "ends at {end}, not by the console");
         // It goes by the ramp, up the port side of the hangar.
         assert!(path.iter().any(|p| p.x < -3.5 && p.z > 15.0 && p.y < 1.0), "{path:?}");
+        assert!(end.y > upper - 0.1);
         // Every leg is a straight walk on the grid.
         let mut from = grid.point(grid.standing_on(start).unwrap());
         for &p in &path {
@@ -532,28 +584,3 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod picture {
-    use super::*;
-
-    #[test]
-    #[ignore]
-    fn print_carrier() {
-        let g = NavGrid::for_hull(HullKind::Carrier);
-        for (name, y0, y1) in [("lower", -0.1, 1.0), ("upper", 1.0, 4.0), ("outside", 4.0, 99.0)] {
-            println!("{name}");
-            for i in 0..g.size.0 {
-                let row: String = (0..g.size.1)
-                    .map(|k| {
-                        let ns: Vec<_> = g.column(i, k).iter().filter(|&&n| (y0..y1).contains(&g.nodes[n as usize].y)).collect();
-                        match ns.first() {
-                            None => ' ',
-                            Some(&&n) => (b'a' + (g.region[n as usize] % 26) as u8) as char,
-                        }
-                    })
-                    .collect();
-                println!("{row}");
-            }
-        }
-    }
-}

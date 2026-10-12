@@ -8,6 +8,7 @@ pub mod asteroids;
 pub mod bodies;
 pub mod bots;
 pub mod combat;
+pub mod design;
 pub mod events;
 pub mod flight;
 pub mod frame;

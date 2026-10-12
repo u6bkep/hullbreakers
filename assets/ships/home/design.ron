@@ -1,0 +1,10 @@
+// The crew's ship. Ship coordinates, metres: +Y up, bow toward -Z.
+// See docs/ships.md.
+Design(
+    name: "SHIP",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 2.0, 0.0), radii: (9.0, 7.5, 19.0)),
+    turrets: [(0.0, 4.6, -4.0), (0.0, -0.8, -6.0)],
+    modules: [(module: "home/hull")],
+)

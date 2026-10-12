@@ -477,7 +477,7 @@ pub fn think(
                 };
                 // Walking a route: the grid of the ship underfoot, if that's
                 // its home (routes are in its home's frame).
-                let grid = (on == brain.home).then(|| hulls.get(on).ok()).flatten().map(|h| grids.get(h.0));
+                let grid = (on == brain.home).then(|| hulls.get(on).ok()).flatten().map(|h| grids.get(&h.0));
                 let walk = match goal {
                     None => {
                         // Fighting where it stands: the route is history.

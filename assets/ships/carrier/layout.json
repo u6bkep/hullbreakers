@@ -1,5 +1,5 @@
 {
-  "doc": "Ship coordinates, metres, +Y up, bow toward -Z. boxes: the collision (center, full size, rotation as an [x, y, z, w] quaternion, material: hull = structure, trim = fittings and furniture). Walls are boxes; doorways are the gaps between them. controls: buttons (center, half size). turrets: mount points. shield: ellipsoid center and radii.",
+  "doc": "Ship coordinates, metres, +Y up, bow toward -Z. boxes: the collision (center, full size, rotation as an [x, y, z, w] quaternion, material: hull = structure, trim = fittings and furniture). Walls are boxes; doorways are the gaps between them. controls: buttons (center, half size). turrets: mount points. shield: ellipsoid center and radii. lights: the ceiling lights.",
   "boxes": [
     {"center": [0.0000, -0.1500, 0.0000], "size": [12.6000, 0.3000, 60.6000], "rotation": [0.00000, 0.00000, 0.00000, 1.00000], "material": "hull"},
     {"center": [0.0000, 6.4500, 0.0000], "size": [12.6000, 0.3000, 60.6000], "rotation": [0.00000, 0.00000, 0.00000, 1.00000], "material": "hull"},
@@ -62,5 +62,6 @@
     {"label": "Disable shields", "center": [0.0000, 4.3600, -27.0000], "half_size": [0.3500, 0.0600, 0.3000]}
   ],
   "turrets": [[0.0000, 8.1000, -8.0000], [0.0000, -0.8000, 4.0000]],
+  "lights": [[0.0000, 2.7000, -27.0000], [0.0000, 2.7000, -16.0000], [0.0000, 2.7000, -4.0000], [0.0000, 2.7000, 8.0000], [-4.0000, 2.7000, -12.0000], [-4.0000, 2.7000, 6.0000], [4.0000, 2.7000, -12.0000], [4.0000, 2.7000, 6.0000], [0.0000, 5.9000, 18.0000], [0.0000, 5.9000, 26.0000], [0.0000, 6.0000, -26.0000], [0.0000, 6.0000, -14.0000], [0.0000, 6.0000, -2.0000], [0.0000, 6.0000, 9.0000], [-4.0000, 6.0000, -8.0000], [-4.0000, 6.0000, 8.0000], [4.0000, 6.0000, -8.0000], [4.0000, 6.0000, 8.0000]],
   "shield": {"center": [0.0000, 3.2000, 0.0000], "radii": [11.0000, 8.0000, 36.0000]}
 }

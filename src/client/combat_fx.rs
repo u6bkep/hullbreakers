@@ -695,7 +695,7 @@ fn fit_shields(
                 ShieldBubble { ship, failed: None },
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_translation(hull.0.shield().0).with_scale(hull.0.shield().1),
+                Transform::from_translation(hull.design().shield.center).with_scale(hull.design().shield.radii),
                 NotShadowCaster,
             ))
             .id();
@@ -732,7 +732,8 @@ fn draw_shields(
         };
         let u = &mut material.shield;
         let local = ship.rotation.inverse() * (camera.translation - ship.translation);
-        let (shield_center, shield_radii) = hull.0.shield();
+        let shield = hull.design().shield;
+        let (shield_center, shield_radii) = (shield.center, shield.radii);
         let inside = ((local - shield_center) / shield_radii).length() < 1.0;
         let mut hits: Vec<&BeamTrack> = tracks
             .0

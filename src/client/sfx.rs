@@ -19,7 +19,7 @@ use rand_chacha::ChaCha8Rng;
 use crate::sim::asteroids::Asteroid;
 use crate::sim::combat::{Beams, Combatant, TURRETS, beam_on};
 use crate::sim::mission::{Mission, Phase};
-use crate::sim::ship::{HomeShip, HullKind, ShipHull};
+use crate::sim::ship::{HomeShip, ShipHull};
 use crate::sim::SimTick;
 use super::events::Presented;
 use crate::sim::events::{Detach, PlayerEvent};
@@ -978,7 +978,7 @@ pub fn play_combat_sounds(
     // it everywhere else.
     let alarm = ships
         .iter()
-        .find(|(_, c, h, _)| h.0 == HullKind::Carrier && !c.shield)
+        .find(|(_, c, h, _)| h.design().hostile && !c.shield)
         .map(|(e, ..)| e);
     let klaxon = match alarm {
         Some(raider) if body == Some(raider) => 0.3,

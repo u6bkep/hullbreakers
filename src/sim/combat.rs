@@ -137,7 +137,8 @@ pub fn update_beams(
         let (distance, shielded) = if target_state.shield {
             let local_origin = theirs.point_to_local(from);
             let local_dir = theirs.dir_to_local(*dir);
-            let (center, radii) = kind.0.shield();
+            let shield = kind.design().shield;
+            let (center, radii) = (shield.center, shield.radii);
             match ray_ellipsoid(local_origin, local_dir, center, radii) {
                 Some(t) => (t, true),
                 None => (from.distance(aim), false),

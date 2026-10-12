@@ -98,11 +98,12 @@ tools/assets/
 
 ## Ships: built on a collision layout
 
-A ship's collision is boxes in code (`src/sim/ship.rs`); the game draws the ship's model
-(`HullKind::model`) *instead of* the boxes and still collides against the boxes. So the
-model is built on the boxes, not the other way round:
+A ship's collision is the boxes of its design (`assets/ships/<ship>/`, see
+[ships.md](ships.md)); the game draws the design's `model` *instead of* the boxes and
+still collides against the boxes. So the model is built on the boxes, not the other way
+round:
 
-- `cargo run --bin layout_dump -- <hull> > assets/ships/<hull>/layout.json` writes the
+- `cargo run --bin layout_dump -- <ship> > assets/ships/<ship>/layout.json` writes the
   layout: boxes (centre, size, rotation, `hull` or `trim`), controls, turret mounts,
   shield. It is generated; never edit it.
 - `build.py` reads `layout.json` and models the walls, floors and furniture on their
