@@ -1397,6 +1397,7 @@ pub fn limpet_bites(
             source: Some(entity),
             weak: false,
             from: Some(at),
+            steady: false,
         });
     }
 }

@@ -349,3 +349,19 @@ it.
   it rocked at the wall's foot. Fix: when its goal is a ceiling perch it
   commits to a climb (`Crawling::climb`: the wall's direction in its body,
   held for a few seconds) instead of re-deciding. Cost: several test runs.
+
+## Lightyear and Replicon (net/)
+
+- 2026-10-12. Lightyear 0.30 replicates through Replicon, and has no
+  per-component, per-client target of its own (`Replicate`,
+  `PredictionTarget` are per entity). Keeping a profile to its owner took
+  Replicon's own visibility filter (`net::profiles::ProfileOwner`, scoped to
+  `(Profile, SavedProfile)`), so `bevy_replicon` is a direct dependency now
+  (the same version lightyear uses). The filter can only be registered
+  where Replicon's server is in: a pure client app has no `FilterRegistry`
+  and panics on `add_visibility_filter`, and in `build` the server plugin
+  may not be in yet; it's registered in `ProtocolPlugin::finish`, if the
+  registry exists. The filter's client entity is lightyear's link entity
+  (what `ControlledBy::owner` holds). An entity without the filter
+  component has the scoped components hidden from every client, which is
+  what the host's own player wants. Cost: an hour.

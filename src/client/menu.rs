@@ -56,6 +56,11 @@ pub struct Menu {
     chosen: Option<Place>,
     /// What's chosen at the armory.
     pub armory: Option<crate::sim::progression::Holding>,
+    /// The name being typed (the Controls tab's callsign field), if it's
+    /// been touched.
+    name_draft: Option<String>,
+    /// A text field has the keyboard: keys are letters, not commands.
+    typing: bool,
 }
 
 /// Inventory changes asked for in the menu, waiting to go to the
@@ -78,11 +83,14 @@ impl Menu {
     pub fn close(&mut self) {
         self.open = false;
         self.capture = None;
+        self.typing = false;
+        self.name_draft = None;
     }
 
-    /// Whether a binding is waiting for its key (so keys aren't commands).
+    /// Whether a binding is waiting for its key, or a name is being typed
+    /// (so keys aren't commands).
     pub fn binding(&self) -> bool {
-        self.capture.is_some()
+        self.capture.is_some() || self.typing
     }
 }
 
@@ -218,6 +226,8 @@ pub fn menu(
     // The controls list takes the screen's height, less the window around it.
     let list_height = (ctx.content_rect().height() - 48.0 - 200.0).max(160.0);
     let menu = &mut *menu;
+    // Only a field drawn this frame has the keyboard.
+    menu.typing = false;
     let (player, profile) = match player.as_deref() {
         Some((player, profile)) => (Some(*player), *profile),
         None => (None, None),
@@ -264,7 +274,11 @@ pub fn menu(
                 ),
                 Tab::Armory => super::armory::armory_tab(ui, player, profile, &mut menu.armory, requests.as_deref_mut()),
                 Tab::Workbench => super::workbench::workbench_tab(ui, player, profile, &mut menu.armory, requests.as_deref_mut()),
-                Tab::Controls => controls_tab(ui, menu, &mut bindings, list_height),
+                Tab::Controls => {
+                    callsign_row(ui, menu, profile, requests.as_deref_mut());
+                    ui.separator();
+                    controls_tab(ui, menu, &mut bindings, list_height - 34.0)
+                }
             }
             if !menu.status.is_empty() {
                 ui.separator();
@@ -621,6 +635,37 @@ fn details(ui: &mut egui::Ui, player: Option<&Player>, chosen: &mut Option<Place
         if ui.small_button("Drop").clicked() {
             ask(ops, ItemOp::Drop(place));
             *chosen = None;
+        }
+    });
+}
+
+/// What the crew call you: your profile's name, changed here (Enter or
+/// Set sends it to the host, which keeps it in your profile).
+fn callsign_row(ui: &mut egui::Ui, menu: &mut Menu, profile: Option<&Profile>, requests: Option<&mut ProfileRequests>) {
+    let current = profile.map_or("", |p| p.name.as_str());
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Callsign").strong());
+        let draft = menu.name_draft.get_or_insert_with(|| current.to_string());
+        let field = ui.add(
+            egui::TextEdit::singleline(draft)
+                .char_limit(crate::sim::progression::NAME_MAX)
+                .desired_width(220.0)
+                .hint_text("your name, as the crew sees it"),
+        );
+        menu.typing = field.has_focus();
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let cleaned = crate::sim::progression::clean_name(draft);
+        let changed = cleaned.as_deref().is_some_and(|n| n != current);
+        let set = ui.add_enabled(changed && profile.is_some(), egui::Button::new("Set")).clicked();
+        if (set || entered) && changed
+            && let (Some(name), Some(requests)) = (cleaned, requests)
+        {
+            requests.1 = Some(name.clone());
+            menu.name_draft = Some(name);
+            menu.status = "Callsign sent to the host".into();
+        }
+        if profile.is_none() {
+            ui.label(egui::RichText::new("(your profile hasn't reached the host yet)").small().color(DIM));
         }
     });
 }

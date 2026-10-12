@@ -2,7 +2,7 @@
 //! continuous player state. Everything is heard "through the suit": there is
 //! no sound in vacuum, so your own effects are non-spatial and contact
 //! sounds are dull and bassy. Other players are heard only through structure
-//! you share: their footsteps, landings, bumps and grapple strikes on the
+//! you share: their footsteps, landings, bumps, grapple strikes and gunfire on the
 //! body you stand on reach you from their direction, fading with distance.
 //! In EVA you hear nothing of them.
 
@@ -12,7 +12,8 @@ use bevy::audio::{AudioSinkPlayback, PlaybackMode, Volume};
 use bevy::prelude::*;
 
 use crate::sim::vitals::HitLog;
-use crate::sim::weapons::{Family, GunKind};
+use crate::sim::bots::Robot;
+use crate::sim::weapons::{Family, GunKind, ShotKind};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
@@ -620,6 +621,8 @@ fn play_at(
 pub struct RemoteHearing {
     events: EventCursor,
     stride: f32,
+    /// When each hand's shotgun last boomed.
+    boomed: [f32; 2],
 }
 
 /// Other players' contact sounds, carried through the body you share.
@@ -630,14 +633,15 @@ pub fn play_remote_sounds(
     sounds: Res<Sounds>,
     rocks: Query<(), With<Asteroid>>,
     listener: Query<&Player, With<LocalPlayer>>,
-    mut players: Query<(Entity, &Player, Option<&mut RemoteHearing>), Without<LocalPlayer>>,
+    mut players: Query<(Entity, &Player, Option<&mut RemoteHearing>, Has<Robot>), Without<LocalPlayer>>,
     avatars: Query<(&Avatar, &GlobalTransform)>,
     poses: Query<&GlobalTransform, Without<Avatar>>,
 ) {
+    let now = time.elapsed_secs();
     let shared = listener.single().ok().and_then(|p| p.mode.body());
     let dt = time.delta_secs();
     let mut rng = rand::rng();
-    for (entity, player, hearing) in &mut players {
+    for (entity, player, hearing, robot) in &mut players {
         let Some(mut hearing) = hearing else {
             commands.entity(entity).insert(RemoteHearing::default());
             continue;
@@ -685,6 +689,16 @@ pub fn play_remote_sounds(
                         .and_then(|g| Some(poses.get(body).ok()?.transform_point(g.anchor)))
                         .unwrap_or(position);
                     play_at(&mut commands, &sounds.grapple_attach, 0.6, pitch, anchor);
+                }
+                // A crewmate's gunfire, through the body they stand on with
+                // us (robots' guns are voiced in `robot_fx`, by the same
+                // rule).
+                PlayerEvent::Fired { hand, gun, kind, .. }
+                    if !robot && shared.is_some() && player.mode.body() == shared =>
+                {
+                    if let Some(sound) = sounds.shot(gun, kind, &mut hearing.boomed[hand as usize], now) {
+                        play_at(&mut commands, sound, 0.7, pitch, position);
+                    }
                 }
                 _ => {}
             }
@@ -805,23 +819,8 @@ pub fn play_event_sounds(
             PlayerEvent::BeamStarted { .. } => play(&mut commands, &sounds.shot_laser, 0.7, pitch),
             PlayerEvent::BeamStopped { .. } => {}
             PlayerEvent::Fired { hand, gun, kind, .. } => {
-                let sound = match (kind.family(), gun) {
-                    (Family::Plasma, _) => &sounds.shot_plasma,
-                    (Family::Arc, _) => &sounds.shot_arc,
-                    (Family::Laser, _) => &sounds.shot_laser,
-                    (_, GunKind::Shotgun) => {
-                        // Eight pellets, one boom (each hand its own: two
-                        // shotguns, two booms).
-                        let last = &mut last_boom[hand as usize];
-                        if time.elapsed_secs() - *last < 0.05 {
-                            continue;
-                        }
-                        *last = time.elapsed_secs();
-                        &sounds.shot_shotgun
-                    }
-                    (_, GunKind::Sniper) => &sounds.shot_sniper,
-                    (_, GunKind::Smg | GunKind::SwarmerSprayer) => &sounds.shot_smg,
-                    (_, GunKind::Rifle | GunKind::GunnerRifle | GunKind::MarksmanRifle | GunKind::TurretCannon) => &sounds.shot_rifle,
+                let Some(sound) = sounds.shot(gun, kind, &mut last_boom[hand as usize], time.elapsed_secs()) else {
+                    continue;
                 };
                 play(&mut commands, sound, 0.7, pitch);
             }
@@ -829,22 +828,64 @@ pub fn play_event_sounds(
     }
 }
 
-/// A held beam hums on, a few times a second, each hand's its own.
+impl Sounds {
+    /// A shot's sound, by its family, else its frame. A shotgun's pellets
+    /// are one boom: `last` is when its hand last boomed (the boom is
+    /// skipped within 50 ms of it, and `now` recorded).
+    fn shot(&self, gun: GunKind, kind: ShotKind, last: &mut f32, now: f32) -> Option<&Handle<AudioSource>> {
+        Some(match (kind.family(), gun) {
+            (Family::Plasma, _) => &self.shot_plasma,
+            (Family::Arc, _) => &self.shot_arc,
+            (Family::Laser, _) => &self.shot_laser,
+            (_, GunKind::Shotgun) => {
+                if now - *last < 0.05 {
+                    return None;
+                }
+                *last = now;
+                &self.shot_shotgun
+            }
+            (_, GunKind::Sniper) => &self.shot_sniper,
+            (_, GunKind::Smg | GunKind::SwarmerSprayer) => &self.shot_smg,
+            (_, GunKind::Rifle | GunKind::GunnerRifle | GunKind::MarksmanRifle | GunKind::TurretCannon) => &self.shot_rifle,
+        })
+    }
+}
+
+/// Seconds between a held beam's hums.
+const HUM_EVERY: f32 = 0.12;
+
+/// A held beam hums on, a few times a second, each hand's its own: ours
+/// through the suit, a crewmate's through the body we share with them.
 pub fn beam_hum(
     mut commands: Commands,
     time: Res<Time>,
     sounds: Res<Sounds>,
-    player: Option<Single<&Player, With<LocalPlayer>>>,
-    mut last: Local<[f32; 2]>,
+    players: Query<(Entity, &Player, Has<LocalPlayer>, Has<Robot>)>,
+    avatars: Query<(&Avatar, &GlobalTransform)>,
+    mut last: Local<std::collections::HashMap<(Entity, usize), f32>>,
 ) {
-    let Some(player) = player else { return };
     let now = time.elapsed_secs();
-    for (i, state) in player.loadout.hands.iter().enumerate() {
-        if state.beam.is_some() && now - last[i] >= 0.12 {
-            last[i] = now;
-            play(&mut commands, &sounds.shot_laser, 0.6, 1.0);
+    let shared = players.iter().find(|p| p.2).and_then(|(_, p, ..)| p.mode.body());
+    for (entity, player, local, robot) in &players {
+        for (i, state) in player.loadout.hands.iter().enumerate() {
+            if state.beam.is_none() {
+                last.remove(&(entity, i));
+                continue;
+            }
+            let at = last.entry((entity, i)).or_insert(f32::MIN);
+            if now - *at < HUM_EVERY {
+                continue;
+            }
+            *at = now;
+            if local {
+                play(&mut commands, &sounds.shot_laser, 0.6, 1.0);
+            } else if !robot && shared.is_some() && player.mode.body() == shared {
+                let Some((_, pose)) = avatars.iter().find(|(a, _)| a.player == entity) else { continue };
+                play_at(&mut commands, &sounds.shot_laser, 0.6, 1.0, pose.translation());
+            }
         }
     }
+    last.retain(|(e, _), _| players.contains(*e));
 }
 
 /// Footsteps, jetpack hiss, reel whine, and the rope going taut.

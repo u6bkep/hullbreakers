@@ -117,6 +117,12 @@ started; one that can't be read at all is left alone (a fresh profile, not
 saved). `HULLBREAKERS_SAVE=path` keeps it elsewhere; `tools/hl` gives each
 game it runs its own. Mission cargo (a data core) stays in its mission.
 
+A profile is someone: it's made with a random id (never shown) and a
+**callsign** ("Kestrel 42"), which you can change at the top of the menu's
+Controls tab. It's what the crew sees over your head and in the debrief and
+the run board; records (the grapple run's personal bests) go by the id, so
+a new player in a reused slot, or one who takes your name, starts their own.
+
 - **Your guns are yours, for good.** Every gun you pick up is yours. Store
   the ones you aren't carrying in the **armory** (up to 40). What you leave
   where you die, or put down and nobody takes, is back in your stash when the
@@ -520,6 +526,13 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
 - Sounds are synthesized at startup (`client/sfx.rs`) and heard through the
   suit (non-spatial): footsteps, landing/impact clanks, release, jetpack hiss,
   grapple fire/attach/release, reel whine under load, rope twang, rip-off warning.
+  Other players (crew and robots alike) are heard only through a body you
+  stand on together, from where they are, fading with distance: footsteps,
+  landings, bumps, grapple strikes and gunfire (every frame and family, a
+  laser's hum while its beam is on). One floating in EVA isn't heard: there's
+  no sound in vacuum.
+- Crewmates' callsigns show over their heads (and how far off they are)
+  while they're within 80 m and on screen.
 - Rope: grey and sagging when slack, straight pale gold when taut, orange to red
   under load with dashes running in while reeling; load gauge under the crosshair.
 - Crosshair ring + distance when a surface is within grapple range; the

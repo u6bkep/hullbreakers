@@ -288,7 +288,9 @@ pub fn fly_shots(
             continue;
         };
         let point = shot.position + dir * hit.distance;
+        let steady = matches!(shot.kind, ShotKind::Laser { .. });
         let hurt = |target: Entity, amount: f32, weak: bool| Damage {
+            steady,
             target,
             amount,
             source: Some(shot.shooter),

@@ -309,6 +309,7 @@ fn hurting_one_grazer_stampedes_its_herd() {
         source: Some(me),
         weak: false,
         from: Some(food + Vec3::new(-20.0, 0.0, 0.0)),
+        steady: false,
     });
     ticks(&mut app, 60 * 3);
     for (i, g) in herd.iter().enumerate() {
@@ -381,6 +382,7 @@ fn a_bolting_grazer_tramples_whoever_is_in_its_way() {
         source: None,
         weak: false,
         from: Some(at - Vec3::X * 20.0),
+        steady: false,
     });
     ticks(&mut app, 60 * 4);
     assert!(health(&app, me) < full, "never trampled");

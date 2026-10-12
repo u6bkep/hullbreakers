@@ -47,7 +47,20 @@ pub struct Damage {
     /// Where it came from, in the world (a shot's muzzle, a beam's turret),
     /// for the victim's [`HurtLog`].
     pub from: Option<Vec3>,
+    /// From something that hurts every tick (a crew laser's beam): it's
+    /// applied every tick, but the logs (the shooter's hit markers and
+    /// sounds, the victim's damage arcs, and what they cost on the wire)
+    /// get one entry per [`STEADY_LOG_SECONDS`] of it, its damage summed.
+    pub steady: bool,
 }
+
+/// How often a steady source's hits on one target are logged (s).
+pub const STEADY_LOG_SECONDS: f32 = 0.15;
+
+/// Steady hits gathered since they were last logged, by source and target:
+/// when that was, and the damage since.
+#[derive(Resource, Default)]
+pub struct SteadyHits(std::collections::HashMap<(Option<Entity>, Entity), (f32, f32)>);
 
 /// What has recently hurt a player, and from where: their HUD's damage
 /// arcs. The authority writes it; a client can't know what hit it.
@@ -157,6 +170,7 @@ pub fn beam_burns(
                 source: None,
                 weak: false,
                 from,
+                steady: false,
             });
         }
     }
@@ -172,8 +186,12 @@ pub fn apply_damage(
     mut vitals: Query<(&mut Vitals, Has<Robot>, Has<Player>, Option<&BodyTuning>, Option<(&Affixes, &mut Brain, &mut Condition)>)>,
     mut logs: Query<&mut HitLog>,
     mut hurts: Query<&mut HurtLog>,
+    mut steady: ResMut<SteadyHits>,
 ) {
     let dt = time.delta_secs();
+    let now = time.elapsed_secs();
+    // A beam that's moved off (or stopped) starts afresh next time.
+    steady.0.retain(|_, (logged, _)| now - *logged < 2.0 * STEADY_LOG_SECONDS);
     // The crew's suits heal (to their own most: rank plates them); robots
     // and creatures don't.
     for (mut v, robot, player, own, _) in &mut vitals {
@@ -196,6 +214,21 @@ pub fn apply_damage(
         };
         v.health = (v.health - amount).max(0.0);
         v.since_hurt = 0.0;
+        let kill = v.health <= 0.0;
+        // A steady source logs a hit now and then, its damage summed (its
+        // first touch and a kill at once).
+        let amount = if hit.steady {
+            let entry = steady.0.entry((hit.source, hit.target)).or_insert((f32::MIN, 0.0));
+            entry.1 += amount;
+            if !kill && now - entry.0 < STEADY_LOG_SECONDS {
+                continue;
+            }
+            let sum = entry.1;
+            *entry = (now, 0.0);
+            sum
+        } else {
+            amount
+        };
         if let Ok(mut log) = hurts.get_mut(hit.target) {
             log.push(Hurt {
                 from: hit.from,

@@ -17,6 +17,9 @@ rand = "0.9"
 rand_chacha = "0.9"
 serde = { version = "1", features = ["derive"] }
 ron = "0.10"
+# Lightyear replicates through Replicon; its per-client component visibility
+# (a profile only to its owner) is Replicon's own API.
+bevy_replicon = { version = "0.44.1", default-features = false, features = ["server"] }
 
 [dev-dependencies]
 # Lightyear's transports read the clock directly; tests drive a mock clock.

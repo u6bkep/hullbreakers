@@ -200,6 +200,44 @@ pub fn ship_markers(
     Ok(())
 }
 
+/// How far off a crewmate's name still shows over them (m).
+const CREW_NAME_RANGE: f32 = 80.0;
+
+/// Crewmates' names over their heads (and how far off they are), while
+/// they're on screen and within [`CREW_NAME_RANGE`]: who's who, as the crew
+/// calls them (their profiles' names). Less important than the other marks:
+/// a name that would sit on another label isn't drawn.
+pub fn crew_markers(
+    mut contexts: EguiContexts,
+    crew: Query<(Entity, &Name), (With<Player>, Without<LocalPlayer>, Without<crate::sim::bots::Robot>)>,
+    avatars: Query<(&crate::client::render::Avatar, &GlobalTransform)>,
+    camera: CameraView,
+    mut memory: ResMut<HudMemory>,
+) -> Result {
+    let labels = &mut memory.labels;
+    let ctx = contexts.ctx_mut()?;
+    let (camera, cam) = *camera;
+    let view = Projector::new(camera, cam, ctx);
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("crew markers")));
+    let screen = ctx.content_rect();
+    for (entity, name) in &crew {
+        let Some((_, pose)) = avatars.iter().find(|(a, _)| a.player == entity) else { continue };
+        // Over the head (the avatar's origin is the capsule's middle).
+        let head = pose.translation() + pose.up() * 1.15;
+        let range = head.distance(cam.translation);
+        if range > CREW_NAME_RANGE {
+            continue;
+        }
+        let Some(p) = view.to_screen(head).filter(|p| screen.shrink(EDGE).contains(*p) && !labels.blocked(*p)) else {
+            continue;
+        };
+        let near = 1.0 - (range / CREW_NAME_RANGE).powi(2) * 0.5;
+        let color = style::fade(FRIENDLY, clear_of_centre(screen, p) * near);
+        tag(&painter, labels, p, p + vec2(0.0, 2.0), name.as_str(), &distance_label(range), color);
+    }
+    Ok(())
+}
+
 /// Brackets the reference body (or points at it from the screen edge) and
 /// marks the prograde/retrograde directions of motion relative to it. The
 /// reference body is a suit system, so all of it is SUIT.

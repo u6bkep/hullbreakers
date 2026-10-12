@@ -16,7 +16,7 @@ use hullbreakers::sim::items::{Item, Place, Rarity, Weapon};
 use hullbreakers::sim::mission::{Director, ScenarioKind};
 use hullbreakers::sim::pickups::Pickup;
 use hullbreakers::sim::player::{Mode, Player, new_player};
-use hullbreakers::sim::progression::{Profile, ProfileOp, ProfileOrders, ProfileWire, RECOVER_UNCLAIMED};
+use hullbreakers::sim::progression::{Holding, Profile, ProfileOp, ProfileOrders, ProfileWire, RECOVER_UNCLAIMED};
 use hullbreakers::sim::ship::HomeShip;
 use hullbreakers::sim::tuning::Tuning;
 use hullbreakers::sim::vitals::Vitals;
@@ -194,7 +194,7 @@ fn the_armory_moves_guns_between_the_stash_and_your_hands() {
     app.world_mut().get_mut::<Profile>(me).unwrap().stash.push(smg);
     stand_looking_at(&mut app, me, DECK, DECK + Vec3::new(0.0, 0.0, -2.0));
     // The rifle to the stash, the SMG from it.
-    ask(&mut app, me, ProfileOp::Store(Place::Weapon(0)));
+    ask(&mut app, me, ProfileOp::Store(Holding::Carried(Place::Weapon(0), rare())));
     ask(&mut app, me, ProfileOp::Take(smg));
     let (p, pr) = (player(&app, me), profile(&app, me));
     assert_eq!(p.loadout.inventory.weapons[0], Some(smg));
@@ -202,7 +202,7 @@ fn the_armory_moves_guns_between_the_stash_and_your_hands() {
     // Standard issue is free, and goes back on the rack.
     ask(&mut app, me, ProfileOp::TakeIssue(GunKind::Rifle));
     assert_eq!(player(&app, me).loadout.inventory.weapons[1], Some(Weapon::issue(GunKind::Rifle)));
-    ask(&mut app, me, ProfileOp::Store(Place::Weapon(1)));
+    ask(&mut app, me, ProfileOp::Store(Holding::Carried(Place::Weapon(1), Weapon::issue(GunKind::Rifle))));
     assert_eq!(player(&app, me).loadout.inventory.weapons[1], None);
     assert_eq!(profile(&app, me).stash, vec![rare()], "issue went in the stash");
     // Not from off the ship.
@@ -219,11 +219,11 @@ fn the_armory_moves_guns_between_the_stash_and_your_hands() {
 #[test]
 fn the_workbench_tunes_refits_repaints_and_scraps() {
     use hullbreakers::sim::items::{PAINTS, SLOTS};
-    use hullbreakers::sim::progression::{Holding, REFIT_COST, part_bit, scrap_value, tune_cost, xp_for};
+    use hullbreakers::sim::progression::{REFIT_COST, part_bit, scrap_value, tune_cost, xp_for};
     let mut app = app();
     let me = armed(&mut app);
     stand_looking_at(&mut app, me, DECK, DECK + Vec3::new(0.0, 0.0, -2.0));
-    let held = Holding::Carried(Place::Weapon(0));
+    let held = Holding::Carried(Place::Weapon(0), rare());
     let gun = || rare();
     // Broke: nothing happens.
     ask(&mut app, me, ProfileOp::Tune(held));
@@ -265,9 +265,21 @@ fn the_workbench_tunes_refits_repaints_and_scraps() {
     assert_eq!(painted.look().paint.body, PAINTS[0].1);
     // Standard issue can't be worked on.
     ask(&mut app, me, ProfileOp::TakeIssue(GunKind::Smg));
-    let issue = Holding::Carried(Place::Weapon(1));
+    let issue = Holding::Carried(Place::Weapon(1), Weapon::issue(GunKind::Smg));
     ask(&mut app, me, ProfileOp::Tune(issue));
     assert_eq!(player(&app, me).loadout.inventory.weapons[1], Some(Weapon::issue(GunKind::Smg)));
+    // An order for a gun that's since been moved (another in its place by
+    // the time it's applied) is refused: the tuned rifle isn't scrapped
+    // when the order named the SMG that was in its slot.
+    let painted_rifle = player(&app, me).loadout.inventory.weapons[0].unwrap();
+    let salvage = profile(&app, me).salvage;
+    ask(&mut app, me, ProfileOp::Scrap(Holding::Carried(Place::Weapon(0), Weapon::issue(GunKind::Smg))));
+    ask(&mut app, me, ProfileOp::Store(Holding::Carried(Place::Weapon(0), Weapon::issue(GunKind::Smg))));
+    assert_eq!(player(&app, me).loadout.inventory.weapons[0], Some(painted_rifle), "acted on the gun now in the slot");
+    assert_eq!(profile(&app, me).salvage, salvage);
+    // Named rightly, by its make, a gun the workbench changed is still it.
+    ask(&mut app, me, ProfileOp::Scrap(Holding::Carried(Place::Weapon(0), rare())));
+    assert_eq!(player(&app, me).loadout.inventory.weapons[0], None);
 }
 
 #[test]

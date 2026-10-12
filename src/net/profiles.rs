@@ -5,9 +5,13 @@
 //! authority queues them for the simulation ([`ProfileOrders`]), by the
 //! player of the link they came on. A host's own player's skip the network.
 //! Profiles come back by replication (the [`Profile`] component); each
-//! machine saves its own player's.
+//! machine saves its own player's. A profile and its saved snapshot go
+//! only to the player whose they are ([`ProfileOwner`]); what others need
+//! of it is public: the player's name (their `Name`) and rank
+//! ([`crate::sim::progression::Rank`]).
 
 use bevy::prelude::*;
+use bevy_replicon::prelude::{AppVisibilityExt, VisibilityFilter};
 use lightyear::prelude::*;
 
 use super::LocalPlayer;
@@ -29,12 +33,38 @@ pub fn register(app: &mut App) {
         .add_direction(NetworkDirection::ClientToServer);
     app.component::<Profile>().replicate();
     app.component::<SavedProfile>().replicate();
+    app.component::<crate::sim::progression::Rank>().replicate();
+}
+
+/// Once every plugin is in: on a machine that sends replication (a server
+/// or host), profiles go only to their owners. (A pure client has no
+/// visibility to filter.)
+pub fn finish(app: &mut App) {
+    if app.world().contains_resource::<bevy_replicon::server::visibility::registry::FilterRegistry>() {
+        app.add_visibility_filter::<ProfileOwner>();
+    }
+}
+
+/// On a player: the link (client connection) their profile is replicated
+/// to, and no other. A player without one (the host's own, a robot) sends
+/// its profile to nobody.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+#[component(immutable)]
+pub struct ProfileOwner(pub Entity);
+
+impl VisibilityFilter for ProfileOwner {
+    type ClientComponent = ProfileOwner;
+    type Scope = (Profile, SavedProfile);
+
+    fn is_visible(&self, client: Entity, _: Option<&ProfileOwner>) -> bool {
+        client == self.0
+    }
 }
 
 /// What this machine's armory and workbench ask of its profile, to go to
 /// the authority.
 #[derive(Resource, Default)]
-pub struct ProfileRequests(pub Vec<ProfileOp>);
+pub struct ProfileRequests(pub Vec<ProfileOp>, pub Option<String>);
 
 /// A playing machine: its profile and requests go to the authority, by the
 /// network or (a host) straight to its own simulation.
@@ -58,6 +88,7 @@ pub fn send_profile(
         }
         if let Some(mut requests) = requests {
             outgoing.extend(requests.0.drain(..).map(ProfileWire::Op));
+            outgoing.extend(requests.1.take().map(ProfileWire::Rename));
         }
         if outgoing.is_empty() {
             return;
