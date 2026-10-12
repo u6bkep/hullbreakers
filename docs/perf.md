@@ -102,28 +102,37 @@ passes at 2.
 | 2026-10-12 | boarding, standing on our ship, after | 37.8 | about 9 robots moving or aiming every tick |
 | 2026-10-12 | co-op field, a real client (`sent_per_client`) | 15-20 | two players' own states, the field's fauna |
 | 2026-10-12 | co-op boarding, a real client | 44-47 | |
+| 2026-10-12 | co-op boarding, a real client, robots as their views | 43.4 -> 18.0 | back to back, same build otherwise; packets 82 -> 62/s |
+| 2026-10-12 | co-op field, a real client, robots as their views | 11.6 -> 11.4 | its limpets were already quiet |
+| 2026-10-12 | boarding, standing on our ship (`netplay` test) | 37.8 -> 12.9 | asserted under 20 |
 
 What was wrong: every robot's `Player` was marked changed every tick (its
 event log counts the tick; booted on a turning rock, its feet re-seat by a
 few micrometres), and so was every robot's and creature's `Vitals` (the
 hurt clock) and `PlayerTelemetry` (rewritten zero). A changed component is
 re-sent. Now a robot whose state is within a millimetre of what was last
-sent keeps its old change tick (`bots::quiet_idle_robots`), only the crew's
+sent keeps its old change tick (`bots::quiet_idle_robots`, since replaced:
+see below), only the crew's
 hurt clock is replicated (their HUD shows it), telemetry is written only
 when it differs, and a grazer kept bolting isn't rewritten (`fauna::startle`).
 
-Still big: a robot that moves sends its whole `Player` (loadout, event log
-and all) at the send rate, about 170 B an update, for what a client draws
-from its pose and a few flags. See "Bigger work".
+**Robots as what's drawn of them** (`net::robots`). A moving robot sent its
+whole `Player` (216 B on the wire) every tick, for what a client draws and
+hears. Now `Player` isn't replicated for robots at all; the authority sends
+a `RobotView` (mode, rope, boots, beams; quantised to mm, cm/s and 1/32767:
+57 B) when it moves by more than that, and a `RobotLog` (the last half
+second of its event log) when there's a new entry. A remote client builds
+the robot's `Player` from them, so everything that draws, hears or aims at
+robots reads it as before; the host reads the real one.
+
+What's left in co-op is mostly the other crew members: each one's whole
+`Player` (loadout, input cursor, event log) goes every tick, since the log
+counts the tick. Splitting that the same way is harder (their own client
+predicts from the full state, and the others interpolate it), and at 11 kB/s
+for two players it's not yet worth it.
 
 ## Bigger work (not done; numbers above)
 
-- **Robots' replication.** A moving robot's whole `Player` goes at the send
-  rate: boarding is 37-47 kB/s a client, most of it the carrier's crew
-  turning and strafing (the turrets sweep all the time). A slim replicated
-  pose for robots (mode, look, grapple; the loadout and event log only when
-  they change) would cut that several-fold. It touches how robots are
-  interpolated and drawn, so it wants its own change.
 - **Rock colliders.** The field's tick is mostly Avian over 300 rocks, and
   a rock's box is found from every point of its hulls (about 640 each)
   every step. Fewer points per hull (ico2: 162) would cut that about 4x,
@@ -135,8 +144,20 @@ from its pose and a few flags. See "Bigger work".
   pieces, affix parts, frond segments, gun parts). Marking small or
   interior-only meshes `NotShadowCaster` would cut it; it's a look call
   per kind of thing.
-- **The fixed loop under load.** When a frame runs long the next runs
-  several ticks; capping catch-up (Bevy's `Time<Fixed>` max delta) would
-  stop the spiral at the cost of the sim running slow for a moment. It
-  matters only on a loaded machine (or a slow one): worth deciding with the
-  network in mind (the authority's tick is the clock).
+- **The fixed loop under load: decided against a cap** (2026-10-12). When a
+  frame runs long the next runs several ticks to catch up. That catch-up is
+  what keeps the authority's tick on the wall clock, and the authority's
+  tick is every peer's clock: each client runs its own timeline ahead of
+  the authority's estimated tick (lightyear's sync slews its speed for small
+  errors and shifts it by whole ticks for large ones). An authority that
+  dropped time under load would fall behind every client's estimate, and
+  each would slew or snap back (rollbacks, a jump in its own player's view)
+  until it re-estimated. A client that capped would fight its own sync,
+  which would only speed it up again or skip it ahead. So there's no cap
+  beyond Bevy's own: `Time<Virtual>`'s 250 ms max delta (at most 15 ticks a
+  frame) already bounds the spiral, and below that, keeping up is the
+  point. The fix for a loaded or slow machine is a cheaper tick (see rock
+  colliders). One case could take a tighter cap: an authority with no
+  remote clients (playing alone), where no other clock is watching; it
+  isn't done, since a client can join at any time and it would be a second
+  timing mode to keep right.

@@ -287,9 +287,12 @@ impl EventLog {
         self.tick
     }
 
-    /// Whether the two hold the same entries (whatever tick each is on).
-    pub fn same_entries(&self, other: &EventLog) -> bool {
-        self.entries == other.entries
+    /// A copy holding only the entries of the last `ticks` ticks.
+    pub fn since(&self, ticks: u32) -> EventLog {
+        EventLog {
+            tick: self.tick,
+            entries: self.entries.iter().filter(|(t, _)| self.tick.wrapping_sub(*t) < ticks).copied().collect(),
+        }
     }
 
     pub fn push(&mut self, event: PlayerEvent) {

@@ -334,11 +334,14 @@ pub struct PreviousMode(pub Mode);
 pub fn add_player_hull(
     add: On<Add, Player>,
     tuning: Res<Tuning>,
-    robots: Query<&Robot>,
+    robots: Query<(&Robot, Option<&BodyTuning>)>,
     mut commands: Commands,
 ) {
-    // A robot's own size (if its kind is known yet; see `bots::add_body_tuning`).
-    let robot = robots.get(add.entity).ok().map(|kind| kind.tuning(&tuning));
+    // A robot's own size: as fitted to its kind and affixes if it has been
+    // (on a client its player is built after it arrives; see
+    // `net::robots`), else its kind's, if that's known yet (see
+    // `bots::add_body_tuning`).
+    let robot = robots.get(add.entity).ok().map(|(kind, fitted)| fitted.map_or_else(|| kind.tuning(&tuning), |f| f.0.clone()));
     commands
         .entity(add.entity)
         .insert((
