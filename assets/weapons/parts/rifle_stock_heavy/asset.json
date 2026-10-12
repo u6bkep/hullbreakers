@@ -1,0 +1,19 @@
+{
+  "name": "rifle_stock_heavy",
+  "kind": "weapon_part",
+  "brief": "Rifle stock, heavy: Full and solid, with a raised cheek piece.",
+  "palette": {
+    "paint_primary": "#d6cfba",
+    "paint_secondary": "#3b4658"
+  },
+  "expect": {
+    "parts": [
+      "stock"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

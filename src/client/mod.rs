@@ -11,6 +11,7 @@ pub mod debug_shots;
 pub mod devices;
 pub mod events;
 pub mod gallery;
+pub mod guns;
 pub mod hud;
 pub mod input;
 pub mod items_hud;
@@ -58,6 +59,7 @@ impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, robot_fx::RobotFxPlugin))
             .insert_resource(input::MouseCaptured(true))
+            .init_resource::<guns::GunModels>()
             .init_resource::<input::TuningOpen>()
             .init_resource::<menu::Menu>()
             .init_resource::<menu::ItemOps>()
@@ -117,6 +119,7 @@ impl Plugin for ClientPlugin {
                     animate::animate_avatars,
                     camera::update_camera,
                     viewmodel::pose_view_hands,
+                    guns::assemble_guns,
                     pickup_look::paint_weapons,
                     viewmodel::dress_view_hands,
                     render::update_dust,
@@ -163,6 +166,7 @@ impl Plugin for ClientPlugin {
                     hud::loadout_hud,
                     items_hud::pickup_card,
                     gallery::label_exhibits,
+                    gallery::label_armoury,
                     hud::hit_markers,
                     menu::menu,
                 )

@@ -1,0 +1,29 @@
+{
+  "name": "smg_barrel_short",
+  "kind": "weapon_part",
+  "brief": "SMG barrel, short: A stub barely past the receiver.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.06
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

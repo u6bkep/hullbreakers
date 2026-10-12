@@ -82,6 +82,11 @@ Recycler (every fourth shot is free) and Last word (the last round in the
 mag hits three times as hard). A gun's name is its maker, the maker's model
 (rarer guns have higher marks) and a word for one of its parts or perks:
 "Kessler KG-3 Longshot", "Hoshi Type II Hornet", "Corvid Scrap #4 Miser".
+A gun looks like what it rolled: it's drawn from its frame's receiver with
+each of its parts on (a long barrel is long, a drum is a drum, a quick mag
+is two taped together, a compensator is ported, a scope has a big objective
+bell), in its maker's paint, in your hands, your crewmates' and on pickups.
+The model gallery has racks of every part and a row of rolled guns.
 
 Robots drop things when destroyed (mostly ammo, sometimes a gun, better from
 tougher robots), and the enemy carrier has **loot crates** aboard, better

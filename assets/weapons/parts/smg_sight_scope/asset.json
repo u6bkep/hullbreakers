@@ -1,0 +1,19 @@
+{
+  "name": "smg_sight_scope",
+  "kind": "weapon_part",
+  "brief": "SMG sight, scope: A tube scope with a big objective bell.",
+  "palette": {
+    "paint_primary": "#c46c2c",
+    "emissive": "#6cedff"
+  },
+  "expect": {
+    "parts": [
+      "sight"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

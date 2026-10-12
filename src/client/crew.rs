@@ -3,7 +3,6 @@
 
 use bevy::gltf::GltfMaterialName;
 use bevy::prelude::*;
-use bevy::world_serialization::WorldAssetRoot;
 
 use super::render::Avatar;
 use super::viewmodel::{Held, held};
@@ -39,6 +38,7 @@ pub struct HeldModel;
 /// the helmet, and keeps each hand holding what the stance says.
 pub fn dress_crew(
     assets: Res<AssetServer>,
+    mut models: ResMut<super::guns::GunModels>,
     mut avatars: Query<(Entity, &Avatar, &mut CrewLook)>,
     players: Query<(&Player, Option<&DeckSlot>)>,
     children: Query<&Children>,
@@ -105,16 +105,8 @@ pub fn dress_crew(
                     commands.entity(child).despawn();
                 }
             }
-            if let Some(path) = item.and_then(Held::model) {
-                let mut model = commands.spawn((
-                    HeldModel,
-                    WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
-                    Transform::default(),
-                    ChildOf(socket),
-                ));
-                if let Some(paint) = item.and_then(Held::paint) {
-                    model.insert(super::pickup_look::WeaponPaint(paint));
-                }
+            if let Some(item) = item {
+                item.spawn(&mut commands, &mut models, &assets, (HeldModel, Transform::default(), ChildOf(socket)));
             }
             look.showing[hand] = item;
         }

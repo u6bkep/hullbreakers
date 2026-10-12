@@ -104,6 +104,21 @@ it.
   `asset_view` given several models draws them on the same spot, overlapping.
   Cost: a few iterations each.
 
+- 2026-10-12, weapon parts. Thirty-two part variants share their geometry, but a
+  `build.py` can't import a sibling module: Blender ignores `PYTHONPATH` and
+  `run_build.py` only puts `tools/assets` on the path. Each part's `build.py` adds its
+  parent directory to `sys.path` itself (`assets/weapons/parts/*/build.py`). Their
+  `asset.json`s are written by a script from one table (`make_parts.py`), since 32
+  hand-kept sidecars would drift. Cost: half an hour. The "bevel eats narrow steps"
+  warning came back on every barrel (collar and crown steps of 1.5–3 mm under a 2 mm
+  bevel); widened to 4 mm.
+
+## Our gallery (client/gallery.rs)
+
+- 2026-10-12. The gallery drew a socket gizmo for every `SOCKET_` node in the
+  scenario, so once it showed live robots and weapon racks, those were a thicket of
+  axes. Now only the model row's exhibits get them. Cost: one screenshot.
+
 ## Headless harness (system audio)
 
 - 2026-10-12. The harness's ALSA null config didn't stop the game playing

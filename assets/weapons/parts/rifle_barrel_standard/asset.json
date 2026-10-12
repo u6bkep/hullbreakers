@@ -1,0 +1,29 @@
+{
+  "name": "rifle_barrel_standard",
+  "kind": "weapon_part",
+  "brief": "Rifle barrel, standard: The issue barrel, crowned.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.118
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

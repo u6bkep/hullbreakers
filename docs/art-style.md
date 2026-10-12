@@ -66,6 +66,7 @@ asked for.
 | Kind | Triangles | Bevel width | Near | Detail size | Bevel segments |
 |---|---|---|---|---|---|
 | Handheld (weapon, tool) | 1k–4k | 2–4 mm | 0.3 m | 1 px = 0.4 mm | 1 |
+| Weapon part (a gun's barrel, magazine, stock, sight, muzzle device) | 40–1.2k | 1.5–4 mm | 0.3 m | 1 px = 0.4 mm | 1 |
 | Small robot or creature (≤ 1 m) | 2k–5k | 5–10 mm | 2 m | 2 px = 5.1 mm | 1 |
 | Large robot (2–4 m) | 3k–8k | 1–3 cm | 3 m | 2 px = 7.6 mm | 1 |
 | Prop, console, crate | 0.5k–3k | 5–20 mm | 1.5 m | 2 px = 3.8 mm | 1 |

@@ -1,0 +1,19 @@
+{
+  "name": "smg_mag_quick",
+  "kind": "weapon_part",
+  "brief": "SMG mag, quick: Two mags taped side by side, with a pull loop.",
+  "palette": {
+    "paint_secondary": "#3d4650",
+    "emissive": "#6cedff"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

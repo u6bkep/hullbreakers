@@ -1,0 +1,23 @@
+{
+  "name": "smg_receiver",
+  "kind": "handheld",
+  "brief": "The compact SMG's body, which its parts mount on: chunky painted receiver, dark polymer grip, trigger guard, a top rail, a magwell, a status strip down each side. Orange body, cyan lights. Barrel, magazine, stock and sight are separate part models (assets/weapons/parts).",
+  "palette": {
+    "paint_primary": "#c46c2c",
+    "emissive": "#6cedff"
+  },
+  "expect": {
+    "size": {"x": [0.04, 0.06], "y": [0.2, 0.24], "z": [0.27, 0.31]},
+    "parts": ["receiver", "grip", "trigger_guard", "sight_rail"],
+    "colliders": ["COL_body", "COL_grip"],
+    "sockets": {
+      "SOCKET_grip":   {"at": [0, 0, 0], "tol": 0.001},
+      "SOCKET_barrel": {"at": [0, 0.1, -0.162], "tol": 0.001},
+      "SOCKET_mag":    {"at": [0, 0.05, -0.105], "tol": 0.001},
+      "SOCKET_sight":  {"at": [0, 0.141, -0.005], "up": [0, 1, 0], "tol": 0.001},
+      "SOCKET_stock":  {"at": [0, 0.09, 0.128], "tol": 0.001},
+      "SOCKET_eject":  {"at": [0.025, 0.1, -0.05], "forward": [1, 0, 0]}
+    },
+    "tolerance": 0.01
+  }
+}

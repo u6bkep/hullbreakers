@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify a built asset against docs/art-style.md and its own asset.json.
 
-    python3 -I tools/assets/verify_glb.py assets/weapons/smg_frame
+    python3 -I tools/assets/verify_glb.py assets/weapons/smg_receiver
 
 Plain Python 3 stdlib; never needs Blender. Reads <dir>/asset.json, <dir>/<name>.glb and
 <dir>/<name>.intent.json (written by the build: which faces were modelled flat).

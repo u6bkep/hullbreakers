@@ -1,0 +1,31 @@
+{
+  "name": "smg_barrel_long",
+  "kind": "weapon_part",
+  "brief": "SMG barrel, long: A slim jacket run well out, vented along its top.",
+  "palette": {
+    "paint_primary": "#c46c2c"
+  },
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.292
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

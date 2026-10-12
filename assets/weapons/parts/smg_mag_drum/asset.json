@@ -1,0 +1,19 @@
+{
+  "name": "smg_mag_drum",
+  "kind": "weapon_part",
+  "brief": "SMG mag, drum: A short neck into a fat drum.",
+  "palette": {
+    "paint_primary": "#c46c2c",
+    "emissive": "#6cedff"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}
