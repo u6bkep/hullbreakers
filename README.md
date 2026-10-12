@@ -41,13 +41,21 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   carrier never goes down, shield or no shield. The board, a status line
   and a marker say what's out; press it back (a junction back to way 0).
   The more of the crew at home, the more goes wrong there, so it's a
-  second front; a ship left empty (a lone boarder) is rarely hit hard.
+  second front. A ship left empty (a lone boarder away) isn't knocked
+  about, and nothing is in the first 45 s. The carrier's crew is sized to
+  ours: alone, three walkers at the deepest posts (the upper corridor and
+  the bridge), one swarmer and no hull turrets, at threat 1; four players,
+  the full complement (seven walkers, six swarmers, three turrets). The fast way across is the rope: hook the carrier on a close
+  pass (the first is 30 s in, at 100 m) and reel.
 
-- **Grapple run**: ten gates strung through a cluster of rocks, from just
-  off our stern, out and back past our bow (about 430 m gate to gate). Fly
-  them in order before the clock (4 minutes) runs out; your next gate glows
-  cyan. No enemies: it's the grapple's show (the reel is far faster than the
-  jetpack). The board at the top keeps everyone's progress and times, and
+- **Grapple run**: ten gates on a switchback just off our stern, lanes 8 m
+  apart with a hairpin round a pylon at each lane's end, climbing a level
+  halfway and dropping back to the finish. Fly them in order, each the way
+  it faces (in by the side whose edges glow cyan), before the clock (4
+  minutes) runs out. No enemies: it's the grapple's show. Rope the pylon as
+  you come abreast of it and it swings you round at full speed; the jetpack
+  has to brake for every hairpin (a flown course: 24 s on the rope, 31 s on
+  the jetpack). The board at the top keeps everyone's progress and times, and
   the host remembers best times, the crew's and each runner's.
 
 - **Dead ship**: a dark derelict lies 22 m off our stern, its airlock facing
@@ -70,7 +78,10 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   amber on the pod, red when the air is nearly gone). Rope one and tow it
   into our hold; let go of the keys while towing and flight assist keeps
   station with what you tow instead of braking (so it doesn't run into
-  you). A survivor is light; the lifeboat is 600 kg, so a second rope on it
+  you; stop a tow with the brake, X, and early). A rope on a pod doesn't
+  snap when you set off and it goes taut. A pod anywhere at the hold's
+  mouth counts (caught on the door frame
+  or beside an engine pod, say): the survivors climb in. A survivor is light; the lifeboat is 600 kg, so a second rope on it
   nearly doubles the pull. Win with everyone accounted for and at least 4
   of the 8 home; alone you can't reach them all, so split up.
 

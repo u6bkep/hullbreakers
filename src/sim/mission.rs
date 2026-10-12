@@ -740,6 +740,7 @@ pub fn switch_scenario(
         tick: tick.0,
         asteroids: director.asteroids,
         robots: director.robots,
+        players: players.iter().count().max(1),
     });
     **mission = Mission {
         kind,

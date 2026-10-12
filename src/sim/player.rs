@@ -1703,6 +1703,16 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
         let along = (end.point - position).normalize_or_zero();
         (end.inverse_mass(along) > 1.0 / TOW_MAX_MASS).then(|| end.velocity())
     });
+    // A rope on a load light enough to tow doesn't snap when it's jerked
+    // taut: setting off from a slack rope at full thrust does that at once
+    // (17 m/s by the time 7 m of rope goes taut), and the rope then pulls at
+    // its limit instead, taking up the difference over a few ticks.
+    let light_load = player.grapple.filter(|g| !ctx.untowable.contains(&g.target)).is_some_and(|g| {
+        far_end(bodies, &g).is_some_and(|end| {
+            let along = (end.point - position).normalize_or_zero();
+            end.inverse_mass(along) > 1.0 / TOW_MAX_MASS
+        })
+    });
     let thrust_dv = if cmd.brake {
         (reference_velocity - velocity).clamp_length_max(t.brake_accel * ctx.dt)
     } else if player.flight_assist && !(swinging && input == Vec3::ZERO) {
@@ -1758,7 +1768,7 @@ fn eva_tick(ctx: &TickContext, bodies: &mut Bodies, player: &mut Player, cmd: &T
                 velocity += imp.direction * imp.magnitude * inverse_mass;
                 bodies.apply_impulse(end.body, -imp.direction * imp.magnitude, anchor_w);
                 // A force-limited winch saturating is normal; a rope is not.
-                snapped = imp.clamped && winch.is_none();
+                snapped = imp.clamped && winch.is_none() && !light_load;
             }
             player.grapple = if snapped {
                 player.emit(PlayerEvent::RopeSnapped);

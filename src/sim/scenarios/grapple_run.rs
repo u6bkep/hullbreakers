@@ -1,6 +1,8 @@
-//! The grapple run: ten gates strung through a cluster of rocks, from just
-//! off our stern out and back past our bow, against the clock. No enemies:
-//! it's the grapple's show. Everyone flies the gates in order; the board
+//! The grapple run: ten gates on a switchback just off our stern, a
+//! hairpin round a pylon after each, in a cluster of rocks, against the
+//! clock. Gates count only flown the way they face. No enemies: it's the
+//! grapple's show (a rope swings you round a hairpin at full speed; the
+//! jetpack has to brake for it). Everyone flies the gates in order; the board
 //! keeps each runner's progress and time. It's won when the whole crew is
 //! through the last gate, lost if the clock runs out first. Best times are
 //! kept for as long as the host runs.
@@ -46,7 +48,7 @@ pub const COURSE: &str = "course";
 pub const COURSE_AT: Vec3 = Vec3::new(0.0, 1.5, 32.0);
 /// How long the crew has (s).
 pub const TIME_LIMIT: f32 = 240.0;
-/// Rocks in the cluster, and how far from the line of gates they lie (m).
+/// Rocks in the cluster, and how far out from the course they lie (m).
 const ROCKS: usize = 240;
 const ROCK_SPREAD: f32 = 45.0;
 const ROCK_SEED: u64 = 0x6a7e_0005;
@@ -66,11 +68,22 @@ pub fn gates(design: &ShipDesign) -> Vec<usize> {
         .collect()
 }
 
-/// Where the cluster's rocks are (centre, radius): around the line of
-/// gates, clear of the gates themselves, of our ship, and of each other.
+/// Where the cluster's rocks are (centre, radius): around the course, in
+/// a shell outside the box its gates and pylons fill (the course is flown
+/// on its pylons; the rocks are the scenery, and anchors for a wide line),
+/// clear of our ship and of each other.
 pub fn rock_places() -> Vec<(Vec3, f32)> {
     let course = design(COURSE);
-    let line: Vec<Vec3> = gates(course).iter().map(|&i| COURSE_AT + course.devices[i].at).collect();
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for &i in &gates(course) {
+        let at = COURSE_AT + course.devices[i].at;
+        (lo, hi) = (lo.min(at), hi.max(at));
+    }
+    for b in &course.boxes {
+        (lo, hi) = (lo.min(COURSE_AT + b.center - b.size / 2.0), hi.max(COURSE_AT + b.center + b.size / 2.0));
+    }
+    // The gates' openings and frames, and room to swing wide.
+    let (lo, hi) = (lo - Vec3::splat(10.0), hi + Vec3::splat(10.0));
     let mut rng = ChaCha8Rng::seed_from_u64(ROCK_SEED);
     let mut placed: Vec<(Vec3, f32)> = Vec::new();
     // A rock reaches about twice its radius (its lobes and its noise).
@@ -79,19 +92,19 @@ pub fn rock_places() -> Vec<(Vec3, f32)> {
         if placed.len() == ROCKS {
             break;
         }
-        let leg = rng.random_range(0..line.len() - 1);
-        let on = line[leg].lerp(line[leg + 1], rng.random());
         // Mostly small rocks, a few big ones.
         let radius = 1.0 * 9.0f32.powf(rng.random::<f32>().powi(2));
-        let dir = loop {
-            let v = Vec3::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0));
-            if (1e-3..=1.0).contains(&v.length_squared()) {
-                break v.normalize();
-            }
-        };
-        let at = on + dir * rng.random_range(radius * REACH + 4.0..ROCK_SPREAD);
-        let clear_of = |p: Vec3, keep: f32| p.distance(at) > radius * REACH + keep;
-        if !line.iter().all(|&g| clear_of(g, 9.0)) || !clear_of(Vec3::ZERO, 24.0) {
+        let at = Vec3::new(
+            rng.random_range(lo.x - ROCK_SPREAD..hi.x + ROCK_SPREAD),
+            rng.random_range(lo.y - ROCK_SPREAD..hi.y + ROCK_SPREAD),
+            rng.random_range(lo.z - ROCK_SPREAD..hi.z + ROCK_SPREAD),
+        );
+        // Outside the course's box by its reach.
+        let outside = (lo - at).max(at - hi).max_element();
+        if outside < radius * REACH {
+            continue;
+        }
+        if at.distance(Vec3::ZERO) < radius * REACH + 40.0 {
             continue;
         }
         if placed.iter().any(|&(p, r)| p.distance(at) < (r + radius) * REACH + 1.0) {

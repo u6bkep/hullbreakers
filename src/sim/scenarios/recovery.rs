@@ -258,7 +258,7 @@ fn recover(
         if !underway || pod.state != PodState::Adrift {
             continue;
         }
-        if in_hold(ship.point_to_local(at.0)) {
+        if at_the_hold(ship.point_to_local(at.0)) {
             rescue.home.insert(pod.index, pod.kind);
             let crew: Vec<Entity> = rescue.towed.get(&pod.index).map(|s| s.iter().copied().collect()).unwrap_or_default();
             let by: Vec<String> = crew.iter().map(|&e| name(e)).collect();
@@ -316,4 +316,17 @@ fn recover(
         Phase::Lost => "Rescue failed".to_string(),
     };
     Mission::show(&mut mission, objective, status, markers);
+}
+
+/// The mouth of our hold: from the engine pods' fronts to 8 m astern of
+/// the cargo door, as wide as the pods and a little over and under (ship
+/// coordinates). A pod swinging on its rope catches the door frame or wedges
+/// beside a pod as often as it goes straight in.
+const MOUTH_LO: Vec3 = Vec3::new(-6.5, -1.5, 7.0);
+const MOUTH_HI: Vec3 = Vec3::new(6.5, 4.0, 23.0);
+
+/// Whether a pod at `local` (our ship's coordinates) is home: in the hold,
+/// or anywhere at its mouth, from where the survivors climb in.
+pub fn at_the_hold(local: Vec3) -> bool {
+    in_hold(local) || (local.cmpge(MOUTH_LO).all() && local.cmple(MOUTH_HI).all())
 }

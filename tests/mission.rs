@@ -444,12 +444,20 @@ fn the_carriers_ramp_leads_to_the_upper_deck() {
     panic!("never reached the upper deck: {:?}", player(&mut app).mode);
 }
 
-/// The carrier's robots stand at their posts on its decks.
+/// The carrier's robots stand at their posts on its decks (all seven
+/// walkers', with a crew of four to face them).
 #[test]
 fn the_carriers_gunners_stand_at_their_posts() {
+    use hullbreakers::sim::player::new_player;
     let mut app = app();
     app.world_mut().resource_mut::<Director>().robots = true;
-    start_boarding(&mut app);
+    let ship = home(&mut app);
+    for slot in 1..4 {
+        let tuning = Tuning::default();
+        app.world_mut().spawn((new_player(ship, slot), Vitals::full(&tuning)));
+    }
+    ticks(&mut app, 2);
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
     ticks(&mut app, 120);
     let world = app.world_mut();
     let gunners: Vec<Mode> = world
@@ -463,7 +471,7 @@ fn the_carriers_gunners_stand_at_their_posts() {
             p.mode
         })
         .collect();
-    let crew: Vec<_> = world.query_filtered::<&Player, Without<Robot>>().single(world).unwrap().events.iter().collect();
+    let crew: Vec<_> = world.query_filtered::<&Player, Without<Robot>>().iter(world).flat_map(|p| p.events.iter().collect::<Vec<_>>()).collect();
     eprintln!("crew events: {crew:?}");
     assert_eq!(gunners.len(), 7);
     for mode in gunners {
@@ -986,6 +994,31 @@ fn a_straight_tow_brings_a_survivor_home() {
     panic!("never got the survivor home: {:?}", player(&mut app).mode);
 }
 
+/// A pod brought to the hold's mouth is home, even caught on the door frame
+/// or wedged beside an engine pod (as one swinging on a rope often is); one
+/// left farther astern isn't.
+#[test]
+fn a_pod_at_the_hold_mouth_is_home() {
+    let home_at = |local: Vec3| {
+        let mut app = app();
+        start(&mut app, ScenarioKind::Recovery);
+        let ship = home(&mut app);
+        let (pod, _) = pods(&mut app)[0];
+        let at = frame(&mut app, ship).point_to_world(local);
+        app.world_mut().get_mut::<Position>(pod).unwrap().0 = at;
+        app.world_mut().get_mut::<LinearVelocity>(pod).unwrap().0 = Vec3::ZERO;
+        app.world_mut().get_mut::<AngularVelocity>(pod).unwrap().0 = Vec3::ZERO;
+        ticks(&mut app, 3);
+        mission(&mut app).report.iter().any(|l| l.starts_with("Survivor A home"))
+    };
+    // Against the door frame, astern of the door, wedged by the starboard
+    // engine pod.
+    for local in [Vec3::new(2.4, 1.2, 15.6), Vec3::new(0.0, 1.0, 21.0), Vec3::new(4.7, -0.2, 8.0)] {
+        assert!(home_at(local), "a pod at {local} (ship coordinates) wasn't home");
+    }
+    assert!(!home_at(Vec3::new(0.0, 1.0, 30.0)), "a pod 15 m astern of the door was home");
+}
+
 /// The lifeboat is heavy: two ropes on it pull it about twice as fast as
 /// one.
 #[test]
@@ -1059,8 +1092,9 @@ fn a_hit_knocks_out_our_power_and_someone_resets_it() {
     start_boarding(&mut app);
     let ship = home(&mut app);
     let mut waited = 0;
+    // Nothing's knocked out in the first 45 s.
     while knocked_out(&mut app, ship).is_empty() {
-        assert!(waited < 20 * 60, "no hit knocked anything out in 20 s");
+        assert!(waited < 65 * 60, "no hit knocked anything out in 65 s");
         ticks(&mut app, 1);
         waited += 1;
     }
