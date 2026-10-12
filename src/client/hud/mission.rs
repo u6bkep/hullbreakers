@@ -39,6 +39,7 @@ pub fn mission_hud(
     fx: Res<CameraFx>,
     missions: Query<&Mission>,
     ships: Query<(&Combatant, Has<HomeShip>)>,
+    mut memory: ResMut<super::HudMemory>,
     // Eased hull bars: ours, theirs.
     mut shown: Local<(f32, f32)>,
 ) -> Result {
@@ -84,6 +85,7 @@ pub fn mission_hud(
         let height = 12.0 + bars_h + 26.0 + status_h + if status_g.is_empty() { 4.0 } else { 10.0 };
         let plate = Rect::from_min_size(pos2(screen.center().x - width / 2.0, screen.min.y + EDGE * 0.6), vec2(width, height));
         style::plate(&painter, plate, OBJECTIVE, 1.0);
+        memory.mission_strip = Some(plate);
         let mut y = plate.min.y + 10.0;
 
         if fight {

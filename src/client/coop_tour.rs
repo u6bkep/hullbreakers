@@ -1,0 +1,304 @@
+//! A co-op smoke test's host side (debug): `HULLBREAKERS_COOP_TOUR=<dir>`
+//! on the host walks the first *remote* crew member through each
+//! scenario's set pieces, putting them where something can be tried (the
+//! locker, a crate, a fight, the console, a junction, a gate, a pod, the
+//! zoo) and setting what the step needs (a death, guns). The tester drives
+//! the client's own input (press, fire, reel) from outside, and follows
+//! along by `<dir>/step`, which holds the current step's number and name,
+//! and lets the tour go on by writing that number to `<dir>/ack`.
+//! It's the authority that moves them, so each step is also a hard
+//! correction for the client's prediction to take.
+
+use bevy::prelude::*;
+
+use super::LocalPlayer;
+use crate::sim::bots::{Affix, Affixes, Robot};
+use crate::sim::mission::{Director, Mission, ScenarioKind};
+use crate::sim::pickups::{Pickup, PickupKind};
+use crate::sim::player::{Grapple, Mode, Player};
+use crate::sim::scenarios::boarding::CARRIER;
+use crate::sim::scenarios::dead_ship::DERELICT;
+use crate::sim::scenarios::grapple_run::COURSE;
+use crate::sim::scenarios::recovery::Pod;
+use crate::sim::ship::{HOME, ShipHull};
+use crate::sim::vitals::Vitals;
+
+#[derive(Resource)]
+pub struct CoopTour {
+    dir: std::path::PathBuf,
+    next: usize,
+    /// Seconds into the current step.
+    timer: f32,
+    /// The current step's set-up is done.
+    placed: bool,
+}
+
+pub fn coop_tour_from_env() -> Option<CoopTour> {
+    let dir = std::env::var_os("HULLBREAKERS_COOP_TOUR")?;
+    Some(CoopTour {
+        dir: dir.into(),
+        next: 0,
+        timer: 0.0,
+        placed: false,
+    })
+}
+
+/// Where a step puts the client.
+#[derive(Clone, Copy)]
+enum Place {
+    /// Leave them be.
+    Stay,
+    /// Booted on `ship`'s deck.
+    Booted { ship: &'static str, feet: Vec3, forward: Vec3, pitch: f32 },
+    /// In EVA at `offset` from `ship`, looking at `look_at`, drifting.
+    Eva { ship: &'static str, offset: Vec3, look_at: Vec3, drift: Vec3 },
+    /// Facing the kit they left, from a step away.
+    Kit,
+    /// In EVA by the first pod, roped to it.
+    Pod,
+    /// In EVA a few metres in front of the gallery's `kind` with `affix`,
+    /// facing it.
+    Robot { kind: Robot, affix: Affix },
+}
+
+/// What else a step does.
+#[derive(Clone, Copy, PartialEq)]
+enum Do {
+    Nothing,
+    Arm,
+    Kill,
+}
+
+struct Step {
+    name: &'static str,
+    scenario: ScenarioKind,
+    place: Place,
+    action: Do,
+    seconds: f32,
+}
+
+fn upper() -> f32 {
+    ShipHull::new(CARRIER).design().marker("upper_deck").y
+}
+
+fn steps() -> Vec<Step> {
+    use ScenarioKind::*;
+    let booted = |ship, feet, forward, pitch| Place::Booted { ship, feet, forward, pitch };
+    let step = |name, scenario, place, action, seconds| Step { name, scenario, place, action, seconds };
+    let up = upper();
+    vec![
+        step("field_idle", Field, Place::Stay, Do::Nothing, 8.0),
+        step("boarding_locker", Boarding, booted(HOME, Vec3::new(2.4, 0.01, 9.0), Vec3::X, -0.05), Do::Nothing, 6.0),
+        // Dies with the guns on (from the locker): the kit is on our deck.
+        step("boarding_die", Boarding, Place::Stay, Do::Kill, 5.0),
+        step("boarding_kit", Boarding, Place::Kit, Do::Nothing, 6.0),
+        step("boarding_crate", Boarding, booted(CARRIER, Vec3::new(3.4, up + 0.01, -27.4), Vec3::new(1.0, 0.0, -1.0), -0.7), Do::Nothing, 6.0),
+        step("boarding_fight", Boarding, booted(CARRIER, Vec3::new(0.0, up + 0.01, 10.0), Vec3::NEG_Z, 0.0), Do::Arm, 10.0),
+        step("boarding_console", Boarding, booted(CARRIER, Vec3::new(0.0, up + 0.01, -25.6), Vec3::NEG_Z, -0.38), Do::Nothing, 22.0),
+        step("derelict_reactor", DeadShip, booted(DERELICT, Vec3::new(2.4, 0.01, 10.0), Vec3::X, -0.35), Do::Nothing, 6.0),
+        step("derelict_junction", DeadShip, booted(DERELICT, Vec3::new(5.7, 0.01, 1.0), Vec3::X, -0.25), Do::Nothing, 6.0),
+        step(
+            "run_gate",
+            GrappleRun,
+            Place::Eva {
+                ship: COURSE,
+                offset: Vec3::new(0.286, 0.103, 0.953) * -8.0,
+                look_at: Vec3::ZERO,
+                drift: Vec3::new(0.286, 0.103, 0.953) * 5.0,
+            },
+            Do::Nothing,
+            8.0,
+        ),
+        step("recovery_tow", Recovery, Place::Pod, Do::Nothing, 10.0),
+        step(
+            "gallery_zoo",
+            Gallery,
+            Place::Eva {
+                ship: HOME,
+                offset: Vec3::new(0.0, -1.0, 36.0),
+                look_at: Vec3::new(0.0, -1.5, 27.0),
+                drift: Vec3::ZERO,
+            },
+            Do::Arm,
+            6.0,
+        ),
+        step("gallery_shielded", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Shielded }, Do::Arm, 6.0),
+        step("gallery_armoured", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Armoured }, Do::Arm, 6.0),
+        step("gallery_volatile", Gallery, Place::Robot { kind: Robot::Gunner, affix: Affix::Volatile }, Do::Arm, 6.0),
+    ]
+}
+
+/// Seconds after a scenario switch before the step's set-up, so the world
+/// has arrived on the client.
+const ARRIVE_SECONDS: f32 = 4.0;
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_coop_tour(
+    time: Res<Time>,
+    mut tour: ResMut<CoopTour>,
+    mut director: ResMut<Director>,
+    missions: Query<&Mission>,
+    mut crew: Query<(&mut Player, &mut Vitals), (Without<LocalPlayer>, Without<Robot>)>,
+    ships: Query<(Entity, &Transform, &ShipHull)>,
+    pickups: Query<(&Pickup, &Transform)>,
+    pods: Query<(Entity, &Pod, &Transform)>,
+    robots: Query<(&Robot, &Affixes, &Player), Without<LocalPlayer>>,
+    mut died_at: Local<Option<Vec3>>,
+) {
+    let steps = steps();
+    let Some(step) = steps.get(tour.next) else {
+        return;
+    };
+    let Ok(mission) = missions.single() else { return };
+    // Wait for the client.
+    let Some((mut player, mut vitals)) = crew.iter_mut().next() else {
+        return;
+    };
+    if mission.kind != step.scenario {
+        director.start(step.scenario);
+        tour.timer = -ARRIVE_SECONDS;
+        return;
+    }
+    tour.timer += time.delta_secs();
+    if tour.timer < 0.0 {
+        return;
+    }
+    if !tour.placed {
+        tour.placed = true;
+        let ship = |id: &str| ships.iter().find(|(.., h)| h.0 == id).map(|(e, t, _)| (e, *t));
+        match step.place {
+            Place::Stay => {}
+            Place::Booted { ship: id, feet, forward, pitch } => {
+                if let Some((body, _)) = ship(id) {
+                    let up = Vec3::Y;
+                    let right = forward.cross(up).normalize();
+                    let forward = up.cross(right);
+                    player.mode = Mode::Booted {
+                        body,
+                        feet,
+                        up,
+                        velocity: Vec3::ZERO,
+                        orientation: Quat::from_mat3(&Mat3::from_cols(right, up, -forward)),
+                        pitch,
+                    };
+                    player.grapple = None;
+                }
+            }
+            Place::Eva { ship: id, offset, look_at, drift } => {
+                if let Some((_, t)) = ship(id) {
+                    let position = t.transform_point(offset);
+                    player.mode = Mode::Eva {
+                        position,
+                        velocity: t.rotation * drift,
+                        orientation: Transform::from_translation(position).looking_at(t.transform_point(look_at), t.up()).rotation,
+                        pitch: 0.0,
+                    };
+                    player.grapple = None;
+                    player.flight_assist = drift == Vec3::ZERO;
+                }
+            }
+            Place::Kit => {
+                let kit = died_at.and_then(|at| {
+                    pickups
+                        .iter()
+                        .filter(|(p, _)| p.kind == PickupKind::Dropped)
+                        .min_by(|a, b| a.1.translation.distance(at).total_cmp(&b.1.translation.distance(at)))
+                });
+                match kit {
+                    // On a deck: a step aft of it, looking down at it.
+                    Some((case, _)) if case.body.is_some() => {
+                        player.mode = Mode::Booted {
+                            body: case.body.unwrap(),
+                            feet: case.at - Vec3::Y * 0.19 + Vec3::Z * 1.3,
+                            up: Vec3::Y,
+                            velocity: Vec3::ZERO,
+                            orientation: Quat::IDENTITY,
+                            pitch: -0.75,
+                        };
+                    }
+                    // Adrift: beside it, drifting with it.
+                    Some((case, t)) => {
+                        let position = t.translation + Vec3::new(0.0, 0.3, 1.6);
+                        player.mode = Mode::Eva {
+                            position,
+                            velocity: case.velocity,
+                            orientation: Transform::from_translation(position).looking_at(t.translation, Vec3::Y).rotation,
+                            pitch: 0.0,
+                        };
+                        player.flight_assist = false;
+                    }
+                    None => {}
+                }
+            }
+            Place::Robot { kind, affix } => {
+                // The zoo's robots float in EVA.
+                let found = robots.iter().find_map(|(k, a, p)| match p.mode {
+                    Mode::Eva { position, .. } if *k == kind && a.has(affix) => Some(position),
+                    _ => None,
+                });
+                if let Some(target) = found {
+                    let position = target + Vec3::new(0.0, 0.0, 6.0);
+                    player.mode = Mode::Eva {
+                        position,
+                        velocity: Vec3::ZERO,
+                        orientation: Transform::from_translation(position).looking_at(target, Vec3::Y).rotation,
+                        pitch: 0.0,
+                    };
+                    player.grapple = None;
+                    player.flight_assist = true;
+                }
+            }
+            Place::Pod => {
+                if let Some((pod, _, t)) = pods.iter().min_by_key(|(_, p, _)| p.index) {
+                    let position = t.translation + Vec3::new(-6.0, 2.0, 4.0);
+                    player.mode = Mode::Eva {
+                        position,
+                        velocity: Vec3::ZERO,
+                        orientation: Transform::from_translation(position).looking_at(t.translation, Vec3::Y).rotation,
+                        pitch: 0.0,
+                    };
+                    player.grapple = Some(Grapple {
+                        target: pod,
+                        anchor: Vec3::ZERO,
+                        length: position.distance(t.translation),
+                        tension: 0.0,
+                    });
+                }
+            }
+        }
+        match step.action {
+            Do::Nothing => {}
+            Do::Arm => {
+                player.loadout.restock();
+                player.loadout.current = 0;
+            }
+            Do::Kill => {
+                // Where they fell, to find their kit by.
+                let frame = player.mode.body().and_then(|b| ships.get(b).ok().map(|(_, t, _)| *t));
+                *died_at = Some(match (player.mode, frame) {
+                    (Mode::Booted { feet, .. }, Some(t)) => t.transform_point(feet),
+                    (Mode::Eva { position, .. }, _) => position,
+                    _ => Vec3::ZERO,
+                });
+                vitals.health = 0.0;
+                vitals.since_hurt = 0.0;
+            }
+        }
+        let _ = std::fs::write(tour.dir.join("step"), format!("{} {}\n", tour.next, step.name));
+        info!("coop tour: {}", step.name);
+    }
+    // On to the next once the step's time is up and the tester is done
+    // with it (it writes the step's number to `<dir>/ack`).
+    let acked = std::fs::read_to_string(tour.dir.join("ack"))
+        .ok()
+        .and_then(|a| a.trim().parse::<usize>().ok())
+        .is_some_and(|a| a >= tour.next);
+    if tour.timer >= step.seconds && acked {
+        tour.next += 1;
+        tour.timer = 0.0;
+        tour.placed = false;
+        if tour.next == steps.len() {
+            let _ = std::fs::write(tour.dir.join("step"), format!("{} done\n", tour.next));
+        }
+    }
+}

@@ -492,3 +492,26 @@ fn markers_find_their_bodies_on_clients() {
     let slot = world.query_filtered::<&DeckSlot, With<LocalPlayer>>().single(world).unwrap().0;
     assert_eq!(marker.player, Some(slot));
 }
+
+/// A death is the authority's alone. One where the respawn puts you back
+/// where you stood, with nothing on you, changes nothing else a client
+/// predicts; it must still reach the client's log (its HUD and camera show
+/// it from there).
+#[test]
+fn a_death_where_you_stand_reaches_the_client() {
+    use hullbreakers::sim::events::PlayerEvent;
+    use hullbreakers::sim::vitals::Vitals;
+    let (_guard, mut s) = session(100);
+    s.step(60);
+    let world = s.server.world_mut();
+    let mut vitals = world.query_filtered::<&mut Vitals, With<Player>>().single_mut(world).unwrap();
+    vitals.health = 0.0;
+    vitals.since_hurt = 0.0;
+    let mut seen = false;
+    for _ in 0..60 {
+        s.step(1);
+        seen |= s.local_player().unwrap().events.iter().any(|(_, e)| e == PlayerEvent::Died);
+    }
+    assert!(s.server_player().events.iter().any(|(_, e)| e == PlayerEvent::Died), "the server never killed them");
+    assert!(seen, "the client never heard it died");
+}
