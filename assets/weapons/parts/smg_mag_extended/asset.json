@@ -1,0 +1,18 @@
+{
+  "name": "smg_mag_extended",
+  "kind": "weapon_part",
+  "brief": "SMG mag, extended: Nearly twice as long, raked forward.",
+  "palette": {
+    "emissive": "#6cedff"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

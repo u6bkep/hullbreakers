@@ -1,0 +1,19 @@
+{
+  "name": "rifle_sight_scope",
+  "kind": "weapon_part",
+  "brief": "Rifle sight, scope: A tube scope with a big objective bell.",
+  "palette": {
+    "paint_primary": "#d6cfba",
+    "emissive": "#c2ff4d"
+  },
+  "expect": {
+    "parts": [
+      "sight"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

@@ -63,10 +63,10 @@ tools/assets/
    - `expect.parts` / `expect.colliders` must exist.
    - Unknown keys anywhere in `asset.json` (a typo such as `foward`) are errors, not ignored.
 
-3. **`build.py`.** See the API below and `assets/weapons/smg_frame/build.py` (60 lines).
+3. **`build.py`.** See the API below and `assets/weapons/smg_receiver/build.py` (60 lines).
    Sketch the side outline on paper in Bevy coordinates first: forward is **−Z**.
 
-4. **Build and verify:** `tools/assets/build weapons/smg_frame` (the path is relative to
+4. **Build and verify:** `tools/assets/build weapons/smg_receiver` (the path is relative to
    `assets/`). It deletes the old outputs, runs the script in Blender, renders four
    previews, then runs the verifier. The build prints each part's triangles, the total,
    and how many bevels fell under the detail size and how many buried edges went
@@ -85,7 +85,7 @@ tools/assets/
 
    ```sh
    cargo build --bin asset_view
-   tools/hl start && HL_BIN=asset_view tools/hl game <out_dir> weapons/smg_frame/smg_frame.glb
+   tools/hl start && HL_BIN=asset_view tools/hl game <out_dir> weapons/smg_receiver/smg_receiver.glb
    ```
 
    Model paths are relative to `assets/`; pass several to see them side by side. `out_dir`
@@ -95,6 +95,24 @@ tools/assets/
    If a model is a black blob from the shadow side, fix its emissives or value contrast.
 
 7. **Commit** `asset.json`, `build.py`, `<name>.glb` and `<name>.intent.json` together.
+
+## Weapons: a receiver and its parts
+
+A crew gun is put together at runtime (`src/client/guns.rs`) from its frame's
+receiver (`assets/weapons/<frame>_receiver`: the body, grip and furniture, with a
+`SOCKET_barrel`, `SOCKET_mag`, `SOCKET_stock` and `SOCKET_sight`) and one part per slot
+(`assets/weapons/parts/<frame>_<slot>_<variant>`), each part's origin at the socket it
+mounts on; a muzzle device mounts on the barrel's `SOCKET_muzzle`. The variants are
+the part enums in `src/sim/items.rs`; which file is which is in `guns.rs`, and a test
+checks every variant has its model and sockets.
+
+The part assets share their geometry: each `build.py` is three lines handing over to
+`assets/weapons/parts/gunparts.py`, where a slot's variants are drawn side by side, and
+`make_parts.py` writes their `asset.json`s from one table (briefs, the palette roles
+each paints, the barrels' muzzle sockets). To change a part, edit `gunparts.py`; to add
+one, add it to the table, run `python3 -I assets/weapons/parts/make_parts.py`, and
+build. Parts are kind `weapon_part`. Their paint roles are what a maker's paint job
+recolours (`paint_primary`, `paint_secondary`); the rest stays metal and polymer.
 
 ## Ships: built on a collision layout
 

@@ -9,14 +9,12 @@
 //! Paint: a model under a [`WeaponPaint`] has its `paint_primary` and
 //! `paint_secondary` materials recoloured, once they've loaded (the held
 //! gun in first person, crewmates' guns, and the guns on pickups).
-//! Part models are wave 4; until then a weapon is its frame's model in its
-//! paint.
+//! A pickup's gun is put together from its parts (see `guns`).
 
 use bevy::gltf::GltfMaterialName;
 use bevy::prelude::*;
-use bevy::world_serialization::WorldAssetRoot;
 
-use super::viewmodel::frame_model;
+use super::guns::{GunLook, GunModels, spawn_gun};
 use crate::sim::items::{Item, Paint, Rarity, Weapon};
 use crate::sim::pickups::{CRATE_HALF, PICKUP_HALF, Pickup, PickupKind};
 
@@ -147,6 +145,7 @@ pub fn draw_pickups(
     mut commands: Commands,
     look: Res<PickupLook>,
     assets: Res<AssetServer>,
+    mut models: ResMut<GunModels>,
     time: Res<Time>,
     tick: Res<crate::sim::SimTick>,
     bodies: Query<&Transform, (Without<Pickup>, Without<Showcase>)>,
@@ -209,32 +208,26 @@ pub fn draw_pickups(
             Transform::from_xyz(0.0, if crate_kind { half.y * 0.4 } else { 0.0 }, 0.0),
             ChildOf(entity),
         ));
-        if let Some(weapon) = wanted.showcase
-            && let Some(path) = frame_model(weapon.frame)
-        {
+        if let Some(weapon) = wanted.showcase {
             // Upright on the lid, turning: grip at the bottom, the gun's
             // middle over the lid's.
-            let mut gun = commands.spawn((
-                PickupPart,
-                Showcase,
-                Transform::from_xyz(0.0, half.y + 0.04, 0.0).with_rotation(spin),
-                Visibility::default(),
-                ChildOf(entity),
-            ));
+            let showcase = commands
+                .spawn((
+                    PickupPart,
+                    Showcase,
+                    Transform::from_xyz(0.0, half.y + 0.04, 0.0).with_rotation(spin),
+                    Visibility::default(),
+                    ChildOf(entity),
+                ))
+                .id();
             let length = if weapon.frame == crate::sim::weapons::GunKind::Rifle { 0.8 } else { 0.4 };
-            let mut model = None;
-            gun.with_children(|gun| {
-                model = Some(
-                    gun.spawn((
-                        WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
-                        Transform::from_xyz(0.0, 0.0, length * 0.35),
-                    ))
-                    .id(),
-                );
-            });
-            if let (Some(model), true) = (model, weapon.rarity != Rarity::Standard) {
-                commands.entity(model).insert(WeaponPaint(weapon.look().paint));
-            }
+            spawn_gun(
+                &mut commands,
+                &mut models,
+                &assets,
+                GunLook::of(&weapon),
+                (Transform::from_xyz(0.0, 0.0, length * 0.35), ChildOf(showcase)),
+            );
         }
         commands.entity(entity).insert(wanted);
     }

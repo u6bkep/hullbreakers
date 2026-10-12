@@ -1,0 +1,31 @@
+{
+  "name": "rifle_barrel_long",
+  "kind": "weapon_part",
+  "brief": "Rifle barrel, long: Long and thin, with a gas block.",
+  "palette": {
+    "paint_primary": "#d6cfba"
+  },
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.315
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

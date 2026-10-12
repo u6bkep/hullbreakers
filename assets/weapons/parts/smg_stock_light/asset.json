@@ -1,0 +1,16 @@
+{
+  "name": "smg_stock_light",
+  "kind": "weapon_part",
+  "brief": "SMG stock, light: An end cap with a sling loop: next to no stock.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "stock"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

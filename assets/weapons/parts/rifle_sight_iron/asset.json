@@ -1,0 +1,16 @@
+{
+  "name": "rifle_sight_iron",
+  "kind": "weapon_part",
+  "brief": "Rifle sight, iron: A notched rear sight and a front post with ears.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "sight"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}
