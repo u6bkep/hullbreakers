@@ -523,15 +523,33 @@ impl NavGrid {
 }
 
 /// Authority: each ship design's grid, baked the first time a walker
-/// needs it.
+/// needs it, for each state of its doors and bridges it's needed in (which
+/// of its devices are solid just now: shut doors block the way, extended
+/// bridges are floor; see `devices::DoorsBuilt`). A state is baked once and
+/// kept, so a door opening and shutting costs one bake each way.
 #[derive(Resource, Default)]
-pub struct NavGrids(HashMap<String, NavGrid>);
+pub struct NavGrids(HashMap<(String, Vec<bool>), NavGrid>);
 
 impl NavGrids {
-    pub fn get(&mut self, id: &str) -> &NavGrid {
-        self.0.entry(id.to_string()).or_insert_with(|| {
-            let grid = NavGrid::for_design(design(id));
-            info!("nav: {id} has {} standing places", grid.len());
+    /// The grid of design `id` with the devices marked in `solid` (by
+    /// index, as `DoorsBuilt` has them) in its way or underfoot; `None` for
+    /// the design as built.
+    pub fn get(&mut self, id: &str, solid: Option<&[bool]>) -> &NavGrid {
+        let solid = solid.map(|s| s.to_vec()).unwrap_or_default();
+        self.0.entry((id.to_string(), solid)).or_insert_with_key(|(id, solid)| {
+            let ship = design(id);
+            let mut boxes = ship.boxes.clone();
+            boxes.extend(ship.devices.iter().zip(solid).filter(|(_, s)| **s).filter_map(|(d, _)| match d.kind {
+                super::devices::DeviceKind::Door { size, .. } | super::devices::DeviceKind::Bridge { size } => Some(super::design::HullBox {
+                    center: d.at,
+                    size,
+                    rotation: Quat::IDENTITY,
+                    material: super::SimMaterial::Hull,
+                }),
+                _ => None,
+            }));
+            let grid = NavGrid::for_boxes(&boxes);
+            info!("nav: {id} has {} standing places (with {} devices in place)", grid.len(), solid.iter().filter(|s| **s).count());
             grid
         })
     }

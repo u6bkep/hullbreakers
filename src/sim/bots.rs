@@ -480,7 +480,7 @@ pub fn think(
     bodies: Bodies,
     spatial: SpatialQuery,
     everyone: Query<CrewQuery>,
-    hulls: Query<&ShipHull>,
+    hulls: Query<(&ShipHull, Option<&super::devices::DoorsBuilt>)>,
     mut grids: ResMut<NavGrids>,
     mut damage: MessageReader<Damage>,
     mut robots: Query<RobotQuery>,
@@ -721,7 +721,11 @@ pub fn think(
                 };
                 // Walking a route: the grid of the ship underfoot, if that's
                 // its home (routes are in its home's frame).
-                let grid = (on == brain.home).then(|| hulls.get(on).ok()).flatten().map(|h| grids.get(&h.0));
+                // (As its doors and bridges are just now.)
+                let grid = (on == brain.home)
+                    .then(|| hulls.get(on).ok())
+                    .flatten()
+                    .map(|(h, built)| grids.get(&h.0, built.map(|b| b.0.as_slice())));
                 let walk = match goal {
                     None => {
                         // Fighting where it stands: the route is history.
