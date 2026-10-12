@@ -36,6 +36,18 @@ it.
 
 ## Our fauna (sim/fauna.rs)
 
+- 2026-10-12, merging wave 4's weapons. Shots settle "living" targets from
+  players only, so a grazer (health, but a body) was pushed and never hurt;
+  and plasma splash measures to a target's middle, right for a crew capsule
+  but not a 3 m grazer (a burst 1.5 m off its bell was 3 m from its
+  middle). Targets now include creature bodies (no side: everyone's shots
+  hit them; pushed as bodies, not shoved as players), and splash reaches a
+  body's nearest surface (`src/sim/shots.rs`). Cost: one failed test.
+- 2026-10-12. Code-drawn colours escape the asset verifier's magenta rule:
+  the limpet's tendril was drawn pink and a dead grazer's spores
+  heart-magenta, both breaking "magenta means shoot here". Fixed by hand;
+  nothing checks code colours. Cost: caught in review of screenshots.
+
 - 2026-10-12. A grazer may change its motion only in its pulses (so the
   network sends nothing between them), and its jet pushes only bell
   first. Steered that way (turning toward where it wants to go, pushing
@@ -116,6 +128,19 @@ it.
   nothing. Worked around with `mkdir -p` first. Cost: one run (~1 min).
   (`src/client/debug_shots.rs`; not fixed.)
 
+## Our netcode (net/mod.rs)
+
+- 2026-10-12. A death where the respawn puts you back where you stood
+  (killed at your deck spot, carrying nothing) never reached the client:
+  the client only takes the authority's `Player` on a rollback, and
+  `player_diverged` saw nothing to roll back for, so the authority-only
+  `Died` stayed out of the client's log (no SUIT FAILURE, no fade). Found
+  in the live co-op smoke test. Fix: a death in the confirmed log that the
+  prediction lacks is a divergence (`died_unpredicted`; test
+  `a_death_where_you_stand_reaches_the_client`). Cost: an hour. Pattern to
+  watch: any other authority-only event that changes nothing predicted
+  would be lost the same way.
+
 ## Bevy rendering
 
 - 2026-10-12. We wanted the headlamp not to light the player's own arms.
@@ -179,6 +204,17 @@ it.
   hand-kept sidecars would drift. Cost: half an hour. The "bevel eats narrow steps"
   warning came back on every barrel (collar and crown steps of 1.5–3 mm under a 2 mm
   bevel); widened to 4 mm.
+- 2026-10-12, wave 4 guns (shotgun, sniper, six family emitters; 40 assets).
+  There's no way to see an assembled gun outside the game: the previews show
+  each part alone, so overall length and fit took a throwaway Blender script
+  that hangs part .glbs on a receiver's sockets and renders orthographic views
+  (kept at `/tmp/hbcompose/compose.py` during the work; worth bringing in-tree
+  as `tools/assets/compose`). The "flat planes have no triangles left"
+  warning still doesn't name the plane (every case was a 2–3 mm crown step
+  under a 1.5 mm bevel). Lathe end caps sit flush where a lens goes, so glass
+  must stand proud of the cap to show. `paint_secondary` tape on a near-black
+  secondary paint vanishes: the quick mags use `paint_primary`. Cost: a few
+  hours of a modelling agent's time.
 
 ## Our gallery (client/gallery.rs)
 
@@ -203,6 +239,12 @@ it.
   `/etc/alsa/conf.d/99-pipewire-default.conf` after anything on
   `ALSA_CONFIG_PATH`. Fix: point `ALSA_CONFIG_PATH` at our config alone
   (`tools/hl`, d46d850). Cost: a session's debugging.
+- 2026-10-12. Driving a client in a two-window harness: keys go to the
+  focused window (`tools/hl focus`), but clicks go to the window under the
+  pointer, which starts on the host's half; the client's shots were the
+  host's grapple. Fix: `swaymsg 'seat * cursor set X Y'` onto the client
+  before clicking (`tools/coop-smoke`). Focus also wanders, so it's set
+  again before each step. Cost: two smoke runs.
 
 ## Our ship designs (sim/design.rs, ship.rs)
 
@@ -262,6 +304,14 @@ it.
   braking with the load behind you (a rope can't push), which a player
   learns to do slowly.
 
+- 2026-10-12. A shotgun's shove (or a plasma burst's) is an impulse on a
+  floating player's velocity, and flight assist (on by default) brakes any
+  velocity the keys didn't ask for: a shoved crewmate with assist on stops
+  within a second, one with it off tumbles on. That's the intended feel, but
+  a test that measures a shove must turn the target's assist off (or it
+  reads zero a few ticks later). Robots float with their own brains' assist,
+  so a Swarmer's shove fades the same way. Cost: half an hour
+  (`tests/families.rs`, `target`).
 
 ## Our robots' brains (sim/bots.rs)
 

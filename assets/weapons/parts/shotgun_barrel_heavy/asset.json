@@ -1,0 +1,31 @@
+{
+  "name": "shotgun_barrel_heavy",
+  "kind": "weapon_part",
+  "brief": "Shotgun barrel, heavy: Over-and-under: a second barrel slung beneath.",
+  "palette": {
+    "paint_primary": "#6f7a45"
+  },
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.13
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

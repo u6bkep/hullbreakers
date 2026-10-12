@@ -1,0 +1,16 @@
+{
+  "name": "sniper_stock_light",
+  "kind": "weapon_part",
+  "brief": "Sniper stock, light: A bare tube and a small pad.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "stock"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

@@ -16,9 +16,8 @@ use crate::net::ProfileRequests;
 use crate::sim::events::PlayerEvent;
 use crate::sim::items::{Item, Place, Weapon};
 use crate::sim::player::Player;
-use crate::sim::progression::{Holding, Profile, ProfileOp, STASH_CAP};
+use crate::sim::progression::{self, Holding, Profile, ProfileOp, STASH_CAP};
 use crate::sim::ship::ControlAction;
-use crate::sim::weapons::GunKind;
 
 /// Pressing the weapons locker opens the armory (and the workbench its tab).
 pub fn open_on_press(mut presented: MessageReader<Presented>, mut menu: ResMut<Menu>) {
@@ -113,7 +112,7 @@ pub fn armory_tab(
     super::workbench::progress_strip(ui, profile);
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Standard issue, free:").color(DIM));
-        for frame in GunKind::CREW {
+        for &frame in progression::frames(progression::rank(profile.xp)) {
             if ui.button(format!("Take an issue {}", frame.name())).clicked() {
                 ask(ProfileOp::TakeIssue(frame));
             }

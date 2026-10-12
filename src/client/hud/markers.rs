@@ -55,13 +55,17 @@ impl Labels {
     /// Marks the HUD's fixed blocks taken (generously: their sizes vary):
     /// the suit and nav plates bottom left, the hands and stances bottom
     /// right, the mission strip top centre.
-    pub fn reserve(&mut self, screen: Rect) {
+    pub fn reserve(&mut self, screen: Rect, mission: Option<Rect>) {
         let bottom = screen.max.y - EDGE;
         let suit = super::vitals::SUIT_BLOCK;
         self.blocks.push(Rect::from_min_max(pos2(screen.min.x, bottom - suit.y - 110.0), pos2(screen.min.x + EDGE + suit.x + 8.0, screen.max.y)));
         let hands = super::hands::BLOCK;
         self.blocks.push(Rect::from_min_max(pos2(screen.max.x - EDGE - hands.x - 8.0, bottom - hands.y - 8.0), screen.max));
-        self.blocks.push(Rect::from_center_size(pos2(screen.center().x, screen.min.y + 50.0), vec2(820.0, 100.0)));
+        // The mission strip as it was drawn last frame (its size follows
+        // the scenario's lines).
+        if let Some(strip) = mission {
+            self.blocks.push(strip.expand(6.0));
+        }
         // The key hint and the event feed.
         self.blocks.push(Rect::from_min_size(screen.min, vec2(EDGE + 360.0, EDGE + 40.0)));
     }

@@ -5,7 +5,7 @@ of the game's physics body (an ellipsoid of radii 1.6, 0.7, 1.6, src/sim/fauna.r
 Read at range: a broad pale dome (smooth skin, its top gently curved so a crew member can
 stand on it) with deep-teal canals radiating from the apex, a ring of cyan lights round its
 margin, eight soft flaps hanging from the rim, and six long translucent teal fronds trailing
-below with violet glowing tips. Under the bell, in its cavity, a magenta heart glows: seen
+below with pale aqua-green glowing tips. Under the bell, in its cavity, a magenta heart glows: seen
 from below and from the side between the flaps, never from above (the bell is opaque).
 Lights, loud to quiet: the heart (emissive_core, SOCKET_weak at its centre), the rim spots
 (emissive), the frond tips (emissive_secondary).
@@ -128,7 +128,7 @@ for k in range(8):
 # ---------------------------------------------------------------- fronds
 # Each hangs from the cavity's roof and drifts a little outward in a slow S; three segments of
 # one smooth curve, tapering ribbons (wider than thick) with a soft knuckle at each joint, the
-# last ending in a glowing violet bead.
+# last ending in a glowing aqua-green bead.
 
 
 def catmull(p0, p1, p2, p3, t):

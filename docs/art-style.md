@@ -28,7 +28,10 @@ models are built is in [assets.md](assets.md).
     extra damage. The game pulses it. Reserve it for weak spots so players
     learn what it means; mark its centre with a `SOCKET_weak`.
     Weak spots are the same hot magenta (`#ff40c8`) on every enemy, the one
-    colour rule in the game: it's a signal to learn, not a faction.
+    colour rule in the game: it's a signal to learn, not a faction. So
+    nothing else glows anywhere near it (pinks, violets, purples): the
+    verifier holds every other light 45 degrees of hue away (in Oklch).
+    Code-drawn colours (ropes, tendrils, effects) keep the same rule.
 - **Value contrast between masses.** Neighbouring parts differ in lightness
   (light body, dark grip; pale plating, dark joints) so the form reads even
   without colour.

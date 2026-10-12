@@ -1,0 +1,18 @@
+{
+  "name": "shotgun_mag_extended",
+  "kind": "weapon_part",
+  "brief": "Shotgun mag, extended: The shell box half again as long, raked forward.",
+  "palette": {
+    "emissive": "#ffb347"
+  },
+  "expect": {
+    "parts": [
+      "mag"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

@@ -457,7 +457,8 @@ fn draw_tendril(gizmos: &mut Gizmos, grapple: &Grapple, from: Vec3, to: Vec3, t:
     let up = side.cross(dir);
     let taut = (grapple.tension / 2000.0).clamp(0.0, 1.0);
     let amplitude = (0.12 * (1.0 - 0.8 * taut)).min(length * 0.08);
-    let color = Color::srgb(0.75 - 0.25 * taut, 0.18, 0.42 - 0.12 * taut);
+    // Raw flesh, red-brown: nothing near the weak spots' magenta.
+    let color = Color::srgb(0.78 - 0.25 * taut, 0.36 - 0.1 * taut, 0.16);
     let points = (0..=32).map(|i| {
         let k = i as f32 / 32.0;
         let envelope = (std::f32::consts::PI * k).sin();

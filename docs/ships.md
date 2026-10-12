@@ -88,6 +88,14 @@ Interactive things beyond buttons, in a module's `devices: [...]` (the code is
  power: All([On("key_a"), On("key_b")])),
 ```
 
+A conduit's path is waypoints; legs between them run along the ship's axes
+only (a leg that differs in more than one axis turns its corners in x, then
+z, then y), as cable is laid. Lay it along wall, floor and ceiling corners,
+a few centimetres off the surface: the check refuses a run that strays more
+than 12 cm from every surface. It glows faintly while live (flashing as its
+power comes, a red flicker as it's cut) with a bead running toward what it
+feeds.
+
 `fault: true` marks a device a hit can knock out of its starting setting
 (our ship's breakers and main bus, in the boarding action). A device
 `turret_<N>` gates that turret's beam: it fires only while the device is
@@ -111,7 +119,7 @@ lever's (1 thrown) or junction's (its way) first setting.
 | `Lamp` | no | lit |
 | `Board(size, rows: [(label, cond)])` | no | lit, a lamp per row showing its condition |
 | `Lights(at: [...], color, flash)` | no | room lights at those points; `flash` for alarms |
-| `Conduit(path: [...])` | no | a cable along those points, lit |
+| `Conduit(path: [...])` | no | a cable through those waypoints, lit |
 | `Gate(size)` | no | a frame (structure) round a `size` opening; scenarios count flights through it |
 
 `power` is a condition over other devices' outputs: `Always` (the default),

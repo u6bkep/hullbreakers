@@ -43,6 +43,7 @@ pub struct DeviceLook {
     gate_next: Handle<StandardMaterial>,
     selected: Handle<StandardMaterial>,
     alarm: Handle<StandardMaterial>,
+    bead: Handle<StandardMaterial>,
 }
 
 pub fn setup_device_look(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
@@ -67,7 +68,7 @@ pub fn setup_device_look(mut commands: Commands, mut materials: ResMut<Assets<St
         panel: flat(&mut materials, Color::srgb(0.07, 0.075, 0.085), 0.3),
         door: flat(&mut materials, Color::srgb(0.32, 0.33, 0.36), 0.6),
         dark: flat(&mut materials, Color::srgb(0.04, 0.04, 0.045), 0.2),
-        power: glow(&mut materials, POWER, 5.0),
+        power: glow(&mut materials, POWER, 3.0),
         standby: glow(&mut materials, WAITING, 0.6),
         waiting: glow(&mut materials, WAITING, 5.0),
         shut: glow(&mut materials, SHUT, 0.9),
@@ -75,6 +76,7 @@ pub fn setup_device_look(mut commands: Commands, mut materials: ResMut<Assets<St
         gate_next: glow(&mut materials, POWER, 9.0),
         selected: glow(&mut materials, Color::srgb(0.85, 0.85, 0.8), 0.35),
         alarm: glow(&mut materials, SHUT, 6.0),
+        bead: glow(&mut materials, POWER, 1.6),
     });
 }
 
@@ -106,6 +108,11 @@ pub enum Part {
     Light { alarm: bool },
     /// A gate's strip: bright when it's the local player's next.
     GateStrip,
+    /// A length of conduit (lit through its conduit's [`CableGlow`]).
+    Cable,
+    /// The bead of light running along a live conduit's path (in the
+    /// device's frame), `length` long.
+    Bead { path: Vec<Vec3>, length: f32 },
 }
 
 /// Which device of which ship a part belongs to.
@@ -137,6 +144,7 @@ pub fn build_devices(
         let (r, u, n) = face_basis(device.face);
         let facing = Quat::from_mat3(&Mat3::from_cols(r, u, n));
         let mut parts: Vec<(Part, Handle<Mesh>, Handle<StandardMaterial>, Transform)> = Vec::new();
+        let mut glow: Option<CableGlow> = None;
         // In the device's frame: x across its face, y up it, z out of it.
         let at = |x: f32, y: f32, z: f32| Transform::from_xyz(x, y, z);
         let root = match &device.kind {
@@ -256,12 +264,32 @@ pub fn build_devices(
                 None
             }
             DeviceKind::Conduit { path } => {
-                for leg in path.windows(2) {
-                    let (a, b) = (leg[0] - device.at, leg[1] - device.at);
-                    let d = b - a;
-                    let size = d.abs() + Vec3::splat(0.05);
-                    parts.push((Part::Live, cuboid(&mut meshes, size), look.dark.clone(), Transform::from_translation((a + b) / 2.0)));
+                // A slim cable (its own material, which glows with its
+                // power: see `glow_cables`), and a bead of light running
+                // along it toward what it feeds.
+                let material = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.11, 0.12, 0.13),
+                    metallic: 0.5,
+                    perceptual_roughness: 0.6,
+                    ..default()
+                });
+                let local: Vec<Vec3> = path.iter().map(|&p| p - device.at).collect();
+                for leg in local.windows(2) {
+                    let size = (leg[1] - leg[0]).abs() + Vec3::splat(CABLE);
+                    parts.push((Part::Cable, cuboid(&mut meshes, size), material.clone(), Transform::from_translation((leg[0] + leg[1]) / 2.0)));
                 }
+                let length = local.windows(2).map(|l| l[0].distance(l[1])).sum();
+                parts.push((
+                    Part::Bead { path: local.clone(), length },
+                    cuboid(&mut meshes, Vec3::splat(CABLE * 1.6)),
+                    look.bead.clone(),
+                    Transform::from_translation(local[0]).with_scale(Vec3::ZERO),
+                ));
+                glow = Some(CableGlow {
+                    material,
+                    live: None,
+                    since: 0.0,
+                });
                 None
             }
             DeviceKind::Gate { size } => {
@@ -287,13 +315,16 @@ pub fn build_devices(
             DeviceKind::Lights { at: points, color, .. } => points.iter().map(|&p| (Color::srgb(color.x, color.y, color.z), p - device.at)).collect(),
             _ => Vec::new(),
         };
-        let entity = commands
-            .spawn((
-                Name::new(format!("Device {}", device.id)),
-                of,
-                Transform::from_translation(device.at).with_rotation(rotation),
-                Visibility::default(),
-            ))
+        let mut root = commands.spawn((
+            Name::new(format!("Device {}", device.id)),
+            of,
+            Transform::from_translation(device.at).with_rotation(rotation),
+            Visibility::default(),
+        ));
+        if let Some(glow) = glow.take() {
+            root.insert(glow);
+        }
+        let entity = root
             .with_children(|b| {
                 for (mesh, material) in fixed {
                     b.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::default()));
@@ -327,6 +358,68 @@ pub fn build_devices(
 
 fn cuboid(meshes: &mut Assets<Mesh>, size: Vec3) -> Handle<Mesh> {
     meshes.add(Cuboid::from_size(size))
+}
+
+/// A conduit's glow: its cable's own material, and when its power last
+/// came or went (s, of the app's clock).
+#[derive(Component)]
+pub struct CableGlow {
+    material: Handle<StandardMaterial>,
+    live: Option<bool>,
+    since: f32,
+}
+
+/// A cable's thickness (m).
+const CABLE: f32 = 0.022;
+/// The bead's speed along a cable (m/s), and the dark stretch between runs
+/// (m).
+const BEAD_SPEED: f32 = 1.4;
+const BEAD_GAP: f32 = 3.0;
+/// How brightly a live cable glows, at rest and as its power comes (a flash
+/// that fades over `FLASH_SECONDS`); a cut one sparks red for
+/// `SPARK_SECONDS`.
+const CABLE_GLOW: f32 = 0.25;
+const CABLE_FLASH: f32 = 3.0;
+const FLASH_SECONDS: f32 = 0.5;
+const SPARK_SECONDS: f32 = 0.9;
+
+/// Lights each conduit's cable: dark when dead; a faint glow when live,
+/// after a flash as its power comes; a red flicker as it's cut.
+pub fn glow_cables(
+    time: Res<Time>,
+    ships: Query<(&ShipHull, Option<&ShownDevices>)>,
+    mut glows: Query<(&OfDevice, &mut CableGlow)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let now = time.elapsed_secs();
+    for (of, mut glow) in &mut glows {
+        let live = ships
+            .get(of.ship)
+            .ok()
+            .and_then(|(_, d)| d)
+            .and_then(|d| d.0.get(of.index as usize))
+            .is_some_and(|s| s.live);
+        match glow.live {
+            // First sight: as it is, no flash.
+            None => glow.since = now - 10.0,
+            Some(was) if was != live => glow.since = now,
+            _ => {}
+        }
+        glow.live = Some(live);
+        let age = now - glow.since;
+        let emissive = if live {
+            LinearRgba::from(POWER) * (CABLE_GLOW + CABLE_FLASH * (-age / FLASH_SECONDS * 3.0).exp())
+        } else if age < SPARK_SECONDS && (now * 14.0).fract() < 0.4 {
+            LinearRgba::from(SHUT) * 1.2
+        } else {
+            LinearRgba::BLACK
+        };
+        if let Some(mut m) = materials.get_mut(&glow.material)
+            && m.emissive != emissive
+        {
+            m.emissive = emissive;
+        }
+    }
 }
 
 /// A room light's point light (its fixture is a [`Part::Light`]).
@@ -447,6 +540,33 @@ pub fn show_devices(
             &Part::Light { alarm } => {
                 let on = s.live && (!alarm || flash);
                 set(&mut material, if on { &look.selected } else { &look.dark });
+            }
+            Part::Cable => {}
+            Part::Bead { path, length } => {
+                // Toward what it feeds, at a walking pace, one run after
+                // another.
+                if !s.live || *length <= 0.0 {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                }
+                // Where along the path it is (past the end: between runs).
+                let mut d = (time.elapsed_secs() * BEAD_SPEED + of.index as f32 * 1.7) % (length + BEAD_GAP);
+                let mut on = None;
+                for leg in path.windows(2) {
+                    let l = leg[0].distance(leg[1]);
+                    if d <= l {
+                        on = Some(leg[0].lerp(leg[1], d / l.max(1e-4)));
+                        break;
+                    }
+                    d -= l;
+                }
+                match on {
+                    Some(at) => {
+                        transform.translation = at;
+                        transform.scale = Vec3::ONE;
+                    }
+                    None => transform.scale = Vec3::ZERO,
+                }
             }
             Part::GateStrip => {
                 let next = next_gate(mission, local, ids.get(of.ship).ok().copied()) == Some(of.index);
@@ -746,5 +866,55 @@ mod tests {
         assert!(lit > 55.0, "inside, its lights all on: {lit}");
         let outside = settled_ambient(at, at + Vec3::new(0.0, 8.0, 10.0), false);
         assert!((outside - 60.0).abs() < 0.01, "on its roof: {outside}");
+    }
+
+    /// A conduit flashes as its power comes, settles to a faint glow, sparks
+    /// red as it's cut, and goes dark.
+    #[test]
+    fn a_cable_flashes_on_settles_and_sparks_off() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)));
+        app.init_resource::<Assets<StandardMaterial>>();
+        app.add_systems(Update, glow_cables);
+        let derelict = design("derelict");
+        let feed = derelict.device("c_feed");
+        let mut states = Devices::new(derelict).0;
+        let ship = app.world_mut().spawn((ShipHull::new("derelict"), ShownDevices(states.clone()))).id();
+        let material = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+        app.world_mut().spawn((
+            OfDevice { ship, index: feed as u16 },
+            CableGlow {
+                material: material.clone(),
+                live: None,
+                since: 0.0,
+            },
+        ));
+        let glow = |app: &mut App| {
+            app.update();
+            let e = app.world().resource::<Assets<StandardMaterial>>().get(&material).unwrap().emissive;
+            (e.red + e.green + e.blue, e.red > e.blue)
+        };
+        for _ in 0..10 {
+            glow(&mut app);
+        }
+        assert_eq!(glow(&mut app).0, 0.0, "dead and dark");
+        states[feed].live = true;
+        app.world_mut().get_mut::<ShownDevices>(ship).unwrap().0 = states.clone();
+        let flash = glow(&mut app).0;
+        for _ in 0..90 {
+            glow(&mut app);
+        }
+        let settled = glow(&mut app).0;
+        assert!(flash > settled * 5.0, "no flash as the power came: {flash} then {settled}");
+        assert!(settled > 0.0, "a live cable glows");
+        states[feed].live = false;
+        app.world_mut().get_mut::<ShownDevices>(ship).unwrap().0 = states;
+        let sparks = (0..30).map(|_| glow(&mut app)).filter(|(g, red)| *g > 0.0 && *red).count();
+        assert!(sparks > 0, "no red spark as it was cut");
+        for _ in 0..60 {
+            glow(&mut app);
+        }
+        assert_eq!(glow(&mut app).0, 0.0, "cut and still glowing");
     }
 }

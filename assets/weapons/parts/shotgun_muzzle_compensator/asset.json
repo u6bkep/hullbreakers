@@ -1,0 +1,16 @@
+{
+  "name": "shotgun_muzzle_compensator",
+  "kind": "weapon_part",
+  "brief": "Shotgun muzzle, compensator: A block with ports cut across its top.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "muzzle"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

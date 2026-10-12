@@ -231,7 +231,8 @@ fn setup_fauna_fx(
         sigh: add(synth.sweep(2.2, 160.0, 40.0, 0.35, 0.8)),
         spore: meshes.add(Sphere::new(0.06).mesh().ico(1).expect("ico subdivisions in range")),
         spore_glow: [
-            materials.add(glow(LinearRgba::rgb(6.0, 0.6, 4.0))),
+            // Its glows, cyan and aqua: magenta is only ever a weak spot.
+            materials.add(glow(LinearRgba::rgb(0.6, 4.5, 3.0))),
             materials.add(glow(LinearRgba::rgb(0.8, 4.0, 5.0))),
         ],
     });

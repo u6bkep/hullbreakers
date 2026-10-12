@@ -35,6 +35,10 @@ pub enum HandTag {
     Low,
     /// Steadied by the free other hand.
     Braced,
+    /// Zoomed (the other hand's button held, that hand free).
+    Zoomed,
+    /// A laser too hot to fire, cooling.
+    Overheated,
 }
 
 /// One hand's card.
@@ -52,6 +56,8 @@ pub struct HandView {
     pub reserve: Option<u16>,
     /// How far through a reload (0..1), if reloading.
     pub reload: Option<f32>,
+    /// A laser's heat (0..1), instead of a mag.
+    pub heat: Option<f32>,
     pub tags: Vec<HandTag>,
 }
 
@@ -72,6 +78,7 @@ fn hand_view(player: &Player, tuning: &Tuning, hand: Hand) -> HandView {
         mag: None,
         reserve: None,
         reload: None,
+        heat: None,
         tags: Vec::new(),
     };
     if let Some(cargo) = loadout.inventory.carrying {
@@ -101,11 +108,25 @@ fn hand_view(player: &Player, tuning: &Tuning, hand: Hand) -> HandView {
             let reserve = loadout.reserve(hand).unwrap_or(0);
             view.item = HandItem::Weapon;
             view.name = weapon.name();
-            view.detail = format!("{} {}", weapon.rarity.name(), weapon.frame.name());
+            view.detail = format!("{} {}", weapon.rarity.name(), weapon.kind_name().to_lowercase());
             view.rarity = Some(weapon.rarity);
+            view.reload = loadout.reload_progress(hand);
+            let state = loadout.hands[hand as usize];
+            if stats.heat > 0.0 {
+                // A laser: heat, not rounds.
+                view.heat = Some(state.heat);
+                if state.overheated {
+                    view.tags.push(HandTag::Overheated);
+                }
+                if loadout.zoom > 1.0 {
+                    view.tags.push(HandTag::Zoomed);
+                } else if loadout.braced(hand) {
+                    view.tags.push(HandTag::Braced);
+                }
+                return view;
+            }
             view.mag = Some((weapon.mag, stats.mag));
             view.reserve = Some(reserve);
-            view.reload = loadout.reload_progress(hand);
             if view.reload.is_some() {
                 view.tags.push(HandTag::Reloading);
             } else if loadout.hands[hand as usize].reload_queued {
@@ -116,7 +137,9 @@ fn hand_view(player: &Player, tuning: &Tuning, hand: Hand) -> HandView {
             } else if (weapon.mag as f32) < stats.mag as f32 * 0.25 {
                 view.tags.push(HandTag::Low);
             }
-            if loadout.braced(hand) {
+            if loadout.zoom > 1.0 && stats.zoom > 0.0 {
+                view.tags.push(HandTag::Zoomed);
+            } else if loadout.braced(hand) {
                 view.tags.push(HandTag::Braced);
             }
         }
@@ -140,6 +163,8 @@ pub fn stance_views(player: &Player) -> Vec<StanceView> {
             Some(g) => match g.frame {
                 GunKind::Smg => "SMG",
                 GunKind::Rifle => "RFL",
+                GunKind::Shotgun => "SHG",
+                GunKind::Sniper => "SNP",
                 _ => "GUN",
             },
             None => "—",

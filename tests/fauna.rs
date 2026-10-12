@@ -14,7 +14,9 @@ use hullbreakers::sim::input::PlayerInput;
 use hullbreakers::sim::player::{Grapple, Mode, Player, new_player};
 use hullbreakers::sim::ship::HomeShip;
 use hullbreakers::sim::tuning::Tuning;
+use hullbreakers::sim::shots::{Shot, Shots, Team};
 use hullbreakers::sim::vitals::{Damage, Vitals};
+use hullbreakers::sim::weapons::ShotKind;
 
 fn app_with(asteroids: bool) -> App {
     let mut app = App::new();
@@ -409,4 +411,89 @@ fn the_field_streams_in_limpets_and_herds_but_not_on_the_crew() {
     for p in limpets.iter().chain(&grazers) {
         assert!(p.length() > 60.0, "fauna {} m from the ship", p.length());
     }
+}
+
+// --- Shooting them --------------------------------------------------------------
+
+/// A shot of `kind` fired by the crew member from `from` along `dir`, flown
+/// (or settled) this tick.
+fn shoot(app: &mut App, kind: ShotKind, from: Vec3, dir: Vec3, damage: f32) {
+    let me = crew(app);
+    let speed = match kind {
+        ShotKind::Plasma { .. } => 100.0,
+        _ => 800.0,
+    };
+    app.world_mut().resource_mut::<Shots>().0.push(Shot {
+        shooter: me,
+        team: Team::Crew,
+        damage,
+        mass: 0.012,
+        position: from,
+        velocity: dir.normalize() * speed,
+        age: 0.0,
+        origin: from,
+        kind,
+        through: None,
+    });
+}
+
+/// What one shot of `kind` from under a grazer, straight up at its heart,
+/// takes off it.
+fn heart_shot(kind: ShotKind) -> f32 {
+    let mut app = app();
+    let at = Vec3::new(0.0, 0.0, -100.0);
+    let g = grazer_at(&mut app, 4, Mood::Grazing, at, Quat::IDENTITY);
+    let full = health(&app, g);
+    shoot(&mut app, kind, at - Vec3::Y * 4.0, Vec3::Y, 10.0);
+    ticks(&mut app, 8);
+    full - health(&app, g)
+}
+
+#[test]
+fn bullets_and_beams_find_a_grazers_heart_arcs_and_bursts_dont() {
+    let bullet = heart_shot(ShotKind::Bullet { pierce: 0 });
+    let sniper = heart_shot(ShotKind::Bullet { pierce: 1 });
+    let laser = heart_shot(ShotKind::Laser { range: 400.0 });
+    let arc = heart_shot(ShotKind::Arc { range: 35.0, chain: 2 });
+    let plasma = heart_shot(ShotKind::Plasma { splash: 2.5 });
+    assert!((bullet - 25.0).abs() < 0.1, "a bullet in its heart took {bullet}");
+    assert!((sniper - 25.0).abs() < 0.1, "a sniper round in its heart took {sniper}");
+    assert!((laser - 25.0).abs() < 0.1, "a beam on its heart took {laser}");
+    assert!((arc - 10.0).abs() < 0.1, "an arc took {arc}");
+    assert!((plasma - 10.0).abs() < 0.1, "a plasma bolt took {plasma}");
+}
+
+#[test]
+fn a_plasma_burst_beside_a_grazer_hurts_nudges_and_startles_it() {
+    let mut app = app();
+    let at = Vec3::new(0.0, 0.0, -100.0);
+    let r = rock(&mut app, at + Vec3::X * 3.0, 0.8);
+    let g = grazer_at(&mut app, 4, Mood::Grazing, at, Quat::IDENTITY);
+    let full = health(&app, g);
+    let before = vel(&app, g);
+    // At the rock, from beyond it: the burst is 1–2 m from the grazer's bell.
+    let rock_at = pos(&app, r);
+    shoot(&mut app, ShotKind::Plasma { splash: 2.5 }, rock_at + Vec3::new(0.0, 0.0, 8.0), Vec3::NEG_Z, 16.0);
+    ticks(&mut app, 12);
+    assert!(health(&app, g) < full, "the burst didn't hurt it");
+    assert!((vel(&app, g) - before).length() > 1e-4, "the burst didn't move it");
+    assert_eq!(grazer(&app, g).mood, Mood::Startled, "the burst didn't startle it");
+}
+
+#[test]
+fn a_bullet_finds_a_limpets_sac() {
+    let mut app = app();
+    let rock = rock(&mut app, Vec3::new(0.0, 0.0, -90.0), 4.0);
+    let limpet = limpet_on(&mut app, rock, 2);
+    let Mode::Booted { body, feet, up, orientation, .. } = player(&app, limpet).mode else { unreachable!() };
+    let rot = app.world().get::<Rotation>(body).unwrap().0;
+    let pos = app.world().get::<Position>(body).unwrap().0;
+    // Straight down onto the sac from above its back.
+    let sac = pos + rot * (feet + orientation * Vec3::new(0.0, 0.26, 0.2));
+    let up = rot * up;
+    let full = health(&app, limpet);
+    shoot(&mut app, ShotKind::Bullet { pierce: 0 }, sac + up * 3.0, -up, 10.0);
+    ticks(&mut app, 4);
+    let took = full - health(&app, limpet);
+    assert!((took - 25.0).abs() < 0.1, "a bullet in its sac took {took}");
 }

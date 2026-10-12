@@ -84,6 +84,8 @@ fn tag_look(tag: HandTag, now: f32) -> (&'static str, Color32) {
         HandTag::Dry => ("Empty", style::fade(HOSTILE, style::pulse(now))),
         HandTag::Low => ("Low", WARNING),
         HandTag::Braced => ("Braced", INK_DIM),
+        HandTag::Zoomed => ("Zoomed", SUIT),
+        HandTag::Overheated => ("Overheated", style::fade(WARNING, style::pulse(now))),
     }
 }
 
@@ -181,6 +183,22 @@ fn card(painter: &egui::Painter, rect: Rect, view: &HandView, key: &str, alpha: 
                     style::seg_bar(painter, bar, 1, 0.0, 0.0, a(SUIT));
                 }
             }
+        }
+        HandItem::Weapon if view.heat.is_some() => {
+            // A laser: its heat, in a bar of ten, and a number.
+            style::caps(painter, pos2(inner.min.x, detail_y), Align2::LEFT_TOP, &view.detail, MICRO, a(accent));
+            let heat = view.heat.unwrap_or(0.0);
+            let hot = view.tags.contains(&HandTag::Overheated);
+            let color = if hot {
+                style::fade(WARNING, style::pulse(now))
+            } else if heat > 0.7 {
+                WARNING
+            } else {
+                SUIT
+            };
+            let r = style::unit(painter, pos2(inner.max.x, bar.min.y - 8.0), Align2::RIGHT_BOTTOM, "% heat", a(INK_DIM));
+            style::text(painter, pos2(r.min.x - 4.0, bar.min.y - 3.0), Align2::RIGHT_BOTTOM, format!("{:.0}", heat * 100.0), style::num(NUMERAL), a(color));
+            style::seg_bar(painter, bar, 10, heat, 0.0, a(color));
         }
         HandItem::Weapon => {
             style::caps(painter, pos2(inner.min.x, detail_y), Align2::LEFT_TOP, &view.detail, MICRO, a(accent));

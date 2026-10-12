@@ -1,0 +1,19 @@
+{
+  "name": "shotgun_sight_reflex",
+  "kind": "weapon_part",
+  "brief": "Shotgun sight, reflex: An open window with a glowing dot.",
+  "palette": {
+    "paint_primary": "#6f7a45",
+    "emissive": "#ffb347"
+  },
+  "expect": {
+    "parts": [
+      "sight"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {},
+    "tolerance": 0.002
+  }
+}

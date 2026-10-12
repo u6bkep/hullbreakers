@@ -13,7 +13,7 @@ use super::LocalPlayer;
 use super::bindings::{Action, Bindings};
 use super::camera::PlayerCamera;
 use crate::sim::bodies::Bodies;
-use crate::sim::items::{Item, Rarity, Taken, Weapon};
+use crate::sim::items::{Family, Item, Rarity, Taken, Weapon};
 use crate::sim::pickups::Pickup;
 use crate::sim::player::{CONTROL_REACH, Player, ray_box};
 use crate::sim::ship::Control;
@@ -72,7 +72,7 @@ pub fn stat_lines(s: &GunStats) -> Vec<StatLine> {
     vec![
         line("Damage", s.damage, true, 1, ""),
         line("Rate", s.rate, true, 1, "/s"),
-        line("Damage/s", s.damage * s.rate, true, 0, ""),
+        line("Damage/s", s.damage * s.rate * s.pellets.max(1) as f32, true, 0, ""),
         line("Muzzle speed", s.muzzle_speed, true, 0, " m/s"),
         line("Cone, braced", s.spread_braced, false, 2, "°"),
         line("Cone, unbraced", s.spread, false, 2, "°"),
@@ -125,9 +125,22 @@ pub fn stats_table(ui: &mut egui::Ui, id: &str, stats: &GunStats, against: Optio
 pub fn weapon_lines(weapon: &Weapon) -> Vec<(String, egui::Color32)> {
     let build = weapon.build();
     let mut lines = vec![(
-        format!("{} {} · {}", weapon.rarity.name(), weapon.frame.name(), build.maker.name()),
+        format!("{} {} · {}", weapon.rarity.name(), weapon.kind_name().to_lowercase(), build.maker.name()),
         rarity_color(weapon.rarity),
     )];
+    let stats = weapon.stats();
+    if weapon.family != Family::Ballistic {
+        lines.push((weapon.family.effect().to_string(), INK));
+    }
+    if stats.pellets > 1 {
+        lines.push((format!("{} pellets a shot, and a hard shove", stats.pellets), INK));
+    }
+    if stats.pierce > 0 {
+        lines.push(("Goes through a body into the next".to_string(), INK));
+    }
+    if stats.zoom > 0.0 {
+        lines.push((format!("Zooms x{:.1}: the other hand free, its button held", stats.zoom), INK));
+    }
     for part in build.parts.all().into_iter().filter(|p| !p.standard()) {
         lines.push((format!("{}: {}", part.name(), part.effect()), INK));
     }

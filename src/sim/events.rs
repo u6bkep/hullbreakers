@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use super::items::Item;
 use super::ship::ControlAction;
-use super::weapons::{GunKind, Hand};
+use super::weapons::{GunKind, Hand, ShotKind};
 
 /// How long entries stay in the log, in ticks. Readers must look at least
 /// this often.
@@ -102,7 +102,10 @@ pub enum PlayerEvent {
         damage: f32,
         mass: f32,
         origin: Vec3,
+        /// A flown shot's velocity; an instant one's direction (times its
+        /// gun's muzzle speed).
         velocity: Vec3,
+        kind: ShotKind,
     },
 }
 

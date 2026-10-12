@@ -1,0 +1,29 @@
+{
+  "name": "shotgun_barrel_standard",
+  "kind": "weapon_part",
+  "brief": "Shotgun barrel, standard: A wide bore under a vent rib, a bead at its tip.",
+  "palette": {},
+  "expect": {
+    "parts": [
+      "barrel"
+    ],
+    "colliders": [
+      "COL_part"
+    ],
+    "sockets": {
+      "SOCKET_muzzle": {
+        "at": [
+          0,
+          0,
+          -0.11
+        ],
+        "forward": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    "tolerance": 0.002
+  }
+}

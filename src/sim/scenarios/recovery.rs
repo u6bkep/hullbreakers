@@ -154,15 +154,18 @@ fn build(stage: &mut Stage) -> Entity {
         // Drifting slowly outward, turning over.
         let drift = at.normalize() * rng.random_range(0.1..0.4);
         let spin = Vec3::new(rng.random_range(-0.3..0.3), rng.random_range(-0.3..0.3), rng.random_range(-0.3..0.3));
+        let pod = Pod {
+            kind,
+            index: index as u8,
+            oxygen_until: tick + (air * TICK_HZ as f32) as u32,
+            state: PodState::Adrift,
+        };
         commands.spawn((
-            Name::new(format!("Pod {index}")),
+            // As the board and the beacons name it: what the HUD's rope and
+            // reference readouts say.
+            Name::new(pod.name()),
             Staged,
-            Pod {
-                kind,
-                index: index as u8,
-                oxygen_until: tick + (air * TICK_HZ as f32) as u32,
-                state: PodState::Adrift,
-            },
+            pod,
             RigidBody::Dynamic,
             SleepingDisabled,
             PreviousVelocity::default(),

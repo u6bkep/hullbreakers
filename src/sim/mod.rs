@@ -179,6 +179,7 @@ impl Plugin for SimPlugin {
         app.add_message::<vitals::Damage>()
             .add_message::<bots::Detonation>()
             .init_resource::<shots::Shots>()
+            .init_resource::<shots::Shoves>()
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
             .add_observer(pickups::note_owned)
@@ -256,6 +257,7 @@ impl Plugin for SimPlugin {
                         combat::apply_damage,
                         shots::launch_shots,
                         shots::fly_shots,
+                        shots::apply_shoves,
                         vitals::beam_burns,
                         vitals::apply_damage,
                         fauna::alarm,

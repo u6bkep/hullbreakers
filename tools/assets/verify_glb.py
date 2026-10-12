@@ -48,6 +48,28 @@ def srgb_hex_to_linear(h):
     return out
 
 
+def oklch(h):
+    """An sRGB hex colour in Oklch: lightness, chroma, hue (degrees)."""
+    r, g, b = srgb_hex_to_linear(h)
+    l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+    m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
+    s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    l, m, s = (math.copysign(abs(x) ** (1 / 3), x) for x in (l, m, s))
+    L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+    bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    return L, math.hypot(a, bb), math.degrees(math.atan2(bb, a)) % 360
+
+
+# No other light may look like the weak spot: an emissive role's Oklch hue
+# keeps at least this far from the magenta's (degrees), unless it's nearly
+# grey. (Measured: the grazer's first frond violet, #b07aff, was 42 degrees
+# off and read as magenta; the red laser emitters sit at 47, the crawler's
+# orange at 59.)
+WEAK_SPOT_HUE_CLEARANCE = 45.0
+GREY_CHROMA = 0.04
+
+
 def load_roles():
     with open(MATERIALS_JSON) as f:
         return json.load(f)["roles"]
@@ -466,6 +488,16 @@ def verify(asset_dir):
     for nm in sorted(used_roles):
         if roles[nm].get("palette") and nm not in palette:
             rep.check(False, f"'{nm}' is used, so asset.json palette must name its colour (from the brief)")
+    _, _, core_hue = oklch(WEAK_SPOT)
+    for nm in sorted(used_roles):
+        if nm == "emissive_core" or "emissive_strength" not in roles[nm]:
+            continue
+        colour = palette.get(nm, roles[nm]["color"])
+        _, chroma, hue = oklch(colour)
+        off = abs((hue - core_hue + 180.0) % 360.0 - 180.0)
+        rep.check(chroma < GREY_CHROMA or off >= WEAK_SPOT_HUE_CLEARANCE,
+                  f"'{nm}' ({colour}) keeps clear of the weak spot's magenta: {off:.0f} deg of hue off it "
+                  f"(at least {WEAK_SPOT_HUE_CLEARANCE:.0f})")
     if "emissive_core" in used_roles:
         rep.check(palette.get("emissive_core", "").lower() == WEAK_SPOT,
                   f"emissive_core is the weak-spot magenta {WEAK_SPOT} (got {palette.get('emissive_core')})")

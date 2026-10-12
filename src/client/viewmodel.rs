@@ -32,8 +32,9 @@ pub enum Held {
     /// A gun, as it looks (see `guns`).
     Gun(GunLook),
     Grapple,
-    /// The glove alone, on the foregrip of the rifle the other hand holds.
-    Brace,
+    /// The glove alone, on the foregrip of the two-handed gun (this frame)
+    /// the other hand holds.
+    Brace(GunKind),
 }
 
 /// The grapple launcher's model.
@@ -55,7 +56,7 @@ impl Held {
             Held::Grapple => {
                 commands.spawn((WorldAssetRoot(models.get(assets, GRAPPLE)), extra));
             }
-            Held::Brace => {}
+            Held::Brace(_) => {}
         }
     }
 }
@@ -87,8 +88,17 @@ const MAIN_GRIP: Vec3 = Vec3::new(0.23, -0.27, -0.52);
 /// A braced rifle sits nearer the middle and closer, its stock toward the
 /// shoulder.
 const BRACED_GRIP: Vec3 = Vec3::new(0.13, -0.25, -0.42);
-/// The rifle's foregrip from its grip (the model's `SOCKET_foregrip`).
-const RIFLE_FOREGRIP: Vec3 = Vec3::new(0.0, 0.02, -0.298);
+/// A two-handed frame's foregrip from its grip (its receiver's
+/// `SOCKET_foregrip`, through the parts it hangs on); `None` for a frame
+/// held in one hand.
+fn foregrip(frame: GunKind) -> Option<Vec3> {
+    match frame {
+        GunKind::Rifle => Some(Vec3::new(0.0, 0.02, -0.298)),
+        GunKind::Shotgun => Some(Vec3::new(0.0, 0.056, -0.295)),
+        GunKind::Sniper => Some(Vec3::new(0.0, 0.03, -0.4)),
+        _ => None,
+    }
+}
 /// Guns point where the tracers cross the line of fire (see
 /// `weapons_fx::CONVERGE`).
 const CONVERGE: f32 = 40.0;
@@ -135,9 +145,9 @@ pub fn held(player: &Player) -> [Option<Held>; 2] {
         Slot::Gun(_) => loadout.weapon(hand).map(Held::gun),
     };
     let (main, off) = (item(Hand::Main), item(Hand::Off));
-    // A rifle with the other hand free is braced on its foregrip.
+    // A two-handed gun with the other hand free is braced on its foregrip.
     let brace = |this: Option<Held>, other: Option<Held>| match (this, other) {
-        (None, Some(Held::Gun(look))) if look.frame == GunKind::Rifle => Some(Held::Brace),
+        (None, Some(Held::Gun(look))) if foregrip(look.frame).is_some() => Some(Held::Brace(look.frame)),
         _ => this,
     };
     [brace(main, off), brace(off, main)]
@@ -177,7 +187,7 @@ pub fn pose_view_hands(
     let what = held(&player);
     let loadout = &player.loadout;
     let switching = loadout.switch_fraction();
-    let braced = what.contains(&Some(Held::Brace));
+    let braced = what.iter().any(|w| matches!(w, Some(Held::Brace(_))));
     let reeling = local.0.reel_in || local.0.pay_out;
     // The main hand's pose, for a brace to follow.
     let mut main_pose = Transform::default();
@@ -207,7 +217,9 @@ pub fn pose_view_hands(
             }
             hand.showing = item;
         }
-        *visibility = if item.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        // Zoomed, the hands are out of the way of the view.
+        let zoomed = loadout.zoom > 1.0;
+        *visibility = if item.is_some() && !zoomed { Visibility::Inherited } else { Visibility::Hidden };
         let Some(item) = item else { continue };
 
         // Recoil from this hand's newest shot.
@@ -232,9 +244,10 @@ pub fn pose_view_hands(
             Hand::Main => 1.0,
             Hand::Off => -1.0,
         };
-        let pose = if item == Held::Brace {
-            // On the foregrip of the rifle in the other hand.
-            Transform::from_translation(main_pose.transform_point(RIFLE_FOREGRIP)).with_rotation(main_pose.rotation)
+        let pose = if let Held::Brace(frame) = item {
+            // On the foregrip of the gun in the other hand.
+            let at = foregrip(frame).unwrap_or_default();
+            Transform::from_translation(main_pose.transform_point(at)).with_rotation(main_pose.rotation)
         } else {
             let rest = if braced { BRACED_GRIP } else { MAIN_GRIP };
             let grip = Vec3::new(rest.x * side, rest.y, rest.z);
