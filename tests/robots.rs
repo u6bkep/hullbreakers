@@ -147,7 +147,13 @@ fn a_robot_out_of_health_is_destroyed() {
         health: 0.0,
         since_hurt: 0.0,
     };
-    ticks(&mut app, 2);
+    // Marked a wreck (so every peer knows it was destroyed), stilled, and
+    // gone the tick after.
+    ticks(&mut app, 1);
+    let robot = app.world().entity(swarmer);
+    assert!(robot.contains::<hullbreakers::sim::bots::Wrecked>(), "not marked a wreck");
+    assert!(!robot.contains::<PlayerInput>(), "still driven");
+    ticks(&mut app, 1);
     assert!(app.world().get_entity(swarmer).is_err(), "still here");
 }
 
@@ -365,13 +371,13 @@ fn a_shell_takes_everything_until_broken_then_comes_back() {
     let mut app = app();
     let gunner = spawn_with(&mut app, Robot::Gunner, Affixes::of(&[Affix::Shielded]), eva(ADRIFT), ADRIFT);
     let full = health(&app, gunner);
-    assert_eq!(condition(&app, gunner).shell, 255);
+    assert_eq!(condition(&app, gunner).shell, 16);
     // 120 health, so a 72-point shell. Weak-spot hits are stopped too.
     hit(&mut app, gunner, 30.0, true);
     hit(&mut app, gunner, 30.0, false);
     assert_eq!(health(&app, gunner), full, "hurt through the shell");
     let left = condition(&app, gunner).shell_fraction();
-    assert!((left - 12.0 / 72.0).abs() < 0.01, "shell at {left}");
+    assert!((left - 12.0 / 72.0).abs() <= 1.0 / 16.0, "shell at {left}");
     // The hit that breaks it is spent on it; the next one gets through.
     hit(&mut app, gunner, 30.0, false);
     assert_eq!(health(&app, gunner), full);
@@ -380,7 +386,7 @@ fn a_shell_takes_everything_until_broken_then_comes_back() {
     assert!(health(&app, gunner) < full - 29.0);
     // Left alone, it comes back.
     ticks(&mut app, 60 * 6);
-    assert_eq!(condition(&app, gunner).shell, 255, "never came back");
+    assert_eq!(condition(&app, gunner).shell, 16, "never came back");
 }
 
 #[test]

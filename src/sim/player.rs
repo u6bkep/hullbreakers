@@ -269,9 +269,9 @@ impl Player {
     }
 
     /// Shoved (by a blast): `dv` (world, m/s) is added to the player's
-    /// velocity. On boots (`frame` the body underfoot's), a shove that would
-    /// lift them off the deck, or slide them hard along it, knocks them off;
-    /// a lesser one is a stagger along the deck.
+    /// velocity. On boots (`frame` the body underfoot's), a shove that beats
+    /// their grip, lifting them off the deck or sliding them along it, knocks
+    /// them off; a lesser one is a stagger along the deck.
     pub fn shove(&mut self, dv: Vec3, frame: Option<&BodyFrame>, tuning: &Tuning) {
         match self.mode {
             Mode::Eva { ref mut velocity, .. } => *velocity += dv,
@@ -287,7 +287,7 @@ impl Player {
                 let local = frame.dir_to_local(dv);
                 let peel = local.dot(up);
                 let along = local - up * peel;
-                if peel > SHOVE_PEEL || along.length() > SHOVE_SKID {
+                if peel > tuning.adhesion_accel * SHOVE_SECONDS || along.length() > tuning.shear_accel * SHOVE_SECONDS {
                     self.mode = booted_to_eva(frame, feet, up, velocity + local, orientation, pitch, tuning);
                     self.detach_timer = tuning.detach_cooldown;
                     self.emit(PlayerEvent::Detached(Detach::Blasted));
@@ -299,10 +299,10 @@ impl Player {
     }
 }
 
-/// A shove lifting a booted player off the deck faster than this (m/s), or
-/// sliding them along it faster than this, knocks them off their boots.
-const SHOVE_PEEL: f32 = 1.5;
-const SHOVE_SKID: f32 = 3.0;
+/// How long a shove lasts (s): its change of velocity over this is the pull
+/// the boots have to hold against (their adhesion, off the deck; their
+/// shear, along it), so a stronger grip shrugs off more.
+const SHOVE_SECONDS: f32 = 0.1;
 
 /// Ticks after a beam shoves a player before it can again.
 const BEAM_HIT_COOLDOWN: u32 = 30;

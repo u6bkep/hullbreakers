@@ -20,6 +20,12 @@ mod blast;
 mod crew;
 
 pub use affixes::{Affix, Affixes, Condition, absorb, robot_upkeep};
+
+/// A robot destroyed: it's gone the tick after. Inserted (and replicated,
+/// reliably, as its despawn is) so every peer knows it was destroyed and not
+/// tidied away; in its last tick it's inert (no brain, no input).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wrecked;
 pub use blast::{Detonation, blast_of, detonate};
 pub use crew::{Posting, Threat, compose_crew, crew_ship, mount, spawn_zoo};
 
@@ -1036,16 +1042,21 @@ fn to_input(view: Quat, dir: Vec3) -> Vec3 {
     Vec3::new(local.x, local.y, -local.z)
 }
 
-/// Authority: a robot out of health is destroyed. A volatile one goes up
-/// (see [`blast`]).
+/// Authority: a robot out of health is destroyed: marked [`Wrecked`] (and
+/// stilled), and gone the tick after. A volatile one goes up (see
+/// [`blast`]).
 pub fn settle_robot_deaths(
     base: Res<Tuning>,
     bodies: Bodies,
-    robots: Query<(Entity, &Robot, &Affixes, &Player, &Vitals, Option<&Brain>, Option<&BodyTuning>)>,
+    robots: Query<(Entity, &Robot, &Affixes, &Player, &Vitals, Option<&Brain>, Option<&BodyTuning>, Has<Wrecked>)>,
     mut detonations: MessageWriter<Detonation>,
     mut commands: Commands,
 ) {
-    for (entity, kind, affixes, player, vitals, brain, own) in &robots {
+    for (entity, kind, affixes, player, vitals, brain, own, wrecked) in &robots {
+        if wrecked {
+            commands.entity(entity).despawn();
+            continue;
+        }
         if vitals.health > 0.0 {
             continue;
         }
@@ -1054,7 +1065,7 @@ pub fn settle_robot_deaths(
             let (at, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
             detonations.write(blast_of(*kind, at, entity, brain.and_then(|b| b.state.last_hit_by)));
         }
-        commands.entity(entity).despawn();
+        commands.entity(entity).insert(Wrecked).remove::<(Brain, PlayerInput)>();
     }
 }
 

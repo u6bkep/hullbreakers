@@ -24,7 +24,7 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::sim::asteroids::Asteroid;
-use crate::sim::bots::{Affixes, Condition, Robot};
+use crate::sim::bots::{Affixes, Condition, Robot, Wrecked};
 use crate::sim::pickups::Pickup;
 use crate::sim::combat::Combatant;
 use crate::sim::vitals::{HitLog, Vitals};
@@ -269,6 +269,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Robot>().replicate_once();
         app.component::<Affixes>().replicate_once();
         app.component::<Condition>().replicate();
+        app.component::<Wrecked>().replicate_once();
         app.component::<DeckSlot>().replicate_once();
         app.component::<Pickup>().replicate();
         app.component::<Flight>().replicate();

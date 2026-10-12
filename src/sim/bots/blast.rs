@@ -64,7 +64,7 @@ pub fn detonate(
     spatial: SpatialQuery,
     mut blasts: MessageReader<Detonation>,
     mut bodies: Bodies,
-    mut players: Query<(Entity, &mut Player, Option<&BodyTuning>), With<Vitals>>,
+    mut players: Query<(Entity, &mut Player, Option<&BodyTuning>, Has<Robot>), With<Vitals>>,
     mut damage: MessageWriter<Damage>,
 ) {
     for blast in blasts.read() {
@@ -77,7 +77,7 @@ pub fn detonate(
                 .cast_ray(blast.at, dir, d, true, &SpatialQueryFilter::from_mask(Layer::World))
                 .is_some_and(|hit| hit.distance < d - 0.3)
         };
-        for (entity, mut player, own) in &mut players {
+        for (entity, mut player, own, robot) in &mut players {
             if entity == blast.robot {
                 continue;
             }
@@ -89,10 +89,12 @@ pub fn detonate(
             if k <= 0.0 || sheltered(center) {
                 continue;
             }
+            // The kill (and a chain's) is its killer's; the crew it hurts
+            // aren't their hits.
             damage.write(Damage {
                 target: entity,
                 amount: blast.damage * k,
-                source: blast.credit,
+                source: if robot { blast.credit } else { None },
                 weak: false,
             });
             let out = (center - blast.at).normalize_or(Vec3::Y);

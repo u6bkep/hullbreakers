@@ -34,20 +34,19 @@ use super::events::EventCursor;
 use super::render::Avatar;
 use super::sfx::{self, Synth, concat, mix, normalize, wav};
 use crate::sim::Layer;
-use crate::sim::bots::{Affix, Affixes, BodyTuning, Condition, Robot, blast_of, tuning_of};
+use crate::sim::bots::{Affix, Affixes, BodyTuning, Condition, Robot, Wrecked, blast_of, tuning_of};
 use crate::sim::events::PlayerEvent;
 use crate::sim::player::{Mode, Player};
 use crate::sim::tuning::Tuning;
-use crate::sim::vitals::Vitals;
 use crate::sim::weapons::GunKind;
 
 pub struct RobotFxPlugin;
 
 impl Plugin for RobotFxPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DeadMaterials>()
-            .add_systems(Startup, (setup_robot_fx, setup_robot_sounds))
+        app.add_systems(Startup, (setup_robot_fx, setup_robot_sounds))
             .add_observer(robot_destroyed)
+            .add_observer(undress)
             .add_systems(
                 PostUpdate,
                 (dress_robots, light_robots, draw_shells, draw_telegraphs)
@@ -386,6 +385,9 @@ fn light_robots(
             m.emissive = e;
         }
         for (affix, handle) in &look.lights {
+            if matches!(affix, Affix::Armoured | Affix::Marksman) {
+                continue;
+            }
             let Some(mut m) = materials.get_mut(handle) else { continue };
             m.emissive = match affix {
                 Affix::Shielded => {
@@ -641,10 +643,6 @@ fn drift_puffs(
 // ---------------------------------------------------------------------------
 // Destruction
 
-/// Emissive materials, put out: a destroyed robot's lights go dark.
-#[derive(Resource, Default)]
-struct DeadMaterials(HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>);
-
 /// A piece of a destroyed robot, tumbling away, bouncing off what it
 /// meets, then shrinking out of sight.
 #[derive(Component)]
@@ -674,26 +672,30 @@ fn pieces(kind: Robot) -> &'static [&'static str] {
 #[allow(clippy::too_many_arguments)]
 fn robot_destroyed(
     remove: On<Remove, Robot>,
-    robots: Query<(&Robot, &Vitals, Option<&BodyTuning>, Option<&Affixes>, &Player)>,
+    robots: Query<(&Robot, Has<Wrecked>, Option<&Affixes>, &Player)>,
     avatars: Query<(Entity, &Avatar, &Transform)>,
     tree: (Query<&Children>, Query<&Name>, Query<&GlobalTransform>),
+    lamps: (Query<(), Or<(With<PointLight>, With<SpotLight>)>>, Query<&Mesh3d>, Option<Res<RobotFxAssets>>),
     lit: Query<&MeshMaterial3d<StandardMaterial>>,
     velocities: Query<&LinearVelocity>,
     listener: Query<&Player, With<LocalPlayer>>,
     view: Query<&Transform, With<PlayerCamera>>,
     assets: (Option<Res<FxAssets>>, Option<Res<RobotSounds>>),
-    mut dead: ResMut<DeadMaterials>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut camera: ResMut<CameraFx>,
     mut commands: Commands,
 ) {
     let (children, names, globals) = tree;
-    let (Ok((&kind, vitals, own, affixes, player)), (Some(fx), sounds)) = (robots.get(remove.entity), assets) else {
+    let (lights, meshes, robot_fx) = lamps;
+    let (Ok((&kind, wrecked, affixes, player)), (Some(fx), sounds)) = (robots.get(remove.entity), assets) else {
         return;
     };
-    if own.is_some_and(|t| vitals.health >= t.0.player_health) {
+    if !wrecked {
         return;
     }
+    // Its lights put out: dark copies of its glowing materials, for this
+    // wreck alone (they go with its pieces).
+    let mut dead: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>> = HashMap::new();
     let Some((avatar, _, transform)) = avatars.iter().find(|(_, a, _)| a.player == remove.entity) else {
         return;
     };
@@ -724,11 +726,17 @@ fn robot_destroyed(
                 life: 1.6 + 1.2 * rand::random::<f32>(),
             },
         ));
-        // Lights out.
+        // Lights out: its lamps (a beacon, a searchlight and its shaft) go,
+        // and its glowing materials go dark.
         for e in std::iter::once(part).chain(children.iter_descendants(part)) {
+            let shaft = robot_fx.as_ref().is_some_and(|r| meshes.get(e).is_ok_and(|m| m.0 == r.beam_cone));
+            if lights.contains(e) || shaft {
+                commands.entity(e).despawn();
+                continue;
+            }
             let Ok(material) = lit.get(e) else { continue };
             let id = material.0.id();
-            let dark = match dead.0.get(&id) {
+            let dark = match dead.get(&id) {
                 Some(h) => h.clone(),
                 None => {
                     let Some(m) = materials.get(&material.0) else { continue };
@@ -739,7 +747,7 @@ fn robot_destroyed(
                     m.emissive = LinearRgba::BLACK;
                     m.base_color = m.base_color.with_luminance(m.base_color.luminance() * 0.4);
                     let h = materials.add(m);
-                    dead.0.insert(id, h.clone());
+                    dead.insert(id, h.clone());
                     h
                 }
             };
@@ -780,6 +788,15 @@ fn robot_destroyed(
         && shared
     {
         play_at(&mut commands, &s.crash, 1.0, 0.9 + 0.2 * rand::random::<f32>(), at);
+    }
+}
+
+/// A robot's avatar gone: what it had drawn in the world goes with it (the
+/// marksman's laser isn't parented to it).
+fn undress(remove: On<Remove, RobotLook>, looks: Query<&RobotLook>, mut commands: Commands) {
+    let Ok(look) = looks.get(remove.entity) else { return };
+    for e in look.laser.into_iter().flatten() {
+        commands.entity(e).try_despawn();
     }
 }
 

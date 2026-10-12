@@ -146,7 +146,7 @@ impl Affixes {
 /// and kept coarse so it changes rarely.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Condition {
-    /// The shell's charge, in 255ths of full (Shielded); 0 is broken.
+    /// The shell's charge, in sixteenths of full (Shielded); 0 is broken.
     pub shell: u8,
     /// Counts the hits the shell has taken (wrapping): a change is a flash.
     pub shell_hits: u8,
@@ -171,7 +171,7 @@ impl Condition {
 
     fn update(&mut self, state: &State, affixes: Affixes) {
         self.shell = if state.shell_max > 0.0 {
-            (state.shell / state.shell_max * 255.0).ceil().clamp(0.0, 255.0) as u8
+            (state.shell / state.shell_max * 16.0).ceil().clamp(0.0, 16.0) as u8
         } else {
             0
         };
@@ -184,7 +184,7 @@ impl Condition {
     }
 
     pub fn shell_fraction(&self) -> f32 {
-        self.shell as f32 / 255.0
+        self.shell as f32 / 16.0
     }
 
     pub fn heat_fraction(&self) -> f32 {
@@ -303,8 +303,9 @@ pub(super) fn mind(mut m: Mind, kind: Robot, affixes: Affixes, rallied: bool) ->
 /// Authority, as a hit lands (see `vitals::apply_damage`): how much of it
 /// reaches the robot's health, and whether it counts as a weak-spot hit.
 /// A shell takes it all while it lasts; a venting robot is all weak spot;
-/// armour turns most of a body hit.
-pub fn absorb(affixes: Affixes, brain: &mut Brain, condition: &mut Condition, source: Option<Entity>, amount: f32, weak: bool) -> (f32, bool) {
+/// armour turns most of a body hit. (`condition` is only touched, and so
+/// only re-sent, when the shell takes the hit.)
+pub fn absorb(affixes: Affixes, brain: &mut Brain, condition: &mut Mut<Condition>, source: Option<Entity>, amount: f32, weak: bool) -> (f32, bool) {
     let state = &mut brain.state;
     state.since_hit = 0.0;
     if source.is_some() {
@@ -349,6 +350,8 @@ pub fn robot_upkeep(
     for (entity, _, affixes, player, input, mut brain, mut condition, own) in &mut robots {
         let at = position(player, own);
         let home = brain.home;
+        // A grappler heats as it throws and reels, as a gunner does firing.
+        let brain_attack = brain.attack;
         let state = &mut brain.state;
         state.since_hit += dt;
         if state.shell_max > 0.0 && state.since_hit > SHELL_DELAY {
@@ -358,7 +361,7 @@ pub fn robot_upkeep(
             if state.venting() {
                 state.vent = (state.vent - dt).max(0.0);
                 state.heat = state.vent / VENT_SECONDS;
-            } else if input.main.held {
+            } else if input.main.held || matches!(brain_attack, super::Attack::Winding(_) | super::Attack::Reeling(_)) {
                 state.heat += dt / HEAT_SECONDS;
                 if state.heat >= 1.0 {
                     state.heat = 1.0;
