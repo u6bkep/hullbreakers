@@ -287,6 +287,11 @@ impl EventLog {
         self.tick
     }
 
+    /// Whether the two hold the same entries (whatever tick each is on).
+    pub fn same_entries(&self, other: &EventLog) -> bool {
+        self.entries == other.entries
+    }
+
     pub fn push(&mut self, event: PlayerEvent) {
         self.entries.push_back((self.tick, event));
     }

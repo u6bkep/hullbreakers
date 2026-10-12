@@ -796,3 +796,16 @@ fn a_crawler_on_the_outer_hull_goes_over_the_edge_to_whoever_is_crossing() {
     assert!(most_x > 0.9, "never went over onto the starboard side (most up.x {most_x})");
     assert!(lowest < full, "never hurt them");
 }
+
+#[test]
+fn robots_follow_the_hosts_tuning_edits() {
+    use hullbreakers::sim::bots::BodyTuning;
+    let mut app = app();
+    let gunner = gunner_on_deck(&mut app, Vec3::new(0.0, 0.01, 12.0));
+    let speed = |app: &App| app.world().get::<BodyTuning>(gunner).unwrap().0.thrust_accel;
+    let before = speed(&app);
+    // The F1 panel: a shared setting the robots' own builds don't override.
+    app.world_mut().resource_mut::<Tuning>().thrust_accel += 5.0;
+    ticks(&mut app, 2);
+    assert!((speed(&app) - (before + 5.0)).abs() < 1e-4, "the robot kept {} after the host's edit", speed(&app));
+}

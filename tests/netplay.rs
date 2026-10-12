@@ -460,7 +460,9 @@ fn a_held_laser_is_cheap_on_the_wire() {
     eprintln!("laser on the wire: standing {idle:.0} B/s, beam held {beam:.0} B/s");
     // Measured 2026-10-12 (before the fauna came): 6.3 kB/s standing; a beam
     // as a `Fired` entry a tick added 65.5 kB/s, as held state 0.8. With the
-    // fauna in the world: 45.2 kB/s standing, the beam adding 5.4.
+    // fauna in the world: 45.2 kB/s standing, the beam adding 5.4; with idle
+    // robots and creatures no longer re-sent every tick (docs/perf.md):
+    // 14.4 standing, the beam adding nothing measurable.
     assert!(beam - idle < 10_000.0, "a beam costs {beam:.0} B/s against {idle:.0} standing");
 }
 
@@ -1052,4 +1054,69 @@ fn measure_rope(robot_mass_scale: f32, what: &str) {
 #[ignore]
 fn measure_rope_yank() {
     measure_rope(1.0, "rope yank (winched 12 m to 4 m at 15 m/s)");
+}
+
+
+/// A measuring tool, not a check (`cargo test --test netplay
+/// replicated_changes -- --ignored --nocapture`): what a client receives
+/// standing still in the field and in the boarding action, and how often
+/// each replicated component is re-marked changed on the server over two
+/// seconds (each mark sends it again), split between robots and the rest.
+/// See `docs/perf.md`.
+#[test]
+#[ignore]
+fn replicated_changes() {
+    use hullbreakers::sim::bots::{Condition, Robot};
+    use hullbreakers::sim::combat::Combatant;
+    use hullbreakers::sim::devices::Devices;
+    use hullbreakers::sim::fauna::Grazer;
+    use hullbreakers::sim::mission::{Director, Mission, ScenarioKind};
+    use hullbreakers::sim::motion::Motion;
+    use hullbreakers::sim::pickups::Pickup;
+    use hullbreakers::sim::player::PlayerTelemetry;
+    use hullbreakers::sim::vitals::{HitLog, HurtLog, Vitals};
+    use std::collections::HashMap;
+    for scenario in [None, Some(ScenarioKind::Boarding)] {
+        let (_guard, mut s) = session(0);
+        if let Some(k) = scenario {
+            s.server.world_mut().resource_mut::<Director>().start(k);
+        }
+        s.step(240);
+        let mut last: HashMap<(Entity, &'static str), u32> = HashMap::new();
+        let mut counts: HashMap<&'static str, (usize, usize)> = HashMap::new();
+        let frames = 120;
+        for _ in 0..frames {
+            s.step(1);
+            let world = s.server.world_mut();
+            macro_rules! track {
+                ($t:ty, $name:literal) => {{
+                    let mut q = world.query::<(Entity, Ref<$t>, Option<&Robot>)>();
+                    for (e, c, robot) in q.iter(world) {
+                        let tick = c.last_changed().get();
+                        let entry = counts.entry($name).or_default();
+                        if last.insert((e, $name), tick).is_some_and(|t| t != tick) {
+                            if robot.is_some() { entry.1 += 1 } else { entry.0 += 1 }
+                        }
+                    }
+                }};
+            }
+            track!(Name, "Name");
+            track!(Devices, "Devices");
+            track!(Grazer, "Grazer");
+            track!(Condition, "Condition");
+            track!(Pickup, "Pickup");
+            track!(Combatant, "Combatant");
+            track!(Vitals, "Vitals");
+            track!(HitLog, "HitLog");
+            track!(HurtLog, "HurtLog");
+            track!(Mission, "Mission");
+            track!(Motion, "Motion");
+            track!(PlayerTelemetry, "PlayerTelemetry");
+            track!(Player, "Player");
+        }
+        let rate = s.received_rate(180);
+        let mut v: Vec<_> = counts.into_iter().collect();
+        v.sort();
+        eprintln!("PROBE {scenario:?}: {rate:.0} B/s; changes in {frames} frames (non-robot, robot): {v:?}");
+    }
 }

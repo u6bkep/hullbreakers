@@ -85,8 +85,17 @@ pub enum SimSystems {
 /// generating components.
 pub struct SimSharedPlugin;
 
+/// Avian's solver substeps per tick. Its default (6) buys stiff joints and
+/// stacks; this world has neither (rocks and creatures in free flight that
+/// now and then collide; ropes and boots are our own, outside the solver),
+/// and the solver over hundreds of rocks was most of a tick. (Measured: see
+/// docs/perf.md.) `HULLBREAKERS_SUBSTEPS=n` overrides it, for comparing.
+pub const PHYSICS_SUBSTEPS: u32 = 2;
+
 impl Plugin for SimSharedPlugin {
     fn build(&self, app: &mut App) {
+        let substeps = std::env::var("HULLBREAKERS_SUBSTEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(PHYSICS_SUBSTEPS);
+        app.insert_resource(SubstepCount(substeps));
         if !app.world().contains_resource::<tuning::Tuning>() {
             let tuning = tuning::Tuning::load_or_default(std::path::Path::new(tuning::TUNING_PATH));
             app.insert_resource(tuning);
@@ -109,6 +118,8 @@ impl Plugin for SimSharedPlugin {
             .add_observer(scenarios::recovery::shape_pod)
             // How its devices look here (a client's own presses at once).
             .add_systems(Update, devices::show_devices)
+            // Robots are built from the host's tuning, as it's edited.
+            .add_systems(FixedPreUpdate, bots::retune_robots)
             // A ship's closed doors are part of its collider, wherever it is.
             .add_systems(
                 FixedPostUpdate,
@@ -244,6 +255,7 @@ impl Plugin for SimPlugin {
                     .after(SimSystems::Beams)
                     .before(SimSystems::Players),
             )
+            .add_systems(FixedPostUpdate, bots::quiet_idle_robots.after(SimSystems::Players).before(SimSystems::Mission))
             .configure_sets(
                 FixedPostUpdate,
                 (

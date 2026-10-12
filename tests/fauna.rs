@@ -499,3 +499,31 @@ fn a_bullet_finds_a_limpets_sac() {
     let took = full - health(&app, limpet);
     assert!((took - 25.0).abs() < 0.1, "a bullet in its sac took {took}");
 }
+
+#[test]
+fn a_grazer_kept_bolting_is_not_rewritten_every_tick() {
+    // (Its replicated state goes out whenever it's marked changed.)
+    let mut app = app();
+    let at = Vec3::new(0.0, 0.0, -100.0);
+    let g = grazer_at(&mut app, 6, Mood::Grazing, at, Quat::IDENTITY);
+    let me = crew(&mut app);
+    adrift(&mut app, me, at + Vec3::new(-12.0, 0.0, 0.0));
+    set(&mut app, me, |p| {
+        p.grapple = Some(Grapple {
+            target: g,
+            anchor: Vec3::new(-1.5, 0.0, 0.0),
+            length: 10.5,
+            tension: 0.0,
+        })
+    });
+    ticks(&mut app, 30);
+    assert_eq!(grazer(&app, g).mood, Mood::Startled);
+    let changed = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<Ref<Grazer>>().get(world, g).unwrap().last_changed()
+    };
+    let before = changed(&mut app);
+    ticks(&mut app, 60);
+    assert_eq!(grazer(&app, g).mood, Mood::Startled, "it stopped bolting while hooked");
+    assert_eq!(changed(&mut app), before, "rewritten while nothing about it changed");
+}

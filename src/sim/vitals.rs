@@ -195,8 +195,17 @@ pub fn apply_damage(
     // The crew's suits heal (to their own most: rank plates them); robots
     // and creatures don't.
     for (mut v, robot, player, own, _) in &mut vitals {
-        v.since_hurt += dt;
-        if player && !robot && v.since_hurt > tuning.health_regen_delay {
+        let crew = player && !robot;
+        // The hurt clock runs for everyone, but only the crew's is anyone's
+        // business on the wire (their HUD shows the wait for their suit to
+        // heal): a robot's or a creature's ticks without marking a change,
+        // so it isn't re-sent every tick.
+        if crew {
+            v.since_hurt += dt;
+        } else {
+            v.bypass_change_detection().since_hurt += dt;
+        }
+        if crew && v.since_hurt > tuning.health_regen_delay {
             v.health = (v.health + tuning.health_regen_rate * dt).min(tuning_of(&tuning, own).player_health);
         }
     }

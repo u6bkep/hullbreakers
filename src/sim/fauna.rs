@@ -350,7 +350,10 @@ const BLAST: f32 = 60.0;
 const TRAMPLE_SPEED: f32 = 3.0;
 const TRAMPLE_HURT: f32 = 12.0;
 
-fn startle(grazer: &mut Grazer, mind: &mut GrazerMind, tick: u32, from: Vec3) {
+/// Startles a grazer (or keeps it startled), from `from`. Its replicated
+/// state is written only when its mood actually changes: a grazer kept
+/// bolting (hooked, say) isn't re-sent every tick.
+fn startle(grazer: &mut Mut<Grazer>, mind: &mut GrazerMind, tick: u32, from: Vec3) {
     if grazer.dormant {
         return;
     }

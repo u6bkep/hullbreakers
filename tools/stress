@@ -14,6 +14,15 @@
 #   firefight  the field with 10 Gunners + 20 Swarmers around our ship and
 #              the player on the roof firing continuously (HULLBREAKERS_STRESS)
 #   coop       the field with a host and a client (both measured)
+#   carrier    the boarding action, the player aboard the carrier on its lower
+#              deck firing continuously, its crew coming at them
+#              (HULLBREAKERS_STRESS=carrier)
+#   derelict   the dead ship with its power routed (its rooms lit), the
+#              player in its junction (HULLBREAKERS_STRESS=derelict)
+#   coop-boarding  the boarding action with a host and a client
+#
+# An authority's report also has what it sent each remote client
+# (sent_per_client: packets and kB a second).
 #
 # Options:
 #   --builds LIST    release,dev (default release,dev; dev = `cargo run`'s profile)
@@ -59,7 +68,7 @@ while [[ $# -gt 0 ]]; do
     --out) out="$2"; shift 2 ;;
     --keep-traces) keep_traces=1; shift ;;
     --ab) read -ra ab_variants <<<"$2"; shift 2 ;;
-    -h | --help) sed -n '2,36p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,45p' "$0"; exit 0 ;;
     -*) echo "stress: unknown option $1" >&2; exit 2 ;;
     *) scenarios+=("$1"); shift ;;
     esac
@@ -131,7 +140,10 @@ run() {
     case "$scenario" in
     gallery | field | boarding) env+=(HULLBREAKERS_SCENARIO="$scenario") ;;
     firefight) env+=(HULLBREAKERS_SCENARIO=field HULLBREAKERS_STRESS=firefight) ;;
+    carrier) env+=(HULLBREAKERS_SCENARIO=boarding HULLBREAKERS_STRESS=carrier) ;;
+    derelict) env+=(HULLBREAKERS_SCENARIO=derelict HULLBREAKERS_STRESS=derelict) ;;
     coop) env+=(HULLBREAKERS_SCENARIO=field) ;;
+    coop-boarding) env+=(HULLBREAKERS_SCENARIO=boarding) ;;
     *) echo "stress: unknown scenario $scenario" >&2; exit 2 ;;
     esac
     if [[ -n "$trace" ]]; then
@@ -139,7 +151,7 @@ run() {
         env+=(TRACE_CHROME="$trace" RUST_LOG="info,wgpu=error,naga=warn,bevy_ecs::query::state=warn,bevy_ecs::schedule::executor=warn")
     fi
     echo "stress: $label"
-    if [[ "$scenario" == coop ]]; then
+    if [[ "$scenario" == coop || "$scenario" == coop-boarding ]]; then
         env HULLBREAKERS_PROFILE_LABEL="$label-host" "${env[@]:1}" tools/hl game --port "$port" >/dev/null
         sleep 2
         env HULLBREAKERS_PROFILE_LABEL="$label-client" "${env[@]:1}" tools/hl game --connect "127.0.0.1:$port" >/dev/null

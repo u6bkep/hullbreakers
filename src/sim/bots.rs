@@ -561,6 +561,19 @@ pub fn add_affix_tuning(add: On<Add, Affixes>, robots: Query<(&Robot, Option<&Af
     fit_body(add.entity, &robots, &base, commands);
 }
 
+/// Every peer: when the host's tuning changes (the F1 panel), every robot
+/// is refitted from it, as players' rank tuning is (see
+/// `progression::tune_to_rank`).
+pub fn retune_robots(base: Res<Tuning>, robots: Query<(Entity, &Robot, Option<&Affixes>)>, mut commands: Commands) {
+    if !base.is_changed() || base.is_added() {
+        return;
+    }
+    for (entity, kind, affixes) in &robots {
+        let tuning = body_tuning(*kind, affixes.copied().unwrap_or_default(), &base);
+        commands.entity(entity).insert((capsule(&tuning), BodyTuning(tuning)));
+    }
+}
+
 fn fit_body(entity: Entity, robots: &Query<(&Robot, Option<&Affixes>)>, base: &Tuning, mut commands: Commands) {
     let Ok((kind, affixes)) = robots.get(entity) else { return };
     let tuning = body_tuning(*kind, affixes.copied().unwrap_or_default(), base);
@@ -1374,6 +1387,63 @@ pub fn settle_robot_deaths(
             detonations.write(blast_of(*kind, at, entity, brain.and_then(|b| b.state.last_hit_by)));
         }
         commands.entity(entity).insert(Wrecked).remove::<(Brain, PlayerInput)>();
+    }
+}
+
+/// A robot's state as it was last marked changed, and when.
+#[derive(Component)]
+pub struct LastChange(Player, bevy::ecs::change_detection::Tick);
+
+/// Authority, after players move: a robot whose state came out of the tick
+/// as it went in (but for its event log counting the tick) keeps its old
+/// change tick, so it isn't re-sent. An idle robot (a limpet lurking on its
+/// rock, a turret with nothing to track, a gallery exhibit) costs the
+/// network nothing; one that moves, turns or does anything is sent as
+/// before.
+pub fn quiet_idle_robots(mut robots: Query<(Entity, Mut<Player>, Option<&mut LastChange>), With<Robot>>, mut commands: Commands) {
+    for (entity, mut player, last) in &mut robots {
+        let Some(mut last) = last else {
+            commands.entity(entity).insert(LastChange(player.clone(), player.last_changed()));
+            continue;
+        };
+        if player.last_changed() == last.1 {
+            continue;
+        }
+        // The same but for the log's tick count, and where it stands or
+        // floats by less than a millimetre (boots re-seating on a turning
+        // rock jitter it in the last bits): compared with what was last
+        // sent, so a slow drift still goes out once it adds up.
+        let idle = player.events.same_entries(&last.0.events) && near(&player.mode, &last.0.mode) && {
+            let mut was = last.0.clone();
+            was.events = player.events.clone();
+            was.mode = player.mode;
+            was == *player
+        };
+        if idle {
+            let tick = last.1;
+            player.set_last_changed(tick);
+        } else {
+            last.0 = player.clone();
+            last.1 = player.last_changed();
+        }
+    }
+}
+
+/// Whether two modes are the same to within what anyone could see.
+fn near(a: &Mode, b: &Mode) -> bool {
+    const AT: f32 = 1e-3;
+    const TURN: f32 = 1e-3;
+    let turned = |p: Quat, q: Quat| super::motion::rotation_error(p, q) < TURN;
+    match (*a, *b) {
+        (
+            Mode::Booted { body: b0, feet: f0, up: u0, velocity: v0, orientation: o0, pitch: p0 },
+            Mode::Booted { body: b1, feet: f1, up: u1, velocity: v1, orientation: o1, pitch: p1 },
+        ) => b0 == b1 && f0.distance(f1) < AT && u0.angle_between(u1) < TURN && v0.distance(v1) < AT && turned(o0, o1) && (p0 - p1).abs() < TURN,
+        (
+            Mode::Eva { position: x0, velocity: v0, orientation: o0, pitch: p0 },
+            Mode::Eva { position: x1, velocity: v1, orientation: o1, pitch: p1 },
+        ) => x0.distance(x1) < AT && v0.distance(v1) < AT && turned(o0, o1) && (p0 - p1).abs() < TURN,
+        _ => false,
     }
 }
 

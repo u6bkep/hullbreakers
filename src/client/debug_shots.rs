@@ -457,7 +457,7 @@ fn power_vantages() -> Vec<(&'static str, Vantage)> {
 
 /// Debug: routes the derelict's power to its vault, as a crew would have,
 /// straight into the authority's state (the shots run on a host).
-fn power_up(hull: &ShipHull, devices: &mut Devices) {
+pub(crate) fn power_up(hull: &ShipHull, devices: &mut Devices) {
     let design = hull.design();
     for (id, set) in [("reactor", 1), ("j1", 2), ("j2", 1), ("j3", 1)] {
         devices.0[design.device(id)].set = set;

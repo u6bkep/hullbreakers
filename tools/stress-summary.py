@@ -42,6 +42,7 @@ def table(paths):
         ("robots", lambda d: f'{d["counts"]["robots"]["mean"]:.0f}', ">"),
         ("tracers", lambda d: f'{d["counts"]["tracers"]["mean"]:.0f}', ">"),
         ("sparks", lambda d: f'{d["counts"]["bullet_sparks"]["mean"] + d["counts"]["hull_sparks"]["mean"]:.0f}', ">"),
+        ("sent kB/s", lambda d: "/".join(f'{c["kbytes_per_s"]:.1f}' for c in d.get("sent_per_client", [])) or "-", ">"),
     ]
     rows = [[c[0] for c in cols]] + [[c[1](d) for c in cols] for d in runs]
     widths = [max(len(r[i]) for r in rows) for i in range(len(cols))]
@@ -52,7 +53,7 @@ def table(paths):
     print("\nframe/fixed in ms; fixed = RunFixedMainLoop (lightyear + sim + physics) per frame;")
     print("gpu* = sum of Bevy's instrumented GPU passes (shadow passes are not instrumented);")
     print("gpu busy% = the GPU's own utilisation (whole card, includes anything else on it);")
-    print("cpu cores = process CPU time / wall time.")
+    print("cpu cores = process CPU time / wall time; sent = an authority's payload bytes to each remote client.")
 
 
 def name_of(raw):
