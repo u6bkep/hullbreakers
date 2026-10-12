@@ -158,6 +158,9 @@ impl Plugin for NetPlugin {
             .add_observer(on_link)
             .add_observer(replicate_body::<Drift>)
             .add_observer(replicate_body::<Asteroid>)
+            // A grazer changes its own motion only in its pulses: between
+            // them it's in free flight like a rock (see `sim::fauna`).
+            .add_observer(replicate_body::<crate::sim::fauna::Grazer>)
             .add_observer(replicate_body::<Debris>)
             .add_observer(replicate_body::<Site>)
             .add_observer(replicate_body::<crate::sim::scenarios::recovery::Pod>)
@@ -279,6 +282,8 @@ impl Plugin for ProtocolPlugin {
         app.component::<crate::sim::scenarios::recovery::Pod>().replicate();
         app.component::<crate::sim::mission::BodyId>().replicate_once();
         app.component::<Asteroid>().replicate_once();
+        // Its mood and when it began: every peer times its pulses from it.
+        app.component::<crate::sim::fauna::Grazer>().replicate();
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
         app.component::<Robot>().replicate_once();

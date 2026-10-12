@@ -304,6 +304,7 @@ pub fn draw_gizmos(
     transforms: Query<&Transform, (Without<PlayerCamera>, Without<Avatar>)>,
     avatars: Query<(&Avatar, &Transform)>,
     camera: Single<&Transform, With<PlayerCamera>>,
+    kinds: Query<&Robot>,
     mut rope_sag: Local<f32>,
 ) {
     let (me, player) = *player;
@@ -337,6 +338,13 @@ pub fn draw_gizmos(
             continue;
         };
         if let Some(anchor) = rope_anchor(&grapple) {
+            if kinds.get(entity).is_ok_and(|k| *k == Robot::Limpet) {
+                // A limpet's tendril, from its snout (its middle is its
+                // capsule's, 0.32 up).
+                let snout = avatar.translation + avatar.rotation * Vec3::new(0.0, -0.2, -0.43);
+                draw_tendril(&mut gizmos, &grapple, snout, anchor, time.elapsed_secs());
+                continue;
+            }
             let hand = avatar.translation + avatar.rotation * Vec3::new(0.25, 0.2, -0.3);
             draw_rope(
                 &mut gizmos,
@@ -439,6 +447,26 @@ pub fn draw_gizmos(
 /// - pulling (reeling or under load): orange to red with load, with dashes
 ///   crawling toward you while the winch runs.
 #[allow(clippy::too_many_arguments)]
+/// A limpet's tendril: flesh, not rope. It writhes (a wave running down
+/// it toward what it holds), and darkens and straightens as it hauls.
+fn draw_tendril(gizmos: &mut Gizmos, grapple: &Grapple, from: Vec3, to: Vec3, t: f32) {
+    let span = to - from;
+    let length = span.length().max(1e-3);
+    let dir = span / length;
+    let side = dir.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
+    let up = side.cross(dir);
+    let taut = (grapple.tension / 2000.0).clamp(0.0, 1.0);
+    let amplitude = (0.12 * (1.0 - 0.8 * taut)).min(length * 0.08);
+    let color = Color::srgb(0.75 - 0.25 * taut, 0.18, 0.42 - 0.12 * taut);
+    let points = (0..=32).map(|i| {
+        let k = i as f32 / 32.0;
+        let envelope = (std::f32::consts::PI * k).sin();
+        let phase = t * 9.0 - k * length * 2.5;
+        from + span * k + (side * phase.sin() + up * (phase * 0.7).cos() * 0.6) * amplitude * envelope
+    });
+    gizmos.linestrip(points, color);
+}
+
 fn draw_rope(
     gizmos: &mut Gizmos,
     tuning: &Tuning,
@@ -557,6 +585,7 @@ pub fn update_avatars(
                 Robot::Grappler => ("robots/grappler/grappler.glb", -tuning.capsule_height / 2.0),
                 Robot::Turret => ("robots/turret/turret.glb", -tuning.capsule_height / 2.0),
                 Robot::Crawler => ("robots/crawler/crawler.glb", -tuning.capsule_height / 2.0),
+                Robot::Limpet => ("fauna/limpet/limpet.glb", -tuning.capsule_height / 2.0),
             };
             commands
                 .spawn((Name::new(kind.name()), Avatar { player: entity }, pose, Visibility::default()))

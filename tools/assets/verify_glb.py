@@ -33,6 +33,7 @@ DIR_DEG = 5.0           # socket forward/up expectations
 COLOR_TOL = 2e-3        # linear colour factors
 CONVEX_TOL = 2e-5       # metres: float32 GLB positions
 PLANE_TOL = 2e-5        # metres: a triangle lies on an intended-flat plane
+WEAK_SPOT = "#ff40c8"   # emissive_core: the same hot magenta on every enemy (art-style.md)
 
 
 # ---------------------------------------------------------------- standards (shared with hb)
@@ -465,6 +466,10 @@ def verify(asset_dir):
     for nm in sorted(used_roles):
         if roles[nm].get("palette") and nm not in palette:
             rep.check(False, f"'{nm}' is used, so asset.json palette must name its colour (from the brief)")
+    if "emissive_core" in used_roles:
+        rep.check(palette.get("emissive_core", "").lower() == WEAK_SPOT,
+                  f"emissive_core is the weak-spot magenta {WEAK_SPOT} (got {palette.get('emissive_core')})")
+        rep.check("SOCKET_weak" in glb.index, "a model with an emissive_core weak spot marks it with SOCKET_weak")
     unused_palette = sorted(set(palette) - used_roles)
     if unused_palette:
         rep.warn(f"palette names roles the model doesn't use: {unused_palette}")
@@ -554,16 +559,23 @@ def verify(asset_dir):
                 if dot(gn, gn) < 1e-20:
                     continue
                 gn = norm(gn)
+                # A small triangle can lie on two modelled-flat planes a fraction of a degree
+                # apart (neighbouring faces of a rock); it counts for each, and its normals are
+                # judged against the closer one.
+                best = None
                 for k, (nx, ny, nz, d) in enumerate(planes):
-                    if dot(gn, (nx, ny, nz)) < 0.99999:
+                    align = dot(gn, (nx, ny, nz))
+                    if align < 0.99999:
                         continue
                     if all(abs(dot(v, (nx, ny, nz)) - d) < PLANE_TOL for v in (a, b, c)):
                         hit[k] += 1
-                        for q in range(3):
-                            dev = angle_deg(N[idx[t + q]], (nx, ny, nz))
-                            if dev > worst:
-                                worst, worst_at = dev, P[idx[t + q]]
-                        break
+                        if best is None or align > best[0]:
+                            best = (align, (nx, ny, nz))
+                if best is not None:
+                    for q in range(3):
+                        dev = angle_deg(N[idx[t + q]], best[1])
+                        if dev > worst:
+                            worst, worst_at = dev, P[idx[t + q]]
         found = sum(1 for h in hit if h)
         where = "" if worst_at is None or worst < FLAT_DEG else f" at {tuple(round(v, 4) for v in worst_at)}"
         rep.check(worst < FLAT_DEG, f"{nm}: {found}/{len(planes)} flat planes, worst vertex normal {worst:.2f} deg off{where}")

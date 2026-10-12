@@ -669,6 +669,7 @@ fn pieces(kind: Robot) -> &'static [&'static str] {
         Robot::Grappler => &["head", "upper_arm_l", "upper_arm_r", "winch", "thigh_l", "thigh_r", "torso", "pelvis"],
         Robot::Turret => &["barrel", "head", "base"],
         Robot::Crawler => &["leg_fl", "leg_ml", "leg_rl", "leg_fr", "leg_mr", "leg_rr", "head", "body"],
+        Robot::Limpet => &["plate_l", "plate_r", "plate_rear", "snout", "shell"],
     }
 }
 
@@ -1037,6 +1038,12 @@ pub struct RobotSounds {
     /// of it taking a new surface.
     clack: Handle<AudioSource>,
     clamp: Handle<AudioSource>,
+    /// A limpet's foot dragging over rock, it slapping onto a new face, its
+    /// tendril going in, and it gnawing at whoever it's on.
+    scrape: Handle<AudioSource>,
+    slap: Handle<AudioSource>,
+    tendril: Handle<AudioSource>,
+    gnaw: Handle<AudioSource>,
 }
 
 fn setup_robot_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
@@ -1067,6 +1074,10 @@ fn setup_robot_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSo
         blast: add(synth.explosion(1.8, 2600.0, 1.3)),
         clack: add(mix(synth.clank(0.05, 1650.0, 95.0, 0.6), synth.thud(0.04, 120.0, 2500.0, 0.4))),
         clamp: add(mix(synth.clank(0.25, 330.0, 22.0, 0.8), synth.thud(0.2, 25.0, 700.0, 0.7))),
+        scrape: add(mix(synth.thud(0.3, 10.0, 1300.0, 0.6), synth.crackle(0.3, 0.02, 0.993))),
+        slap: add(synth.thud(0.22, 18.0, 450.0, 1.0)),
+        tendril: add(mix(synth.sweep(0.18, 900.0, 160.0, 0.6, 0.7), synth.thud(0.12, 35.0, 600.0, 0.6))),
+        gnaw: add(mix(synth.crackle(0.3, 0.035, 0.988), synth.thud(0.25, 16.0, 320.0, 0.8))),
     });
 }
 
@@ -1103,18 +1114,23 @@ struct RobotHearing {
 /// carries this much further through a hull than other sounds do.
 const CLACK_EVERY: f32 = 0.13;
 const CLATTER_REACH: f32 = 2.5;
+/// A limpet's foot drags a scrape every this far (m); one on you gnaws
+/// this often (s).
+const SCRAPE_EVERY: f32 = 0.18;
+const GNAW_EVERY: f32 = 0.6;
 
 /// Robots' gunfire, and what their affixes and attacks sound like, heard
 /// where they are when they're on the body you're standing on.
 fn robot_sounds(
     time: Res<Time>,
     sounds: Res<RobotSounds>,
-    listener: Query<&Player, With<LocalPlayer>>,
+    listener: Query<(Entity, &Player), With<LocalPlayer>>,
     mut robots: Query<(Entity, &Robot, &Player, Option<&Condition>, Option<&Affixes>, Option<&mut RobotHearing>)>,
     avatars: Query<(&Avatar, &GlobalTransform)>,
     mut commands: Commands,
 ) {
-    let shared = listener.single().ok().and_then(|p| p.mode.body());
+    let me = listener.single().ok().map(|(e, _)| e);
+    let shared = listener.single().ok().and_then(|(_, p)| p.mode.body());
     for (entity, kind, player, condition, affixes, hearing) in &mut robots {
         let Some(mut hearing) = hearing else {
             commands.entity(entity).insert(RobotHearing::default());
@@ -1125,6 +1141,25 @@ fn robot_sounds(
         let events = hearing.events.take_new(&player.events);
         let c = condition.copied().unwrap_or_default();
         let last = std::mem::replace(&mut hearing.last, c);
+        // A limpet on you: its tendril going in, and it gnawing, through
+        // your suit.
+        if *kind == Robot::Limpet
+            && let (Some(me), Some(g)) = (me, player.grapple)
+            && g.target == me
+            && let Some(at) = avatars.iter().find(|(a, _)| a.player == entity).map(|(_, t)| t.translation())
+        {
+            if events.iter().any(|e| matches!(e, PlayerEvent::GrappleAttached { .. })) {
+                play_far(&mut commands, &sounds.tendril, 1.0, 0.9 + 0.2 * rand::random::<f32>(), at, sfx::STRUCTURE_SCALE * 2.0);
+            }
+            if g.length < 1.6 {
+                hearing.stride += time.delta_secs();
+                if hearing.stride > GNAW_EVERY {
+                    hearing.stride = 0.0;
+                    play_far(&mut commands, &sounds.gnaw, 0.9, 0.85 + 0.3 * rand::random::<f32>(), at, sfx::STRUCTURE_SCALE * 2.0);
+                }
+            }
+            continue;
+        }
         if shared.is_none() || player.mode.body() != shared {
             continue;
         }
@@ -1168,6 +1203,25 @@ fn robot_sounds(
         }
         // A crawler is heard well before it's seen: its feet clatter
         // through the hull, and it clunks onto each new surface.
+        // A limpet on your rock is heard dragging itself over it toward you,
+        // and its tendril going out.
+        if *kind == Robot::Limpet {
+            let reach = sfx::STRUCTURE_SCALE / CLATTER_REACH;
+            if let Mode::Booted { velocity, .. } = player.mode {
+                hearing.stride += velocity.length() * time.delta_secs();
+                if hearing.stride > SCRAPE_EVERY {
+                    hearing.stride = 0.0;
+                    play_far(&mut commands, &sounds.scrape, 0.6, pitch(), at, reach);
+                }
+            }
+            for &event in &events {
+                match event {
+                    PlayerEvent::SurfaceChanged { .. } | PlayerEvent::Landed { .. } => play_far(&mut commands, &sounds.slap, 0.8, pitch(), at, reach),
+                    PlayerEvent::GrappleAttached { .. } | PlayerEvent::GrappleMissed => play_far(&mut commands, &sounds.tendril, 0.9, pitch(), at, reach),
+                    _ => {}
+                }
+            }
+        }
         if *kind == Robot::Crawler
             && let Mode::Booted { velocity, .. } = player.mode
         {

@@ -17,6 +17,7 @@ from .space import axis_index, vec3
 
 class Prim:
     __slots__ = ("kind", "verts", "faces", "bevel", "smooth_angle", "seams", "facets")
+    # smooth_angle is in radians here (Part converts).
 
     def __init__(self, kind, bevel, smooth_angle):
         self.kind = kind
@@ -143,13 +144,13 @@ def frame(lo, hi, wall, axis, mat, bevel):
     return pr
 
 
-def auto_segments(radius, tol):
-    """Fewest segments (even, at least 8) for which a circle of `radius` is within `tol` of
+def auto_segments(radius, tol, minimum=8):
+    """Fewest segments (even, at least `minimum`) for which a circle of `radius` is within `tol` of
     its polygon (the sagitta r(1 - cos(pi/n)) <= tol), so the silhouette stays round."""
     if radius <= tol:
-        return 8
+        return minimum
     n = math.ceil(math.pi / math.acos(1.0 - tol / radius))
-    return max(8, n + (n % 2))
+    return max(minimum, n + (n % 2))
 
 
 def lathe(profile, axis, center, mats, segments, bevel, smooth_angle, smooth_seams=False):
@@ -266,7 +267,264 @@ def hull(points, mat, bevel):
         for v in bm.verts:
             index[v] = pr.v(v.co)
         for f in bm.faces:
-            pr.face([index[v] for v in f.verts], True, mat)
+            pr.face([index[v] for v in f.verts], True, _role(mat, f.calc_center_median()))
     finally:
         bm.free()
+    return pr
+
+
+# ---------------------------------------------------------------- organic primitives
+# Flora and fauna have no straight lines. These build closed shells from rings of points
+# (loft), tubes along a path (sweep), noisy ellipsoids (blob) and asteroid-style rocks
+# (lump). Their shading follows the `smooth` flag, never an angle guess:
+#   - smooth=True: the surface is one smooth skin. Every edge between its own band faces
+#     stays smooth whatever the angle (a low-poly organic surface shows its facets in the
+#     silhouette, not in the shading), unless `crease` (degrees) is given: then edges at
+#     least that sharp go hard.
+#   - smooth=False: faceted. Every band quad is split into two flat triangles, so the
+#     surface shades exactly flat per triangle (the asteroid look).
+# A material can be a role, or a function of a face's centre (Bevy world point) -> role,
+# for markings and two-tone rocks.
+
+
+def _role(mat, centre):
+    return mat(tuple(centre)) if callable(mat) else mat
+
+
+def _centre(pts):
+    n = len(pts)
+    return Vector((sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n, sum(p[2] for p in pts) / n))
+
+
+def _planar(pts, tol=1e-6):
+    """True when the closed ring `pts` lies on one plane (Newell normal)."""
+    nrm = Vector((0.0, 0.0, 0.0))
+    for i in range(len(pts)):
+        a, b = pts[i], pts[(i + 1) % len(pts)]
+        nrm.x += (a.y - b.y) * (a.z + b.z)
+        nrm.y += (a.z - b.z) * (a.x + b.x)
+        nrm.z += (a.x - b.x) * (a.y + b.y)
+    if nrm.length < 1e-12:
+        return False
+    nrm.normalize()
+    c = _centre(pts)
+    return all(abs((p - c).dot(nrm)) < tol for p in pts)
+
+
+def loft(rings, mat, smooth=True, crease=None):
+    """A closed shell through `rings`: each ring is a closed loop of points (Bevy world),
+    all with the same count; the first and last ring may be a single point (a pole: a
+    rounded or pointed end). Neighbouring rings are joined by quads. An end ring with more
+    than one point is capped: one flat face if it is planar, else a fan to its centre."""
+    rs = []
+    for i, r in enumerate(rings):
+        pts = [vec3(p, "loft point") for p in r]
+        if not pts:
+            raise ValueError(f"loft ring {i} is empty")
+        rs.append(pts)
+    if len(rs) < 2:
+        raise ValueError("loft needs at least 2 rings")
+    n = max(len(r) for r in rs)
+    if n < 3:
+        raise ValueError("loft rings need at least 3 points")
+    for i, r in enumerate(rs):
+        if len(r) == 1:
+            if 0 < i < len(rs) - 1:
+                raise ValueError(f"loft ring {i}: a single-point ring (a pole) is only allowed at the ends")
+        elif len(r) != n:
+            raise ValueError(f"loft ring {i} has {len(r)} points, the others {n}")
+    if len(rs) == 2 and len(rs[0]) == 1 and len(rs[1]) == 1:
+        raise ValueError("loft: two poles and nothing between them")
+
+    pr = Prim("loft", 0.0, math.radians(crease) if crease is not None else math.pi)
+    idx = [[pr.v(p) for p in r] for r in rs]
+    band_edges = []
+
+    def quad(a, b, c, d):
+        role = _role(mat, _centre([pr.verts[k] for k in (a, b, c, d)]))
+        if smooth:
+            pr.face((a, b, c, d), False, role)
+        else:                                   # two flat triangles
+            pr.face((a, b, c), True, role)
+            pr.face((a, c, d), True, role)
+
+    def tri(a, b, c):
+        pr.face((a, b, c), not smooth, _role(mat, _centre([pr.verts[k] for k in (a, b, c)])))
+
+    last = len(rs) - 1
+    for i in range(last):
+        ra, rb = idx[i], idx[i + 1]
+        for k in range(n):
+            kn = (k + 1) % n
+            if len(ra) == 1:
+                tri(ra[0], rb[kn], rb[k])
+                band_edges.append((ra[0], rb[k]))
+            elif len(rb) == 1:
+                tri(ra[k], ra[kn], rb[0])
+                band_edges.append((ra[k], rb[0]))
+            else:
+                quad(ra[k], ra[kn], rb[kn], rb[k])
+                band_edges.append((ra[k], rb[k]))
+            if len(rb) > 1 and i + 1 < last:    # a ring edge between two bands
+                band_edges.append((rb[k], rb[kn]))
+    for ring in (idx[0], idx[-1]):
+        if len(ring) == 1:
+            continue
+        pts = [pr.verts[k] for k in ring]
+        if _planar(pts):
+            pr.face(ring, True, _role(mat, _centre(pts)))
+        else:
+            c = pr.v(_centre(pts))
+            for k in range(n):
+                tri(ring[k], ring[(k + 1) % n], c)
+                band_edges.append((ring[k], c))
+                band_edges.append((ring[k], ring[(k + 1) % n]))
+    if smooth and crease is None:
+        pr.seams = band_edges
+    return pr
+
+
+def _basis(forward, up):
+    """Rotation (3x3) with local -Z along forward and +Y toward up, as space.frame does;
+    identity when both are None."""
+    from .space import frame
+    return frame((0.0, 0.0, 0.0), forward, up).to_3x3()
+
+
+def fbm(p, seed, octaves=3):
+    """Fractal Perlin noise in about [-1, 1] at point p; `seed` picks a far-off region of the
+    field, so the same seed always gives the same shape."""
+    import random
+
+    from mathutils import noise
+    rnd = random.Random(seed)
+    off = Vector((rnd.uniform(-500, 500), rnd.uniform(-500, 500), rnd.uniform(-500, 500)))
+    total, amp, freq, norm = 0.0, 1.0, 1.0, 0.0
+    for _ in range(octaves):
+        total += amp * noise.noise(Vector(p) * freq + off, noise_basis="PERLIN_ORIGINAL")
+        norm += amp
+        amp *= 0.5
+        freq *= 2.0
+    return total / norm
+
+
+def blob(center, radii, mat, segments, forward=None, up=None, noise=0.0, seed=0, frequency=1.5, smooth=True,
+         crease=None):
+    """A closed ellipsoid: a UV sphere with its poles on local Y, radii (rx, ry, rz) in its
+    local frame, its radius displaced by fractal noise (a fraction: 0.2 = +/-20%)."""
+    c = vec3(center, "blob centre")
+    rad = vec3(radii, "blob radii")
+    if min(rad) <= 0:
+        raise ValueError(f"blob radii {tuple(rad)} must be positive")
+    seg = int(segments)
+    if seg < 4:
+        raise ValueError("blob needs at least 4 segments")
+    rot = _basis(forward, up)
+    nrings = max(2, seg // 2)
+    rings = []
+    for i in range(nrings + 1):
+        phi = math.pi * i / nrings                    # 0 at -Y (bottom), pi at +Y (top)
+        y, s = -math.cos(phi), math.sin(phi)
+        if i in (0, nrings):
+            dirs = [Vector((0.0, y, 0.0))]
+        else:
+            dirs = [Vector((s * math.cos(2 * math.pi * k / seg), y, -s * math.sin(2 * math.pi * k / seg)))
+                    for k in range(seg)]
+        ring = []
+        for d in dirs:
+            f = 1.0 + (noise * fbm(d * frequency, seed) if noise else 0.0)
+            ring.append(c + rot @ Vector((d.x * rad.x * f, d.y * rad.y * f, d.z * rad.z * f)))
+        rings.append(ring)
+    return loft(rings, mat, smooth=smooth, crease=crease)
+
+
+def sweep(path, radius, mat, sides, up=None, smooth=True, crease=None):
+    """A tube along `path` (Bevy world points). `radius` is one number, or a list with one
+    entry per path point; an entry is r, or (r_side, r_up) for an oval section. A zero
+    radius at an end makes it pointed. Sections are carried along the path by parallel
+    transport, starting with r_up toward `up` (default world +Y)."""
+    pts = [vec3(p, "sweep point") for p in path]
+    if len(pts) < 2:
+        raise ValueError("sweep needs at least 2 path points")
+    for i in range(len(pts) - 1):
+        if (pts[i + 1] - pts[i]).length < 1e-6:
+            raise ValueError(f"sweep path points {i} and {i + 1} coincide")
+    if isinstance(radius, (int, float)):
+        rads = [radius] * len(pts)
+    elif isinstance(radius, list):
+        rads = list(radius)
+    else:
+        raise ValueError(f"sweep radius: a number, or a list with one entry per path point (an oval section"
+                         f" everywhere is [(r_side, r_up)] * n), got {radius!r}")
+        if len(rads) != len(pts):
+            raise ValueError(f"sweep radius: one per path point ({len(pts)}), got {len(rads)}")
+    out = []
+    for r in rads:
+        if isinstance(r, (int, float)):
+            out.append((float(r), float(r)))
+        else:
+            a, b = (float(v) for v in r)
+            out.append((a, b))
+    if any(a < 0 or b < 0 for a, b in out):
+        raise ValueError("sweep radii must not be negative")
+    if any(a == 0 or b == 0 for a, b in out[1:-1]):
+        raise ValueError("sweep radius 0 is only allowed at the ends")
+    tang = []
+    for i in range(len(pts)):
+        t = pts[min(len(pts) - 1, i + 1)] - pts[max(0, i - 1)]
+        if t.length < 1e-9:
+            raise ValueError(f"sweep path doubles back on itself at point {i}")
+        tang.append(t.normalized())
+    ref = vec3(up, "sweep up") if up is not None else Vector((0.0, 1.0, 0.0))
+    if ref.length < 1e-9:
+        raise ValueError("sweep up must be non-zero")
+    if abs(ref.normalized().dot(tang[0])) > 0.95:
+        raise ValueError(f"sweep up {tuple(ref)} is along the path's start; pass another up=")
+    nrm = (ref - tang[0] * ref.dot(tang[0])).normalized()
+    rings = []
+    for i, p in enumerate(pts):
+        nrm = nrm - tang[i] * nrm.dot(tang[i])        # parallel transport
+        if nrm.length < 1e-9:
+            raise ValueError("sweep path turns back on itself")
+        nrm.normalize()
+        side = tang[i].cross(nrm).normalized()
+        rs, ru = out[i]
+        if rs == 0 or ru == 0:
+            rings.append([p.copy()])
+            continue
+        rings.append([p + side * (rs * math.cos(2 * math.pi * k / sides)) + nrm * (ru * math.sin(2 * math.pi * k / sides))
+                      for k in range(int(sides))])
+    return loft(rings, mat, smooth=smooth, crease=crease)
+
+
+def ico_points(subdivisions):
+    """Unit icosphere vertex directions."""
+    import bmesh
+    bm = bmesh.new()
+    try:
+        bmesh.ops.create_icosphere(bm, subdivisions=int(subdivisions), radius=1.0)
+        return [v.co.normalized() for v in bm.verts]
+    finally:
+        bm.free()
+
+
+def lump(center, radii, mat, bevel, forward=None, up=None, noise=0.25, seed=0, frequency=1.3, subdivisions=1,
+         floor=None):
+    """A rock: the convex hull of a noisy ellipsoid's icosphere points, the way the game
+    builds its asteroids (src/sim/asteroids.rs). Every face flat. floor: points below
+    y = floor are raised to it (a flat base sitting on a surface)."""
+    c = vec3(center, "lump centre")
+    rad = vec3(radii, "lump radii")
+    if min(rad) <= 0:
+        raise ValueError(f"lump radii {tuple(rad)} must be positive")
+    rot = _basis(forward, up)
+    pts = []
+    for d in ico_points(subdivisions):
+        f = 1.0 + noise * fbm(d * frequency, seed)
+        p = c + rot @ Vector((d.x * rad.x * f, d.y * rad.y * f, d.z * rad.z * f))
+        if floor is not None and p.y < floor:
+            p.y = float(floor)
+        pts.append(p)
+    pr = hull(pts, mat, bevel)
+    pr.kind = "lump"
     return pr

@@ -27,6 +27,15 @@ use super::vitals::{Damage, Vitals};
 /// the far side doesn't reach through the body to one.
 const WEAK_DEPTH: f32 = 0.25;
 
+/// A weak spot on something that isn't a player (a grazer): a sphere about
+/// `at` in its body's frame. (A robot's is its kind's: see
+/// [`Robot::weak_spot`].)
+#[derive(Component, Clone, Copy, Debug)]
+pub struct WeakSpot {
+    pub at: Vec3,
+    pub radius: f32,
+}
+
 /// Seconds a bullet flies before it's forgotten.
 pub const SHOT_LIFE: f32 = 2.0;
 
@@ -100,6 +109,7 @@ pub fn fly_shots(
     teams: Query<Option<&Team>, With<Player>>,
     vitals: Query<(), With<Vitals>>,
     robots: Query<(&Robot, &Player, Option<&BodyTuning>)>,
+    spots: Query<&WeakSpot>,
     base: Res<Tuning>,
     mut damage: MessageWriter<Damage>,
 ) {
@@ -126,11 +136,19 @@ pub fn fly_shots(
         if vitals.contains(hit.entity) {
             // A robot's weak spot is a sphere (inside it, or behind its
             // armour); the bullet's line through the body finds it.
-            let weak = robots.get(hit.entity).is_ok_and(|(kind, player, own)| {
-                let frame = player.mode.body().and_then(|b| bodies.frame(b));
-                let (center, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
-                let (local, radius) = kind.weak_spot();
-                let spot = center + body_rotation(&player.mode, frame.as_ref()) * local;
+            let spot = match robots.get(hit.entity) {
+                Ok((kind, player, own)) => {
+                    let frame = player.mode.body().and_then(|b| bodies.frame(b));
+                    let (center, _) = player.mode.world_kinematics(tuning_of(&base, own), frame.as_ref());
+                    let (local, radius) = kind.weak_spot();
+                    Some((center + body_rotation(&player.mode, frame.as_ref()) * local, radius))
+                }
+                Err(_) => spots
+                    .get(hit.entity)
+                    .ok()
+                    .and_then(|w| Some((bodies.frame(hit.entity)?.point_to_world(w.at), w.radius))),
+            };
+            let weak = spot.is_some_and(|(spot, radius)| {
                 let along = (spot - point).dot(*dir).clamp(0.0, WEAK_DEPTH);
                 (point + *dir * along).distance(spot) < radius
             });

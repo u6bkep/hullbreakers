@@ -30,6 +30,11 @@ pub struct Asteroid {
     pub seed: u64,
 }
 
+/// A rock of the streaming field (not one set about a battle), new to it
+/// when this is added: fauna may come with it (see `fauna`).
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct FieldRock;
+
 /// Recycling must not teleport a rock the player is attached to.
 #[derive(Component)]
 pub struct Pinned;
@@ -170,7 +175,8 @@ pub fn spawn_field(commands: &mut Commands, tuning: &Tuning) {
             (-FIELD_LENGTH / 2.0, FIELD_LENGTH / 2.0),
         );
         let (linear, angular) = drift(&mut field.rng, tuning.field_speed);
-        spawn_rock(commands, &mut field, radius, position, linear, angular);
+        let rock = spawn_rock(commands, &mut field, radius, position, linear, angular);
+        commands.entity(rock).insert(FieldRock);
     }
     commands.insert_resource(field);
     commands.insert_resource(AppliedFieldSpeed(tuning.field_speed));
@@ -231,10 +237,10 @@ fn spawn_rock(
     position: Vec3,
     linear: Vec3,
     angular: Vec3,
-) {
+) -> Entity {
     let rng = &mut field.rng;
     let rotation = Quat::from_scaled_axis(random_unit(rng) * rng.random_range(0.0..3.14));
-    commands.spawn((
+    let rock = commands.spawn((
         Name::new(format!("Asteroid {}", field.next)),
         Asteroid {
             radius,
@@ -249,8 +255,9 @@ fn spawn_rock(
         // replicates); Transform is derived from it for rendering.
         Position(position),
         Rotation(rotation),
-    ));
+    )).id();
     field.next += 1;
+    rock
 }
 
 /// Applies changes to `Tuning::field_speed` as a velocity delta to every rock.
@@ -333,6 +340,7 @@ pub fn recycle_field(
         }
         commands.entity(entity).despawn();
         let (linear, angular) = drift(&mut field.rng, tuning.field_speed);
-        spawn_rock(&mut commands, &mut field, rock.radius, candidate, linear, angular);
+        let rock = spawn_rock(&mut commands, &mut field, rock.radius, candidate, linear, angular);
+        commands.entity(rock).insert(FieldRock);
     }
 }

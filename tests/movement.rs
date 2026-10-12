@@ -33,6 +33,8 @@ fn app_configured(tuning: Tuning, asteroids: bool) -> App {
     app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         1.0 / 60.0,
     )));
+    // A quiet field: no fauna on its rocks.
+    app.world_mut().resource_mut::<hullbreakers::sim::mission::Director>().robots = false;
     app.finish();
     app.cleanup();
     // Startup, plus a few ticks for colliders and mass properties to settle.

@@ -1,0 +1,30 @@
+{
+  "name": "grazer",
+  "kind": "large_creature",
+  "brief": "Grazer: a passive space jellyfish/manta hybrid about 3.2 m across that drifts in herds through the asteroid field grazing on rocks. It swims bell-first in slow pulses (+Y, the bell's apex, is the way it swims) and a crew member can stand on top of its bell and ride it. A smooth, pale bell with deep-teal markings radiating from the apex and a ring of cyan glowing spots near the rim; eight rim flaps the game curls in on each pulse; six tapering translucent teal feeding fronds of three segments each, with violet glowing tips, hanging from under the bell. Origin at the bell's centre (the physics body's centre: an ellipsoid of radii 1.6, 0.7, 1.6). Weak spot: a hot-magenta heart sac hanging in the bell's cavity, seen from below and from the side under the rim, hidden from above.",
+  "palette": {
+    "skin": "#cfe8e0",
+    "flesh": "#2f6f73",
+    "membrane": "#3f9c98",
+    "emissive": "#7ef0ff",
+    "emissive_secondary": "#b07aff",
+    "emissive_core": "#ff40c8"
+  },
+  "expect": {
+    "size": {"x": [3.0, 3.3], "y": [2.6, 3.2], "z": [3.0, 3.3]},
+    "parts": [
+      "bell", "heart",
+      "rim_0", "rim_1", "rim_2", "rim_3", "rim_4", "rim_5", "rim_6", "rim_7",
+      "frond_0_a", "frond_0_b", "frond_0_c", "frond_1_a", "frond_1_b", "frond_1_c",
+      "frond_2_a", "frond_2_b", "frond_2_c", "frond_3_a", "frond_3_b", "frond_3_c",
+      "frond_4_a", "frond_4_b", "frond_4_c", "frond_5_a", "frond_5_b", "frond_5_c"
+    ],
+    "colliders": ["COL_bell"],
+    "sockets": {
+      "SOCKET_weak":   {"at": [0, -0.3, 0], "tol": 0.02},
+      "SOCKET_saddle": {"at": [0, 0.68, 0], "up": [0, 1, 0], "tol": 0.02},
+      "SOCKET_mouth":  {"at": [0, -0.55, 0], "forward": [0, -1, 0], "tol": 0.02}
+    },
+    "tolerance": 0.02
+  }
+}

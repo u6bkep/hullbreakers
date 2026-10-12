@@ -1,0 +1,26 @@
+{
+  "name": "limpet",
+  "kind": "small_creature",
+  "brief": "Limpet: a rock mimic about 0.8 m across that clings to asteroids, camouflaged as a lump of rock; it fires a fleshy tendril from its snout to reel prey in, then rides them, biting. A low, lumpy, faceted dome of grey-brown rock that is, on a closer look, overlapping plates: three on its back (plate_l, plate_r, plate_rear) lift when it hunts, showing soft dark flesh under them. Eight glistening purple-red foot lobes ripple round the base rim; a fleshy siphon snout pitches under the shell's front edge; a cluster of pale-green glowing eye pits on the front edge. Origin on the surface it clings to, centred under it. Weak spot: a hot-magenta sac under the gap between the back plates, a thin crack when they're closed, exposed when they lift about 25 degrees.",
+  "palette": {
+    "hide_primary": "#524740",
+    "hide_secondary": "#3b342f",
+    "flesh": "#4a1b2b",
+    "emissive": "#9cff7a",
+    "emissive_core": "#ff40c8"
+  },
+  "expect": {
+    "size": {"x": [0.7, 0.85], "y": [0.28, 0.4], "z": [0.8, 0.95]},
+    "parts": [
+      "shell", "plate_l", "plate_r", "plate_rear", "snout",
+      "skirt_0", "skirt_1", "skirt_2", "skirt_3", "skirt_4", "skirt_5", "skirt_6", "skirt_7"
+    ],
+    "colliders": ["COL_body"],
+    "sockets": {
+      "SOCKET_weak":   {"at": [0, 0.26, 0.2], "tol": 0.01},
+      "SOCKET_muzzle": {"at": [0, 0.12, -0.43], "forward": [0, 0, -1], "tol": 0.02},
+      "SOCKET_eye":    {"at": [0, 0.22, -0.36], "forward": [0, 0, -1], "up": [0, 1, 0], "tol": 0.02}
+    },
+    "tolerance": 0.01
+  }
+}

@@ -103,11 +103,12 @@ impl Session {
         (self.rollbacks() - before) as f32 / (frames as f32 * FRAME.as_secs_f32())
     }
 
-    /// The server's (only) player.
+    /// The server's (only) crew member (the field's limpets are players
+    /// too).
     fn server_player(&mut self) -> Mut<'_, Player> {
         let world = self.server.world_mut();
         let entity = world
-            .query_filtered::<Entity, With<Player>>()
+            .query_filtered::<Entity, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>()
             .single(world)
             .unwrap();
         world.get_mut::<Player>(entity).unwrap().into()
@@ -371,6 +372,60 @@ fn robots_reach_clients() {
     assert!(server > 0, "no robots on the server");
     assert_eq!(client, server, "client sees {client} of {server} robots");
     assert!(rate <= 0.5, "robots upset prediction: {rate:.1}/s");
+}
+
+/// The field's fauna reach clients: grazers as bodies posed from their
+/// motion (which changes only at their pulses), where the server has them;
+/// limpets as players. Neither upsets the client's prediction.
+#[test]
+fn fauna_reach_clients() {
+    use hullbreakers::sim::SimTick;
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::fauna::Grazer;
+    use hullbreakers::sim::motion::Motion;
+    let (_guard, mut s) = session(100);
+    s.step(240);
+    let count = |app: &mut App| {
+        let world = app.world_mut();
+        let grazers = world.query_filtered::<(), With<Grazer>>().iter(world).count();
+        let limpets = world.query::<&Robot>().iter(world).filter(|k| **k == Robot::Limpet).count();
+        (grazers, limpets)
+    };
+    // Fauna stream in with the rocks, so one may be on its way to the
+    // client just now: they agree within a moment.
+    let mut counts = (count(&mut s.server), count(&mut s.client));
+    for _ in 0..6 {
+        if counts.0 == counts.1 {
+            break;
+        }
+        s.step(10);
+        counts = (count(&mut s.server), count(&mut s.client));
+    }
+    let (server, client) = counts;
+    eprintln!("fauna: server {server:?}, client {client:?}");
+    assert!(server.0 > 0 && server.1 > 0, "no fauna on the server: {server:?}");
+    assert_eq!(client, server, "the client sees {client:?} of {server:?}");
+    // At the client's tick, each grazer is where the server's motion for it
+    // puts it.
+    let tick = s.client.world().resource::<SimTick>().0;
+    let world = s.server.world_mut();
+    let truth: Vec<Vec3> = world
+        .query_filtered::<&Motion, With<Grazer>>()
+        .iter(world)
+        .map(|m| m.frame_at(tick, Vec3::ZERO).center_of_mass)
+        .collect();
+    let world = s.client.world_mut();
+    let seen: Vec<Vec3> = world
+        .query_filtered::<(&Position, &Rotation, &hullbreakers::sim::bodies::BodyInertia), With<Grazer>>()
+        .iter(world)
+        .map(|(p, r, i)| p.0 + r.0 * i.center_of_mass)
+        .collect();
+    for at in &truth {
+        let off = seen.iter().map(|q| q.distance(*at)).fold(f32::MAX, f32::min);
+        assert!(off < 0.5, "a grazer is drawn {off} m from where the server has it");
+    }
+    let rate = s.rollback_rate(300);
+    assert!(rate <= 0.5, "fauna upset prediction: {rate:.1}/s");
 }
 
 /// A site's devices reach clients: the derelict, where the server has it,

@@ -28,6 +28,24 @@ it.
 
 ---
 
+## Our tuning (sim/tuning.rs)
+
+- 2026-10-12. The `tuning!` macro's field lists don't take doc comments
+  (`///` is an attribute its patterns don't match); a field's note has to
+  be a `//` comment. Cost: one build.
+
+## Our fauna (sim/fauna.rs)
+
+- 2026-10-12. A grazer may change its motion only in its pulses (so the
+  network sends nothing between them), and its jet pushes only bell
+  first. Steered that way (turning toward where it wants to go, pushing
+  when it faces it) it orbited its goal in 15 m loops: its spin, set at
+  one pulse, overshot by the next, and it couldn't brake without turning
+  round. Fix: a pulse can push up to 35° off its axis (it squeezes one side
+  of its bell harder), it eases off in time to stop (speed limited by
+  `sqrt(2·a·d)`), and each pulse sets the spin that turns it exactly to
+  its heading by the next. Cost: one trace, an hour.
+
 ## egui
 
 - 2026-10-12. The menu window was given `fixed_size([600, 0])` to stop it
@@ -130,6 +148,11 @@ it.
   client systems (`src/client/robot_fx.rs`). Cost: one harness round trip.
   Pattern: client systems get no compile- or test-time check of their
   queries; every new one needs one launch.
+- 2026-10-12. A system that both reads and writes the same message type
+  (`MessageReader<Damage>` and `MessageWriter<Damage>`) panics at startup
+  (B0002), not at compile time. The grazers' alarm (read damage) and
+  trample (deal damage) became two systems (`sim/fauna.rs`). Cost: one
+  test run.
 
 ## Blender pipeline (hb, the verifier, asset_view)
 
@@ -241,6 +264,21 @@ it.
 
 
 ## Our robots' brains (sim/bots.rs)
+
+- 2026-10-12. The limpet (fauna on the robots' machinery) couldn't get
+  back onto a rock: the EVA landing rule takes hold only by the feet
+  (the bottom of the capsule), and the winch, reeling it in, stops 1.2 m
+  short of its anchor by design (`WINCH_ARRIVE`, for players' assist). So
+  it hung off the rock head first, never touching feet first. Fix: a body
+  tuning flag, `land_any_side` (a limpet is all foot underneath; it rights
+  itself as it boots), and its brain closes the last 2 m itself. Cost:
+  two test round-trips. Yaw and pitch alone couldn't turn its feet to the
+  rock (no roll for a robot's look); that was the dead end.
+- 2026-10-12. Tests that looked up "the" player with `.single()` broke as
+  soon as the field had limpets (they're players). Fixed in the movement
+  harness (it turns fauna off, as tests of other things turn robots off)
+  and the netplay one (it picks the crew). Pattern: robots-as-players
+  leaks into anything that counts players.
 
 - 2026-10-12. The hull crawler (walks walls and ceilings) never fired from a
   ceiling at someone below it: `on_target` compared the aim's yaw and pitch
