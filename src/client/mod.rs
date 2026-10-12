@@ -7,6 +7,7 @@ pub mod armory;
 pub mod bindings;
 pub mod camera;
 pub mod combat_fx;
+pub mod coop_tour;
 pub mod crew;
 pub mod debug_shots;
 pub mod devices;
@@ -164,6 +165,9 @@ impl Plugin for ClientPlugin {
                 EguiPrimaryContextPass,
                 (gallery::label_exhibits, gallery::label_armoury, menu::menu).chain().after(hud::HudSet),
             );
+        if let Some(tour) = coop_tour::coop_tour_from_env() {
+            app.insert_resource(tour).add_systems(Update, coop_tour::run_coop_tour);
+        }
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
                 .add_systems(Update, debug_shots::run_shot_script);

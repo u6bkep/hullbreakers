@@ -98,6 +98,19 @@ it.
   nothing. Worked around with `mkdir -p` first. Cost: one run (~1 min).
   (`src/client/debug_shots.rs`; not fixed.)
 
+## Our netcode (net/mod.rs)
+
+- 2026-10-12. A death where the respawn puts you back where you stood
+  (killed at your deck spot, carrying nothing) never reached the client:
+  the client only takes the authority's `Player` on a rollback, and
+  `player_diverged` saw nothing to roll back for, so the authority-only
+  `Died` stayed out of the client's log (no SUIT FAILURE, no fade). Found
+  in the live co-op smoke test. Fix: a death in the confirmed log that the
+  prediction lacks is a divergence (`died_unpredicted`; test
+  `a_death_where_you_stand_reaches_the_client`). Cost: an hour. Pattern to
+  watch: any other authority-only event that changes nothing predicted
+  would be lost the same way.
+
 ## Bevy rendering
 
 - 2026-10-12. We wanted the headlamp not to light the player's own arms.
@@ -180,6 +193,12 @@ it.
   `/etc/alsa/conf.d/99-pipewire-default.conf` after anything on
   `ALSA_CONFIG_PATH`. Fix: point `ALSA_CONFIG_PATH` at our config alone
   (`tools/hl`, d46d850). Cost: a session's debugging.
+- 2026-10-12. Driving a client in a two-window harness: keys go to the
+  focused window (`tools/hl focus`), but clicks go to the window under the
+  pointer, which starts on the host's half; the client's shots were the
+  host's grapple. Fix: `swaymsg 'seat * cursor set X Y'` onto the client
+  before clicking (`tools/coop-smoke`). Focus also wanders, so it's set
+  again before each step. Cost: two smoke runs.
 
 ## Our ship designs (sim/design.rs, ship.rs)
 

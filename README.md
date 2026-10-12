@@ -284,8 +284,17 @@ side is `HULLBREAKERS_PROFILE=<dir>` (`src/client/profile.rs`), off by default.
 
 Run `tools/hl game` again (e.g. `tools/hl game --connect 127.0.0.1`) for more
 instances; sway tiles them side by side (`tools/hl start 2560x720` gives each
-a 1280-wide half). `tools/hl focus <title>` picks which one gets input; the
-client's title is `Hullbreakers — HOST:PORT`.
+a 1280-wide half). `tools/hl focus <title>` picks which one gets keys (clicks
+go to the window under the pointer); the client's title is
+`Hullbreakers — HOST:PORT`.
+
+`tools/coop-smoke <dir> [lag ms] [port]` is a live co-op smoke test: a host
+and a client with simulated lag in one harness. The host
+(`HULLBREAKERS_COOP_TOUR=<dir>`, `src/client/coop_tour.rs`) puts the client
+through every scenario's set pieces (the locker, a death and the kit, a
+crate, a fight, the shield console, the derelict's devices, a gate, a tow,
+the gallery's affixed robots); the script presses, fires and reels as the
+client, screenshots its view into `<dir>`, and copies both logs there.
 
 ## Controls
 

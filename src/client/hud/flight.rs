@@ -12,6 +12,8 @@ use crate::client::bindings::{Action, Bindings};
 use crate::client::events::Presented;
 use crate::client::input::MouseCaptured;
 use crate::sim::bodies::Bodies;
+use crate::sim::events::PlayerEvent;
+use crate::sim::ship::Control;
 use crate::sim::player::{Mode, Player};
 use crate::sim::tuning::Tuning;
 
@@ -108,11 +110,20 @@ pub fn event_feed(
     captured: Res<MouseCaptured>,
     bindings: Res<Bindings>,
     mut presented: MessageReader<Presented>,
+    controls: Query<(&Control, &ChildOf)>,
     mut lines: Local<Vec<(String, f32)>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let now = time.elapsed_secs();
     for Presented(event) in presented.read() {
+        // A press is named by what was pressed: its own label (a device's
+        // name, not "Device").
+        if let PlayerEvent::Pressed { body, action } = event
+            && let Some((control, _)) = controls.iter().find(|(c, parent)| parent.parent() == *body && c.action == *action)
+        {
+            lines.insert(0, (format!("pressed: {}", control.label), now));
+            continue;
+        }
         if let Some(text) = event.caption() {
             lines.insert(0, (text, now));
         }
