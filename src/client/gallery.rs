@@ -14,7 +14,7 @@ use bevy::world_serialization::WorldAssetRoot;
 use bevy_egui::{EguiContexts, egui};
 
 use super::guns::{self, GunLook, GunModels};
-use crate::sim::items::{Rarity, Weapon};
+use crate::sim::items::{Family, Rarity, Weapon};
 use crate::sim::weapons::GunKind;
 use crate::sim::scenarios::gallery::{GALLERY_AT, GalleryAnchor};
 
@@ -141,8 +141,8 @@ impl RackItem {
 /// The armoury. To the right of the start, every part variant: a block per
 /// crew frame, a row per slot, a column per variant, side on (muzzle to the
 /// left as you face it), headed by its frame and its slot. Behind the start,
-/// a dozen rolled guns, each put together from its parts as it's drawn in
-/// play (see `guns`), an SMG row over a rifle row.
+/// rolled guns, each put together from its parts as it's drawn in play (see
+/// `guns`): a row per frame, and a row of the families.
 fn set_out_armoury(anchor: Entity, assets: &AssetServer, guns: &mut GunModels, commands: &mut Commands) {
     let put = |commands: &mut Commands, item: RackItem, at: Vec3, turn: Quat| {
         commands.spawn((item, Transform::from_translation(at).with_rotation(turn), Visibility::default(), ChildOf(anchor))).id()
@@ -150,7 +150,8 @@ fn set_out_armoury(anchor: Entity, assets: &AssetServer, guns: &mut GunModels, c
     // Parts, on a wall facing −X (the start): along it, +Z is to the right.
     let slots = ["Barrel", "Magazine", "Stock", "Sight", "Muzzle"];
     let block = PART_COLUMNS as f32 * PART_SPACING;
-    let left = PARTS_AT.z - (2.0 * block + PART_BLOCK_GAP) / 2.0;
+    let blocks = GunKind::CREW.len() as f32;
+    let left = PARTS_AT.z - (blocks * block + (blocks - 1.0) * PART_BLOCK_GAP) / 2.0;
     for (b, frame) in GunKind::CREW.into_iter().enumerate() {
         let z0 = left + b as f32 * (block + PART_BLOCK_GAP);
         let top = PARTS_AT.y + (slots.len() as f32 - 1.0) * PART_ROW / 2.0;
@@ -173,16 +174,32 @@ fn set_out_armoury(anchor: Entity, assets: &AssetServer, guns: &mut GunModels, c
     let side_on = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2);
     let rarities = [Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Exotic, Rarity::Common, Rarity::Rare];
     put(commands, RackItem::heading(ROLLED_AT, "Rolled guns"), ROLLED_AT + Vec3::Y * 1.05, Quat::IDENTITY);
-    for (row, frame) in GunKind::CREW.into_iter().enumerate() {
+    // A row per frame, then a row of families: each family on an SMG and
+    // a rifle.
+    let mut rows: Vec<Vec<Weapon>> = GunKind::CREW
+        .into_iter()
+        .map(|frame| rarities.iter().enumerate().map(|(i, r)| Weapon::new(frame, 1000 + i as u32 * 7919, *r)).collect())
+        .collect();
+    rows.push(
+        Family::ROLLED
+            .into_iter()
+            .flat_map(|f| GunKind::FAMILIES.into_iter().map(move |frame| Weapon::new(frame, 3000 + f as u32, Rarity::Rare).with_family(f)))
+            .collect(),
+    );
+    for (row, weapons) in rows.into_iter().enumerate() {
         let y = ROLLED_AT.y + 0.45 - row as f32 * 0.9;
-        for (i, rarity) in rarities.into_iter().enumerate() {
-            let weapon = Weapon::new(frame, 1000 + i as u32 * 7919, rarity);
+        for (i, weapon) in weapons.into_iter().enumerate() {
+            let rarity = weapon.rarity;
             // Left to right as you face it: from +X to −X.
             let x = ROLLED_AT.x + (rarities.len() as f32 - 1.0) * ROLLED_SPACING / 2.0 - i as f32 * ROLLED_SPACING;
             // The name in two lines: maker and model, then epithet and
             // rarity, so neighbours' labels keep apart.
             let name = weapon.name();
             let (first, last) = name.rsplit_once(' ').unwrap_or((name.as_str(), ""));
+            let last = match weapon.family {
+                Family::Ballistic => last.to_string(),
+                f => format!("{last}, {}", f.name().to_lowercase()),
+            };
             guns::spawn_gun(
                 commands,
                 guns,

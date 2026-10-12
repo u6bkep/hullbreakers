@@ -846,7 +846,23 @@ pub struct Weapon {
     /// families).
     #[serde(default)]
     pub family: Family,
+    /// A laser's heat, of [`HEAT_FULL`]: it's the gun's, wherever the gun
+    /// is (a hot laser swapped to the other hand or the pack stays hot, and
+    /// cools there).
+    #[serde(default)]
+    pub heat: u16,
+    /// Overheated: it won't fire until it's cooled to [`COOLED`].
+    #[serde(default)]
+    pub overheated: bool,
 }
+
+/// A laser's full heat, in the units [`Weapon::heat`] counts (whole
+/// numbers, so the same on every peer).
+pub const HEAT_FULL: u16 = 10_000;
+/// A laser cools this much a second when not firing (of its full heat).
+pub const COOL_RATE: f32 = 0.5;
+/// An overheated laser fires again once it's cooled to this (of full).
+pub const COOLED: f32 = 0.33;
 
 /// What the workbench has fitted to a gun, by slot (in [`SLOTS`] order):
 /// 0 for what it was made with, else a variant (its index in the slot's
@@ -983,9 +999,36 @@ impl Weapon {
             tune: 0,
             refit: Refit::default(),
             family: Family::Ballistic,
+            heat: 0,
+            overheated: false,
         };
         w.mag = w.stats().mag;
         w
+    }
+
+    /// Its heat, of 1 (only a laser heats).
+    pub fn heat_fraction(&self) -> f32 {
+        self.heat as f32 / HEAT_FULL as f32
+    }
+
+    /// Cools it for `dt` seconds; an overheated one that's cooled enough
+    /// fires again.
+    pub fn cool(&mut self, dt: f32) {
+        let step = (COOL_RATE * dt * HEAT_FULL as f32).round() as u16;
+        self.heat = self.heat.saturating_sub(step);
+        if self.overheated && self.heat_fraction() <= COOLED {
+            self.overheated = false;
+        }
+    }
+
+    /// Heats it by a shot's `heat` (of 1); true if that overheated it.
+    pub fn heat_by(&mut self, heat: f32) -> bool {
+        let step = (heat * HEAT_FULL as f32).round() as u16;
+        self.heat = self.heat.saturating_add(step).min(HEAT_FULL);
+        if self.heat >= HEAT_FULL {
+            self.overheated = true;
+        }
+        self.overheated
     }
 
     /// A gun rolled from `seed`: a crew frame, a rarity by `luck` (0–100).

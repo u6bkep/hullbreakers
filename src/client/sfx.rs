@@ -716,8 +716,7 @@ pub fn play_event_sounds(
     mut combat: ResMut<CombatAudio>,
     rocks: Query<(), With<Asteroid>>,
     time: Res<Time>,
-    mut last_laser: Local<f32>,
-    mut last_boom: Local<f32>,
+    mut last_boom: Local<[f32; 2]>,
 ) {
     let mut rng = rand::rng();
     for Presented(event) in events.read() {
@@ -802,24 +801,22 @@ pub fn play_event_sounds(
             // Something set down; and the pack refusing more.
             PlayerEvent::Dropped(_) => play(&mut commands, &sounds.land_hull, 0.35, pitch * 1.4),
             PlayerEvent::InventoryFull | PlayerEvent::NotYours => play(&mut commands, &sounds.click_off, 0.8, pitch * 0.7),
-            PlayerEvent::Fired { gun, kind, .. } => {
+            // A beam's hum comes on with it (and keeps on: `beam_hum`).
+            PlayerEvent::BeamStarted { .. } => play(&mut commands, &sounds.shot_laser, 0.7, pitch),
+            PlayerEvent::BeamStopped { .. } => {}
+            PlayerEvent::Fired { hand, gun, kind, .. } => {
                 let sound = match (kind.family(), gun) {
                     (Family::Plasma, _) => &sounds.shot_plasma,
                     (Family::Arc, _) => &sounds.shot_arc,
-                    (Family::Laser, _) => {
-                        // A beam fires every tick: its hum a few times a second.
-                        if time.elapsed_secs() - *last_laser < 0.12 {
-                            continue;
-                        }
-                        *last_laser = time.elapsed_secs();
-                        &sounds.shot_laser
-                    }
+                    (Family::Laser, _) => &sounds.shot_laser,
                     (_, GunKind::Shotgun) => {
-                        // Eight pellets, one boom.
-                        if time.elapsed_secs() - *last_boom < 0.05 {
+                        // Eight pellets, one boom (each hand its own: two
+                        // shotguns, two booms).
+                        let last = &mut last_boom[hand as usize];
+                        if time.elapsed_secs() - *last < 0.05 {
                             continue;
                         }
-                        *last_boom = time.elapsed_secs();
+                        *last = time.elapsed_secs();
                         &sounds.shot_shotgun
                     }
                     (_, GunKind::Sniper) => &sounds.shot_sniper,
@@ -828,6 +825,24 @@ pub fn play_event_sounds(
                 };
                 play(&mut commands, sound, 0.7, pitch);
             }
+        }
+    }
+}
+
+/// A held beam hums on, a few times a second, each hand's its own.
+pub fn beam_hum(
+    mut commands: Commands,
+    time: Res<Time>,
+    sounds: Res<Sounds>,
+    player: Option<Single<&Player, With<LocalPlayer>>>,
+    mut last: Local<[f32; 2]>,
+) {
+    let Some(player) = player else { return };
+    let now = time.elapsed_secs();
+    for (i, state) in player.loadout.hands.iter().enumerate() {
+        if state.beam.is_some() && now - last[i] >= 0.12 {
+            last[i] = now;
+            play(&mut commands, &sounds.shot_laser, 0.6, 1.0);
         }
     }
 }

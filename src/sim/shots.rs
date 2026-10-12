@@ -18,7 +18,8 @@
 //!   and on, so many times. Hulls and decks stop a jump; ropes aren't in the
 //!   way of anything. An arc doesn't find weak spots.
 //! - **Laser** beams are instant: a tick of beam hits the first thing in the
-//!   way.
+//!   way. A beam isn't a `Fired` entry but held state ([`super::weapons::Beam`]),
+//!   which hits every tick it's there.
 //!
 //! Bullets and beams find weak spots (a robot's by its kind, a creature
 //! body's by its [`WeakSpot`]); bursts and arcs don't. Something with
@@ -100,9 +101,23 @@ pub struct Shots(pub Vec<Shot>);
 #[derive(Resource, Default, Debug)]
 pub struct Shoves(pub Vec<(Entity, Vec3)>);
 
-/// Authority: shots fired this tick start.
+/// Authority: shots fired this tick start, and every beam on this tick hits.
 pub fn launch_shots(tick: Res<SimTick>, players: Query<(Entity, &Player, Option<&Team>)>, mut shots: ResMut<Shots>) {
     for (entity, player, team) in &players {
+        for beam in player.loadout.hands.iter().filter_map(|h| h.beam) {
+            shots.0.push(Shot {
+                shooter: entity,
+                team: team.copied().unwrap_or_default(),
+                damage: beam.damage,
+                mass: 0.0,
+                position: beam.origin,
+                velocity: beam.dir,
+                age: 0.0,
+                origin: beam.origin,
+                kind: ShotKind::Laser { range: beam.range },
+                through: None,
+            });
+        }
         for (at, event) in player.events.iter() {
             let PlayerEvent::Fired {
                 damage,

@@ -403,7 +403,9 @@ pub fn alarm(
             alarms.push((g.target, position));
         }
         let crew = team.copied().unwrap_or_default() == Team::Crew;
-        let fired = player.events.iter().any(|(t, e)| t == tick.0 && matches!(e, PlayerEvent::Fired { .. }));
+        // A laser beam that's on is gunfire too (it isn't a `Fired` entry).
+        let fired = player.events.iter().any(|(t, e)| t == tick.0 && matches!(e, PlayerEvent::Fired { .. }))
+            || player.loadout.hands.iter().any(|h| h.beam.is_some());
         if crew && fired {
             for (e, ..) in &grazers {
                 if at(e).is_some_and(|p| p.distance(position) < GUNFIRE) {

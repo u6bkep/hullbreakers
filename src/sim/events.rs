@@ -93,6 +93,16 @@ pub enum PlayerEvent {
     NotYours,
     /// Put something down (the authority leaves it as a pickup).
     Dropped(Item),
+    /// A laser's beam came on in `hand` (it's held state from here: see
+    /// [`super::weapons::Beam`]).
+    BeamStarted {
+        hand: Hand,
+        gun: GunKind,
+    },
+    /// The beam in `hand` went off (let go, overheated, put away).
+    BeamStopped {
+        hand: Hand,
+    },
     /// A shot left a gun (a `gun` frame): from `origin` (the eye), at
     /// `velocity`, to do `damage` and push what it hits with a bullet of
     /// `mass`.
@@ -152,7 +162,7 @@ impl PlayerEvent {
             PlayerEvent::Respawned => return None,
             PlayerEvent::BeamHit => "caught in a laser beam".into(),
             PlayerEvent::Died => "killed".into(),
-            PlayerEvent::Fired { .. } => return None,
+            PlayerEvent::Fired { .. } | PlayerEvent::BeamStarted { .. } | PlayerEvent::BeamStopped { .. } => return None,
             PlayerEvent::PickedUp { .. } => "picked up".into(),
             PlayerEvent::InventoryFull => "no room: drop something first".into(),
             PlayerEvent::NotYours => "not yours: a crewmate's kit".into(),
@@ -185,7 +195,9 @@ impl MapEntities for PlayerEvent {
             | PlayerEvent::InventoryFull
             | PlayerEvent::NotYours
             | PlayerEvent::Dropped(_)
-            | PlayerEvent::Fired { .. } => {}
+            | PlayerEvent::Fired { .. }
+            | PlayerEvent::BeamStarted { .. }
+            | PlayerEvent::BeamStopped { .. } => {}
         }
     }
 }

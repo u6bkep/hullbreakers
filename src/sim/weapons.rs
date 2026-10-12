@@ -246,16 +246,27 @@ pub struct HandState {
     pub reload_queued: bool,
     /// Shots this hand has fired (for perks that count them).
     pub fired: u32,
-    /// A laser's heat (of 1), and whether it overheated (then it won't
-    /// fire until it's cooled to [`COOLED`]).
-    pub heat: f32,
-    pub overheated: bool,
+    /// A laser's beam, while it's firing (set each tick it fires, by the
+    /// player's simulation; see [`Beam`]).
+    pub beam: Option<Beam>,
 }
 
-/// A laser cools this much a second when not firing (of its full heat).
-pub const COOL_RATE: f32 = 0.5;
-/// An overheated laser fires again once it's cooled to this.
-pub const COOLED: f32 = 0.33;
+/// A laser's beam this tick, as held state rather than a shot in the event
+/// log (a beam fires every tick: sixty log entries a second would cost the
+/// link more than all else a player sends). It's started and stopped by
+/// `BeamStarted` / `BeamStopped` events; the authority hits with it each
+/// tick it's there, and clients draw it from it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Beam {
+    pub gun: GunKind,
+    pub damage: f32,
+    pub range: f32,
+    /// From the eye, along the crosshair.
+    pub origin: Vec3,
+    pub dir: Vec3,
+}
+
+pub use super::items::{COOL_RATE, COOLED, HEAT_FULL};
 /// Zoomed, the cone is the braced cone times this.
 pub const ZOOM_STEADY: f32 = 0.3;
 
@@ -580,15 +591,31 @@ impl Loadout {
         let stance = self.stance();
         let full = self.hands_full();
         out.grapple_held = !full && Hand::BOTH.iter().any(|h| stance.slot(*h) == Slot::Grapple);
-        // Lasers cool when they aren't firing (below, a firing hand heats).
-        for hand in Hand::BOTH {
-            let firing = cmd.hand(hand).held && self.weapon(hand).is_some_and(|w| w.stats().heat > 0.0);
-            let state = &mut self.hands[hand.index()];
-            if !firing || state.overheated {
-                state.heat = (state.heat - COOL_RATE * dt).max(0.0);
+        // A beam is this tick's (the player's simulation sets it again if
+        // the laser fires).
+        for state in &mut self.hands {
+            state.beam = None;
+        }
+        // Lasers cool wherever they are, unless held firing (below, a
+        // firing one heats); an overheated one cools even held.
+        let held: Vec<usize> = Hand::BOTH
+            .iter()
+            .filter(|h| cmd.hand(**h).held)
+            .filter_map(|h| self.weapon_slot(*h))
+            .collect();
+        for (i, slot) in self.inventory.weapons.iter_mut().enumerate() {
+            if let Some(w) = slot
+                && w.family == Family::Laser
+                && (!held.contains(&i) || w.overheated)
+            {
+                w.cool(dt);
             }
-            if state.overheated && state.heat <= COOLED {
-                state.overheated = false;
+        }
+        for item in self.inventory.pack.iter_mut().flatten() {
+            if let Item::Weapon(w) = item
+                && w.family == Family::Laser
+            {
+                w.cool(dt);
             }
         }
         // Zoom: a gun that zooms, the other hand free and its button held.
@@ -675,15 +702,10 @@ impl Loadout {
                         let mag = self.gun_mut(i).mag;
                         // A laser runs on heat; everything else on its mag.
                         if heated {
-                            if self.hands[h].overheated {
+                            if self.gun_mut(i).overheated {
                                 break;
                             }
-                            let state = &mut self.hands[h];
-                            state.heat += stats.heat;
-                            if state.heat >= 1.0 {
-                                state.heat = 1.0;
-                                state.overheated = true;
-                            }
+                            self.gun_mut(i).heat_by(stats.heat);
                         } else if mag == 0 {
                             self.start_reload(hand);
                             break;
@@ -1069,7 +1091,7 @@ mod tests {
         let pool = l.inventory.ammo(laser.stats().ammo);
         // A beam: a shot every tick, and about four seconds of it.
         let mut ticks = 0;
-        while !l.hands[0].overheated {
+        while !l.inventory.weapons[0].unwrap().overheated {
             assert_eq!(l.tick(&holding(true), DT).shots.len(), 1, "tick {ticks}");
             ticks += 1;
             assert!(ticks < 600, "never overheated");
@@ -1088,7 +1110,33 @@ mod tests {
         for _ in 0..120 {
             l.tick(&holding(false), DT);
         }
-        assert_eq!(l.hands[0].heat, 0.0);
+        assert_eq!(l.inventory.weapons[0].unwrap().heat, 0);
+    }
+
+    #[test]
+    fn a_lasers_heat_is_the_guns_and_it_cools_wherever_it_is() {
+        let laser = Weapon::issue(GunKind::Smg).with_family(Family::Laser);
+        let mut l = one_handed(laser);
+        for _ in 0..120 {
+            l.tick(&holding(true), DT);
+        }
+        let hot = l.inventory.weapons[0].unwrap().heat;
+        assert!(hot > HEAT_FULL / 3, "{hot}");
+        // Into the other hand: as hot as it was.
+        l.stances[0] = Stance { main: Slot::Empty, off: Slot::Gun(0) };
+        l.tick(&TickInput::default(), DT);
+        let moved = l.inventory.weapons[0].unwrap().heat;
+        assert!(moved < hot && hot - moved < 200, "{hot} -> {moved}");
+        // Into the pack: it cools there too.
+        let gun = l.inventory.weapons[0].take().unwrap();
+        l.inventory.pack[0] = Some(Item::Weapon(gun));
+        for _ in 0..60 {
+            l.tick(&TickInput::default(), DT);
+        }
+        let Some(Item::Weapon(packed)) = l.inventory.pack[0] else { panic!("gone") };
+        assert!(packed.heat < moved - HEAT_FULL / 3, "{moved} -> {}", packed.heat);
+        // Its heat doesn't make it another gun.
+        assert!(packed.same_gun(&laser));
     }
 
     #[test]
