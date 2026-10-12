@@ -45,8 +45,11 @@ pub static SCENARIO: Scenario = Scenario {
 /// The freighter's design.
 pub const FREIGHTER: &str = "freighter";
 /// Where it lies: off our stern, turned about so its airlock faces our
-/// cargo door across 20 m.
-pub const FREIGHTER_AT: Vec3 = Vec3::new(0.0, 0.0, 51.0);
+/// cargo door across 33 m. No nearer: its grappler, standing in its
+/// airlock, would reach into our hold and as far as where we come back
+/// aboard after dying (the deck, 45 m off), yanking a lone player across to
+/// the gunners again and again.
+pub const FREIGHTER_AT: Vec3 = Vec3::new(0.0, 0.0, 66.0);
 /// How dangerous its crew is (see [`Threat`]).
 const THREAT: Threat = Threat(2);
 
@@ -58,7 +61,7 @@ pub const ADRIFT_LOST: f32 = 400.0;
 
 fn build(stage: &mut Stage) -> Entity {
     let commands = &mut *stage.commands;
-    let home = commands.spawn(ship::drifting_home_ship()).id();
+    let home = commands.spawn(ship::parked_home_ship()).id();
     let turn = Quat::from_rotation_y(std::f32::consts::PI);
     let freighter = commands.spawn(ship::site("Freighter", FREIGHTER, FREIGHTER_AT, turn)).id();
     let design: &ShipDesign = ShipHull::new(FREIGHTER).design();

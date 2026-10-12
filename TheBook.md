@@ -311,6 +311,34 @@ it.
   braking with the load behind you (a rope can't push), which a player
   learns to do slowly.
 
+- 2026-10-12. Even with tow mode, a towing player at full thrust reached
+  22 m/s with the lifeboat and couldn't stop. The cause: hooking any
+  anchored body made it `reference_body`, and the assist's speed limit and
+  brakes are relative to the reference, so the limit rode along with the
+  load. Hooking a towable body (under `TOW_MAX_MASS`, not `untowable`) now
+  leaves the reference alone (`fire_grapple`; test
+  `a_tow_keeps_the_assist_flying_by_our_ship`). Found by playing recovery
+  by real inputs; the unit tests set `reference_body` by hand and never
+  saw it. Cost: a lost playtest run.
+
+- 2026-10-12. Playing scenarios by real inputs in the harness: set
+  `HULLBREAKERS_TELEMETRY=<file>` and the client writes the player's view
+  about 30 times a second (eye, forward, mode, feet in ship-local
+  coordinates, grapple, kit, mission lines, markers with world positions,
+  every ship's pose, robots). It writes beside the file and renames over
+  it, because readers kept catching it empty. `tools/hl-aim <file> <x,y,z |
+  marker:<label> | ship:<design>:<x,y,z>> [--go]` turns the mouse onto a
+  point (0.0022 rad per pixel; positive dx turns right, positive dy looks
+  down). Traps:
+  - Boots on climb crates and walls, onto the ceiling, so walk in short
+    straight legs, around crates.
+  - In EVA with boots on, you land on the nearest surface, which can be a
+    wall or the hull's underside.
+  - Releasing W in EVA coasts several metres, so approach slowly and stop
+    early.
+  - The game's profile is `$HL_STATE/profile-N.ron`, not `./profile.ron`.
+  Cost: most of a day.
+
 - 2026-10-12. A shotgun's shove (or a plasma burst's) is an impulse on a
   floating player's velocity, and flight assist (on by default) brakes any
   velocity the keys didn't ask for: a shoved crewmate with assist on stops

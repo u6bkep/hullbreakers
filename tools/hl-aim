@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Turns the harness's view toward a target, by real mouse motion.
+
+    tools/hl-aim <telemetry file> <target> [--go]
+
+<target> is a world point `x,y,z`, `marker:<text>` (the first mission
+marker whose label contains <text>), or `ship:<design>:x,y,z` (a point in
+that ship's coordinates). Reads the game's telemetry
+(HULLBREAKERS_TELEMETRY), prints the angle off and the mouse motion that
+fixes it (`tools/hl look DX DY`), and with --go sends it. The game's mouse
+sensitivity is 0.0022 rad per pixel. Run it twice for a close aim: yaw and
+pitch interact when the view is far off.
+"""
+import math
+import os
+import subprocess
+import sys
+
+SENSITIVITY = 0.0022
+
+
+def read(path):
+    fields, markers = {}, []
+    ships = {}
+    for line in open(path):
+        line = line.rstrip("\n")
+        if line.startswith("ship="):
+            parts = dict(p.split("=", 1) for p in line.split(" "))
+            ships[parts["ship"]] = ([float(c) for c in parts["pos"].split(",")], [float(c) for c in parts["rot"].split(",")])
+            continue
+        if line.startswith("marker="):
+            label, rest = line[len("marker="):].split(" @ ", 1)
+            markers.append((label, [float(c) for c in rest.split(" ")[0].split(",")]))
+        elif "=" in line:
+            key, value = line.split("=", 1)
+            fields.setdefault(key, value)
+    fields["_ships"] = ships
+    return fields, markers
+
+
+def rotate(q, v):
+    x, y, z, w = q
+    # v + 2w(q x v) + 2 q x (q x v)
+    qv = (x, y, z)
+    cross = lambda a, b: (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    t = [2 * c for c in cross(qv, v)]
+    u = cross(qv, t)
+    return [v[i] + w * t[i] + u[i] for i in range(3)]
+
+
+def vec(text):
+    return [float(c) for c in text.split(" ")[0].split(",")]
+
+
+def main():
+    if len(sys.argv) < 3:
+        print(__doc__)
+        sys.exit(2)
+    fields, markers = read(sys.argv[1])
+    target = sys.argv[2]
+    if target.startswith("marker:"):
+        want = target[len("marker:"):].lower()
+        found = [p for (label, p) in markers if want in label.lower()]
+        if not found:
+            print("no marker like", want, "in", [m[0] for m in markers])
+            sys.exit(1)
+        target = found[0]
+    elif target.startswith("ship:"):
+        _, design, point = target.split(":", 2)
+        pos, rot = fields["_ships"][design]
+        local = [float(c) for c in point.split(",")]
+        target = [p + r for p, r in zip(pos, rotate(rot, local))]
+    else:
+        target = [float(c) for c in target.split(",")]
+    eye, fwd, up, right = (vec(fields[k]) for k in ("eye", "forward", "up", "right"))
+    d = [t - e for t, e in zip(target, eye)]
+    dot = lambda a, b: sum(x * y for x, y in zip(a, b))
+    x, y, z = dot(d, right), dot(d, up), dot(d, fwd)
+    yaw = math.atan2(x, z)
+    pitch = math.atan2(y, math.hypot(x, z))
+    dx, dy = round(yaw / SENSITIVITY), round(-pitch / SENSITIVITY)
+    dist = math.sqrt(dot(d, d))
+    print(f"target {dist:.1f} m away, {math.degrees(yaw):.1f} deg right, {math.degrees(pitch):.1f} deg up: look {dx} {dy}")
+    if "--go" in sys.argv:
+        hl = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hl")
+        steps = max(1, min(20, int(max(abs(dx), abs(dy)) / 40)))
+        subprocess.run([hl, "look", str(dx), str(dy), str(steps), str(steps * 15)], check=True)
+
+
+main()

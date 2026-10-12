@@ -103,7 +103,7 @@ pub fn rock_places() -> Vec<(Vec3, f32)> {
 }
 
 fn build(stage: &mut Stage) -> Entity {
-    let home = stage.commands.spawn(ship::drifting_home_ship()).id();
+    let home = stage.commands.spawn(ship::parked_home_ship()).id();
     let course = stage.commands.spawn(ship::site("Course", COURSE, COURSE_AT, Quat::IDENTITY)).id();
     // The rocks are the course, so they're there even when a test asks
     // for a quiet field.
