@@ -14,6 +14,7 @@ use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::items::ItemOp;
 use super::weapons::{STANCES, Stance};
 
 /// A button press counter. Wraps; only differences matter.
@@ -50,6 +51,10 @@ pub struct Presses {
     pub interact: Press,
     /// Make the body under the crosshair the reference frame.
     pub set_reference: Press,
+    /// Drop what's in hand.
+    pub drop: Press,
+    /// Do [`PlayerInput::item_op`] to the inventory.
+    pub item_op: Press,
 }
 
 /// The player's input, written by whoever drives the player (the local input
@@ -77,6 +82,9 @@ pub struct PlayerInput {
     /// What the player wants each stance to hold, if they say (robots
     /// don't: theirs are set when they're made).
     pub stances: Option<[Stance; STANCES]>,
+    /// The last thing asked of the inventory (from the inventory screen);
+    /// it's done when `presses.item_op` counts a new press.
+    pub item_op: ItemOp,
     pub presses: Presses,
 }
 
@@ -145,6 +153,8 @@ pub struct TickInput {
     pub stances: Option<[Stance; STANCES]>,
     pub interact: bool,
     pub set_reference: bool,
+    pub drop: bool,
+    pub item_op: Option<ItemOp>,
 }
 
 impl TickInput {
@@ -157,6 +167,12 @@ impl TickInput {
 }
 
 impl InputCursor {
+    /// Whether the simulation has done the last inventory change in
+    /// `input` (so another can be sent).
+    pub fn item_op_done(&self, input: &PlayerInput) -> bool {
+        self.presses.item_op == input.presses.item_op
+    }
+
     /// Look not yet applied by the simulation, for zero-latency aiming.
     pub fn pending_look(&self, input: &PlayerInput) -> Vec2 {
         wrap(input.look - self.look)
@@ -197,6 +213,8 @@ impl InputCursor {
             stances: input.stances,
             interact: p.interact.since(seen.interact),
             set_reference: p.set_reference.since(seen.set_reference),
+            drop: p.drop.since(seen.drop),
+            item_op: p.item_op.since(seen.item_op).then_some(input.item_op),
         };
         self.look = input.look;
         self.presses = p;

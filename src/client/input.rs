@@ -28,7 +28,8 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::LocalInput;
 use super::bindings::{Action, Bindings, Held};
-use super::menu::{Menu, StanceLayout, Tab};
+use super::LocalPlayer;
+use super::menu::{ItemOps, Menu, StanceLayout, Tab};
 use crate::sim::input::HandHeld;
 use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::Tuning;
@@ -69,10 +70,10 @@ pub fn toggle_capture(
             }
         }
         if held.started(&bindings, Action::Loadout) {
-            if menu.open && menu.tab == Tab::Loadout {
+            if menu.open && menu.tab == Tab::Inventory {
                 menu.close();
             } else {
-                menu.open_on(Tab::Loadout);
+                menu.open_on(Tab::Inventory);
             }
         }
         if held.started(&bindings, Action::TuningPanel) {
@@ -99,11 +100,25 @@ pub fn read_input(
     captured: Res<MouseCaptured>,
     tuning: Res<Tuning>,
     stances: Res<StanceLayout>,
+    mut ops: ResMut<ItemOps>,
+    player: Option<Single<&crate::sim::player::Player, With<LocalPlayer>>>,
     mut local: ResMut<LocalInput>,
     mut ship_orders: MessageWriter<ShipCommand>,
 ) {
     let cmd = &mut local.0;
     cmd.stances = Some(stances.0);
+    // The inventory screen's changes, one at a time: the next once the
+    // simulation has done the last. (Without a player, they're dropped.)
+    match player {
+        Some(player) if player.input.item_op_done(cmd) => {
+            if let Some(op) = ops.0.pop_front() {
+                cmd.item_op = op;
+                cmd.presses.item_op.press();
+            }
+        }
+        Some(_) => {}
+        None => ops.0.clear(),
+    }
     if !captured.0 {
         cmd.movement = Vec3::ZERO;
         cmd.roll = 0.0;
@@ -155,6 +170,7 @@ pub fn read_input(
         (Action::ToggleAssist, &mut presses.toggle_assist),
         (Action::SetReference, &mut presses.set_reference),
         (Action::Interact, &mut presses.interact),
+        (Action::DropItem, &mut presses.drop),
         (Action::MainUse, &mut presses.main),
         (Action::OffUse, &mut presses.off),
         (Action::Reload, &mut presses.reload),

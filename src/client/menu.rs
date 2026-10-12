@@ -1,11 +1,14 @@
-//! The in-game menu: what your hands hold in each stance, and the controls.
+//! The in-game menu: your inventory (what you carry, and what your hands
+//! hold in each stance), and the controls.
 //!
 //! The game goes on while it's open (it's co-op; there's no pausing), but
 //! the cursor is free and your input is let go. Escape (or the Menu
-//! binding) opens and closes it; the Loadout binding opens it on the
-//! loadout.
+//! binding) opens and closes it; the Loadout binding (I) opens it on the
+//! inventory.
 //!
-//! The loadout is yours: what each stance puts in each hand is kept in
+//! What you carry is your player's (predicted) state: the inventory screen
+//! asks the simulation for changes through your input (see [`ItemOps`]).
+//! Stances are yours: what each stance puts in each hand is kept in
 //! `stances.ron` and given to the simulation with your input, so it holds
 //! through respawns and across games. Controls are kept in `keybinds.ron`
 //! (see [`super::bindings`]). Both are saved as soon as they change.
@@ -13,17 +16,21 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
+use std::collections::VecDeque;
+
 use super::LocalPlayer;
 use super::bindings::{Action, Binding, Bindings, Button, KEYBINDS_PATH, Modifier, SLOTS};
+use super::items_hud::{self, AMBER, DIM, INK};
+use crate::sim::items::{AmmoKind, Inventory, Item, ItemOp, PACK_SLOTS, Place, WEAPON_SLOTS};
 use crate::sim::player::Player;
-use crate::sim::weapons::{DEFAULT_STANCES, Gun, Hand, Loadout, STANCES, Slot, Stance};
+use crate::sim::weapons::{DEFAULT_STANCES, Hand, Loadout, STANCES, Slot, Stance};
 
 pub const STANCES_PATH: &str = "stances.ron";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tab {
     #[default]
-    Loadout,
+    Inventory,
     Controls,
 }
 
@@ -38,7 +45,14 @@ pub struct Menu {
     /// A mouse button was just bound: its release isn't a click on the
     /// menu (it would start another binding, or clear the one just made).
     swallow_click: bool,
+    /// The inventory item chosen, to move or look at.
+    chosen: Option<Place>,
 }
+
+/// Inventory changes asked for in the menu, waiting to go to the
+/// simulation one at a time.
+#[derive(Resource, Default)]
+pub struct ItemOps(pub VecDeque<ItemOp>);
 
 /// Which binding is waiting for a key.
 struct Capture {
@@ -165,9 +179,8 @@ fn save_bindings(bindings: &Bindings) -> String {
     }
 }
 
-const INK: egui::Color32 = egui::Color32::from_rgb(200, 225, 235);
-const DIM: egui::Color32 = egui::Color32::from_rgb(120, 135, 145);
-const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 190, 70);
+/// The menu's width (fixed, so it doesn't jump between tabs).
+const MENU_WIDTH: f32 = 760.0;
 
 pub fn menu(
     mut contexts: EguiContexts,
@@ -175,6 +188,7 @@ pub fn menu(
     mut bindings: ResMut<Bindings>,
     mut layout: ResMut<StanceLayout>,
     player: Option<Single<&Player, With<LocalPlayer>>>,
+    mut ops: ResMut<ItemOps>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut exit: MessageWriter<AppExit>,
 ) -> Result {
@@ -198,11 +212,11 @@ pub fn menu(
         .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
         .collapsible(false)
         .resizable([false, false])
-        .min_width(600.0)
-        .max_width(600.0)
+        .min_width(MENU_WIDTH)
+        .max_width(MENU_WIDTH)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut menu.tab, Tab::Loadout, egui::RichText::new("Loadout").size(16.0));
+                ui.selectable_value(&mut menu.tab, Tab::Inventory, egui::RichText::new("Inventory").size(16.0));
                 ui.selectable_value(&mut menu.tab, Tab::Controls, egui::RichText::new("Controls").size(16.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Quit game").clicked() {
@@ -215,7 +229,15 @@ pub fn menu(
             });
             ui.separator();
             match menu.tab {
-                Tab::Loadout => loadout_tab(ui, &mut layout, player.as_deref().map(|p| &p.loadout), &bindings, &mut menu.status),
+                Tab::Inventory => inventory_tab(
+                    ui,
+                    &mut layout,
+                    player.as_deref().copied(),
+                    &bindings,
+                    &mut menu.status,
+                    &mut menu.chosen,
+                    &mut ops,
+                ),
                 Tab::Controls => controls_tab(ui, menu, &mut bindings, list_height),
             }
             if !menu.status.is_empty() {
@@ -226,63 +248,208 @@ pub fn menu(
     Ok(())
 }
 
-/// A slot's name, given what's carried.
-pub fn slot_name(slot: Slot, guns: &[Gun]) -> &'static str {
+/// What a stance slot holds, given what's carried: "1: Issue SMG".
+pub fn slot_name(slot: Slot, inventory: &Inventory) -> String {
     match slot {
-        Slot::Empty => "Empty",
-        Slot::Grapple => "Grapple",
-        Slot::Gun(i) => guns.get(i as usize).map_or("Empty", |g| g.kind.stats().name),
+        Slot::Empty => "Empty".into(),
+        Slot::Grapple => "Grapple".into(),
+        Slot::Gun(i) => match inventory.weapons.get(i as usize).copied().flatten() {
+            Some(w) => format!("{}: {}", i + 1, w.name()),
+            None => format!("{}: (empty slot)", i + 1),
+        },
     }
 }
 
-fn loadout_tab(
+/// Asks the simulation to change the inventory (sent one at a time with
+/// the input; see `input::read_input`).
+fn ask(ops: &mut ItemOps, op: ItemOp) {
+    ops.0.push_back(op);
+}
+
+const CELL: egui::Vec2 = egui::vec2(196.0, 46.0);
+const PACK_CELL: egui::Vec2 = egui::vec2(128.0, 46.0);
+
+/// One place in the inventory, drawn as a card: what's there, in its
+/// colour. `chosen` is lit; `target` (where the chosen item could go) is
+/// outlined.
+fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chosen: bool, target: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let painter = ui.painter_at(rect);
+    let color = item.as_ref().map_or(DIM, items_hud::item_color);
+    let hovered = response.hovered();
+    painter.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(if chosen { 230 } else if hovered { 200 } else { 160 }));
+    let stroke = if chosen {
+        egui::Stroke::new(2.0, color)
+    } else if target {
+        egui::Stroke::new(1.5, INK)
+    } else if item.is_some() {
+        egui::Stroke::new(1.0, color.gamma_multiply(0.6))
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(25))
+    };
+    painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+    // A rarity edge down the left.
+    if item.is_some() {
+        painter.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())), 2.0, color);
+    }
+    let inner = rect.shrink2(egui::vec2(9.0, 5.0));
+    painter.text(inner.left_top(), egui::Align2::LEFT_TOP, tag, egui::FontId::monospace(9.0), DIM);
+    let Some(item) = item else {
+        painter.text(inner.left_center() + egui::vec2(0.0, 5.0), egui::Align2::LEFT_CENTER, "empty", egui::FontId::proportional(12.0), DIM);
+        return response;
+    };
+    let name = painter.layout_no_wrap(item.name(), egui::FontId::proportional(13.0), color);
+    let name = if name.size().x <= inner.width() {
+        name
+    } else {
+        painter.layout_no_wrap(item.name(), egui::FontId::proportional(10.5), color)
+    };
+    painter.galley(inner.left_top() + egui::vec2(0.0, 11.0), name, color);
+    let detail = match item {
+        Item::Weapon(w) => format!("{} · {}/{}", w.frame.name(), w.mag, w.stats().mag),
+        Item::Ammo { .. } => String::new(),
+        Item::Cargo(c) if c.bulky() => "bulky: both hands".into(),
+        Item::Cargo(_) => "cargo".into(),
+    };
+    painter.text(inner.left_bottom(), egui::Align2::LEFT_BOTTOM, detail, egui::FontId::monospace(9.0), DIM);
+    response
+}
+
+/// What a click on an inventory place does: with nothing chosen, choose
+/// what's there; on the chosen one, let go of it; elsewhere, move the
+/// chosen item there if it can go (else choose what's there). A right
+/// click drops what's there.
+fn click(inv: &Inventory, place: Place, response: &egui::Response, ops: &mut ItemOps, chosen: &mut Option<Place>) {
+    if response.secondary_clicked() && inv.get(place).is_some() {
+        ask(ops, ItemOp::Drop(place));
+        *chosen = None;
+    } else if response.clicked() {
+        match *chosen {
+            Some(from) if from == place => *chosen = None,
+            Some(from) if can_move(inv, from, place) => {
+                ask(ops, ItemOp::Move { from, to: place });
+                *chosen = Some(place);
+            }
+            _ => *chosen = inv.get(place).is_some().then_some(place),
+        }
+    }
+}
+
+/// Whether what's at `from` can go to `to` (swapping with what's there).
+fn can_move(inv: &Inventory, from: Place, to: Place) -> bool {
+    let mut trial = *inv;
+    trial.move_item(from, to)
+}
+
+/// The inventory: weapon slots, pack, ammo and cargo, with the chosen
+/// item's details beside them; then the stances.
+fn inventory_tab(
     ui: &mut egui::Ui,
     layout: &mut StanceLayout,
-    loadout: Option<&Loadout>,
+    player: Option<&Player>,
     bindings: &Bindings,
     status: &mut String,
+    chosen: &mut Option<Place>,
+    ops: &mut ItemOps,
 ) {
-    // The gun slots every player has (whether or not they carry the gun).
-    let fallback = Loadout::default();
-    let loadout = loadout.unwrap_or(&fallback);
-    let guns = &loadout.guns;
+    let fallback = Loadout::base();
+    let loadout = player.map_or(&fallback, |p| &p.loadout);
+    let inv = &loadout.inventory;
+    if chosen.is_some_and(|p| inv.get(p).is_none()) {
+        *chosen = None;
+    }
+    let target = |chosen: &Option<Place>, to: Place| chosen.is_some_and(|from| from != to && can_move(inv, from, to));
 
-    ui.label(egui::RichText::new("Carried").strong());
-    egui::Grid::new("carried").num_columns(3).spacing([24.0, 4.0]).show(ui, |ui| {
-        ui.label(egui::RichText::new("Grapple").color(INK));
-        ui.label(egui::RichText::new("suit system").color(DIM));
-        ui.label("");
-        ui.end_row();
-        for gun in guns {
-            let stats = gun.kind.stats();
-            if gun.carried {
-                ui.label(egui::RichText::new(stats.name).color(INK));
-                ui.label(egui::RichText::new(format!("{} / {} in mag, {} spare", gun.mag, stats.mag, gun.reserve)).monospace());
-                ui.label(egui::RichText::new(format!("{} dmg · {}/s", stats.damage, stats.rate)).color(DIM));
-            } else {
-                ui.label(egui::RichText::new(stats.name).color(DIM));
-                ui.label(egui::RichText::new("not carried — take one from the weapons locker").color(AMBER));
-                ui.label("");
-            }
-            ui.end_row();
-        }
+    ui.horizontal_top(|ui| {
+        // Left: what's carried.
+        ui.vertical(|ui| {
+            ui.set_width(2.0 * CELL.x + 8.0);
+            ui.label(egui::RichText::new("Weapon slots").strong());
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                for i in 0..WEAPON_SLOTS as u8 {
+                    let place = Place::Weapon(i);
+                    let in_hand = Hand::BOTH.iter().any(|h| loadout.weapon_slot(*h) == Some(i as usize));
+                    let tag = if in_hand { format!("SLOT {} · IN HAND", i + 1) } else { format!("SLOT {}", i + 1) };
+                    let r = cell(ui, CELL, &tag, inv.get(place), *chosen == Some(place), target(chosen, place));
+                    click(inv, place, &r, ops, chosen);
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Pack").strong());
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                for i in 0..PACK_SLOTS as u8 {
+                    let place = Place::Pack(i);
+                    let r = cell(ui, PACK_CELL, "PACK", inv.get(place), *chosen == Some(place), target(chosen, place));
+                    click(inv, place, &r, ops, chosen);
+                }
+            });
+            ui.add_space(4.0);
+            egui::Grid::new("ammo").num_columns(3).spacing([12.0, 4.0]).show(ui, |ui| {
+                for kind in AmmoKind::ALL {
+                    let rounds = inv.ammo(kind);
+                    ui.label(egui::RichText::new(kind.name()).color(items_hud::SUPPLY));
+                    let bar = egui::ProgressBar::new(rounds as f32 / kind.cap() as f32)
+                        .desired_width(170.0)
+                        .text(egui::RichText::new(format!("{rounds} / {}", kind.cap())).monospace().small());
+                    ui.add(bar);
+                    let drop = egui::Button::new(egui::RichText::new(format!("Drop {}", rounds.min(kind.box_rounds()))).small());
+                    if ui
+                        .add_enabled(rounds > 0, drop)
+                        .on_hover_text("Leave a box of it at your feet, for a crewmate")
+                        .clicked()
+                    {
+                        ask(ops, ItemOp::DropAmmo(kind));
+                    }
+                    ui.end_row();
+                }
+                ui.label(egui::RichText::new("Hands").color(items_hud::CARGO));
+                match inv.carrying {
+                    Some(cargo) => {
+                        ui.label(egui::RichText::new(format!("{} (no guns, no grapple)", cargo.name())).color(INK));
+                        if ui.button(egui::RichText::new(format!("Put down [{}]", bindings.label(Action::DropItem))).small()).clicked() {
+                            ask(ops, ItemOp::Drop(Place::Hands));
+                        }
+                    }
+                    None => {
+                        ui.label(egui::RichText::new("free").color(DIM));
+                        ui.label("");
+                    }
+                }
+                ui.end_row();
+            });
+        });
+        ui.separator();
+        // Right: the chosen item.
+        ui.vertical(|ui| {
+            ui.set_width(300.0);
+            let item = chosen.and_then(|p| inv.get(p));
+            details(ui, player, chosen, item, ops);
+        });
     });
-    ui.add_space(10.0);
-
-    ui.label(egui::RichText::new("Stances").strong());
     ui.label(
-        egui::RichText::new(
-            "What each hand holds in each stance. A gun with the other hand empty is braced: \
-             it shoots tighter. Without the grapple in hand, a rope that's out stays out.",
-        )
+        egui::RichText::new(format!(
+            "Click an item, then a slot to move it there (or swap). Right-click drops it; {} drops what's in hand.",
+            bindings.label(Action::DropItem)
+        ))
         .small()
         .color(DIM),
     );
-    ui.add_space(4.0);
+    ui.separator();
+
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Stances").strong());
+        ui.label(
+            egui::RichText::new("A gun with the other hand empty is braced: it shoots tighter. Without the grapple in hand, a rope that's out stays out.")
+                .small()
+                .color(DIM),
+        );
+    });
     let mut options = vec![Slot::Empty, Slot::Grapple];
-    options.extend((0..guns.len() as u8).map(Slot::Gun));
+    options.extend((0..WEAPON_SLOTS as u8).map(Slot::Gun));
     let before = layout.0;
-    egui::Grid::new("stances").num_columns(3).spacing([16.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new("stances").num_columns(3).spacing([16.0, 3.0]).show(ui, |ui| {
         ui.label("");
         ui.label(egui::RichText::new(format!("Main hand  [{}]", bindings.label(Action::MainUse))).color(DIM));
         ui.label(egui::RichText::new(format!("Off hand  [{}]", bindings.label(Action::OffUse))).color(DIM));
@@ -304,15 +471,15 @@ fn loadout_tab(
             for hand in Hand::BOTH {
                 let held = stance.slot(hand);
                 egui::ComboBox::from_id_salt(("stance", i, hand as u8))
-                    .width(150.0)
-                    .selected_text(slot_name(held, guns))
+                    .width(260.0)
+                    .selected_text(slot_name(held, inv))
                     .show_ui(ui, |ui| {
                         for option in &options {
                             let carried = match option {
-                                Slot::Gun(g) => guns[*g as usize].carried,
+                                Slot::Gun(g) => inv.weapons[*g as usize].is_some(),
                                 _ => true,
                             };
-                            let text = egui::RichText::new(slot_name(*option, guns));
+                            let text = egui::RichText::new(slot_name(*option, inv));
                             let text = if carried { text } else { text.color(DIM) };
                             if ui.selectable_label(held == *option, text).clicked() {
                                 put(stance, hand, *option);
@@ -323,13 +490,96 @@ fn loadout_tab(
             ui.end_row();
         }
     });
-    ui.add_space(6.0);
     if ui.button("Default stances").clicked() {
         layout.0 = DEFAULT_STANCES;
     }
     if layout.0 != before {
         *status = save_stances(layout);
     }
+}
+
+/// The chosen item: what it is, its stats against what you'd compare it
+/// with, and what can be done with it.
+fn details(ui: &mut egui::Ui, player: Option<&Player>, chosen: &mut Option<Place>, item: Option<Item>, ops: &mut ItemOps) {
+    let (Some(player), Some(place), Some(item)) = (player, *chosen, item) else {
+        ui.label(egui::RichText::new("Nothing chosen").color(DIM));
+        ui.label(
+            egui::RichText::new(
+                "Choose an item to see what it is and how it compares with your guns. Loot comes from \
+                 robots and from crates aboard enemy ships: better the deeper in they are.",
+            )
+            .small()
+            .color(DIM),
+        );
+        return;
+    };
+    let inv = &player.loadout.inventory;
+    ui.label(egui::RichText::new(item.name()).size(17.0).strong().color(items_hud::item_color(&item)));
+    match item {
+        Item::Weapon(weapon) => {
+            for (line, color) in items_hud::weapon_lines(&weapon) {
+                ui.label(egui::RichText::new(line).small().color(color));
+            }
+            ui.label(egui::RichText::new(weapon.build().maker.blurb()).small().italics().color(DIM));
+            let stats = weapon.stats();
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} / {} in the mag · {} ({} carried)",
+                    weapon.mag,
+                    stats.mag,
+                    stats.ammo.name(),
+                    inv.ammo(stats.ammo)
+                ))
+                .small()
+                .color(INK),
+            );
+            let theirs = items_hud::compared_with(player, &weapon);
+            ui.label(
+                egui::RichText::new(match theirs {
+                    Some(t) => format!("Against {}", t.name()),
+                    None => "Stats".into(),
+                })
+                .small()
+                .color(DIM),
+            );
+            items_hud::stats_table(ui, "chosen stats", &stats, theirs.map(|w| w.stats()).as_ref());
+        }
+        Item::Cargo(cargo) => {
+            ui.label(
+                egui::RichText::new(if cargo.bulky() {
+                    "Bulky: carried in both hands. Whoever carries it can't shoot or grapple."
+                } else {
+                    "Small: rides in the pack."
+                })
+                .small()
+                .color(DIM),
+            );
+        }
+        Item::Ammo { .. } => {}
+    }
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        if let Item::Weapon(_) = item {
+            for i in 0..WEAPON_SLOTS as u8 {
+                let to = Place::Weapon(i);
+                if to != place && ui.small_button(format!("To slot {}", i + 1)).clicked() {
+                    ask(ops, ItemOp::Move { from: place, to });
+                    *chosen = Some(to);
+                }
+            }
+            let pack = (0..PACK_SLOTS as u8).map(Place::Pack).find(|p| inv.get(*p).is_none());
+            if let (Place::Weapon(_), Some(to)) = (place, pack)
+                && ui.small_button("To pack").clicked()
+            {
+                ask(ops, ItemOp::Move { from: place, to });
+                *chosen = Some(to);
+            }
+        }
+        if ui.small_button("Drop").clicked() {
+            ask(ops, ItemOp::Drop(place));
+            *chosen = None;
+        }
+    });
 }
 
 fn controls_tab(ui: &mut egui::Ui, menu: &mut Menu, bindings: &mut Bindings, height: f32) {

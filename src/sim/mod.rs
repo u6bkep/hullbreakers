@@ -13,6 +13,7 @@ pub mod events;
 pub mod flight;
 pub mod frame;
 pub mod input;
+pub mod items;
 pub mod mission;
 pub mod motion;
 pub mod nav;
@@ -209,7 +210,9 @@ impl Plugin for SimPlugin {
                     vitals::beam_burns,
                     vitals::apply_damage,
                     pickups::remove_taken,
+                    pickups::spawn_drops,
                     vitals::settle_deaths,
+                    pickups::drop_robot_loot,
                     bots::settle_robot_deaths,
                     mission::handle_presses,
                     mission::settle_battle,

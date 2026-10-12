@@ -12,7 +12,9 @@ pub mod events;
 pub mod gallery;
 pub mod hud;
 pub mod input;
+pub mod items_hud;
 pub mod menu;
+pub mod pickup_look;
 pub mod profile;
 pub mod render;
 pub mod sfx;
@@ -56,6 +58,7 @@ impl Plugin for ClientPlugin {
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<input::TuningOpen>()
             .init_resource::<menu::Menu>()
+            .init_resource::<menu::ItemOps>()
             .init_resource::<camera::CameraFx>()
             .insert_resource(ViewCorrection {
                 rotation: Quat::IDENTITY,
@@ -89,7 +92,7 @@ impl Plugin for ClientPlugin {
                     camera::spawn_camera,
                     render::setup_lighting,
                     render::setup_dust,
-                    render::setup_pickup_look,
+                    pickup_look::setup_pickup_look,
                     weapons_fx::setup_weapon_fx,
                     sfx::setup_sounds,
                 ),
@@ -104,12 +107,13 @@ impl Plugin for ClientPlugin {
                 PostUpdate,
                 (
                     render::update_avatars,
-                    render::draw_pickups,
+                    pickup_look::draw_pickups,
                     crew::dress_crew,
                     animate::rig_avatars,
                     animate::animate_avatars,
                     camera::update_camera,
                     viewmodel::pose_view_hands,
+                    pickup_look::paint_weapons,
                     viewmodel::dress_view_hands,
                     render::update_dust,
                 )
@@ -152,6 +156,7 @@ impl Plugin for ClientPlugin {
                     hud::mission_hud,
                     hud::vitals_hud,
                     hud::loadout_hud,
+                    items_hud::pickup_card,
                     gallery::label_exhibits,
                     hud::hit_markers,
                     menu::menu,

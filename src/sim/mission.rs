@@ -499,6 +499,7 @@ fn spawn_duel(commands: &mut Commands, tuning: &Tuning, tick: u32, robots: bool)
     if robots {
         crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick);
     }
+    super::pickups::stock_ship(commands, carrier, ShipHull::new(CARRIER).design(), tick);
     home
 }
 
