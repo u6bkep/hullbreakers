@@ -11,9 +11,13 @@
 //! puts it right, reading the power board on the bridge. Without our
 //! shield the hull goes in `home_exposed_seconds`; without our turrets the
 //! carrier never goes down, even with its shield off. The chance a hit
-//! does damage is `hit_fault_chance`, plus twice that for each crew member
+//! does damage is three times `hit_fault_chance` for each crew member
 //! aboard our ship: the more of you at home, the more there is to do there,
-//! and a ship left empty (a lone boarder) is rarely knocked about.
+//! and a ship left empty (a lone boarder away) isn't knocked about. Nor is
+//! anything in the first `FAULT_GRACE_SECONDS`.
+//!
+//! The carrier's crew is sized to ours ([`carrier_crew`]): alone, a light
+//! one; four players, the full complement.
 //!
 //! Results: `shield_dropped`, `faults` (hits that knocked something out)
 //! and `repairs` (those put right).
@@ -25,7 +29,7 @@ use rand_chacha::ChaCha8Rng;
 
 use super::{Scenario, Stage};
 use crate::sim::bodies::{Bodies, PreviousVelocity};
-use crate::sim::bots::{self, Robot};
+use crate::sim::bots::{self, Gait, Robot};
 use crate::sim::combat::{self, Beams, Combatant};
 use crate::sim::devices::Devices;
 use crate::sim::design::ShipDesign;
@@ -144,14 +148,54 @@ fn build(stage: &mut Stage) -> Entity {
     });
     commands.spawn((Name::new("Damage control"), Staged, Damage::default()));
     if stage.robots {
-        bots::crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave.frame(tick, Vec3::ZERO), tick, BOARDING_THREAT);
+        let design = ShipHull::new(CARRIER).design();
+        let crew = carrier_crew(design, stage.players, tick);
+        bots::man_posts(commands, tuning, carrier, design, &weave.frame(tick, Vec3::ZERO), crew);
     }
     crate::sim::pickups::stock_ship(commands, carrier, ShipHull::new(CARRIER).design(), tick);
     home
 }
 
-/// How dangerous the carrier's crew is (see [`bots::Threat`]).
-const BOARDING_THREAT: bots::Threat = bots::Threat(3);
+/// The carrier's crew for `players` boarders: how dangerous (see
+/// [`bots::Threat`]) and how many of its posts are manned grow with the
+/// crew, to the full complement at four. Alone, a boarder crossing on a
+/// rope at the first pass met six swarmers and three hull turrets and was
+/// dead in four seconds, 40 m short of the hangar.
+pub fn carrier_crew(design: &ShipDesign, players: usize, tick: u32) -> Vec<bots::Posting> {
+    let n = players.clamp(1, 4) - 1;
+    let threat = bots::Threat([1, 2, 3, 3][n]);
+    // Manned posts of each kind, by crew size (1 to 4 players).
+    let manned = |gait: Gait| match gait {
+        Gait::Walker => [4, 5, 6, 7][n],
+        Gait::Flyer => [1, 3, 4, 6][n],
+        Gait::Mount => [1, 2, 3, 3][n],
+        _ => usize::MAX,
+    };
+    let entry = design.markers.get("entry").copied().unwrap_or(Vec3::ZERO);
+    let crew = bots::compose_crew(design, threat, tick as u64);
+    let mut kept = Vec::new();
+    for gait in [Gait::Walker, Gait::Flyer, Gait::Mount, Gait::Crawler, Gait::Clinger] {
+        let mut group: Vec<bots::Posting> = crew.iter().copied().filter(|p| p.robot.gait() == gait).collect();
+        // From the way in to the deepest: keep posts spread along it, the
+        // deepest always (the leader guards the bridge).
+        group.sort_by(|a, b| a.post.at.distance(entry).total_cmp(&b.post.at.distance(entry)));
+        let (have, want) = (group.len(), manned(gait).min(group.len()));
+        if want == 0 {
+            continue;
+        }
+        let picks: Vec<usize> = if want == 1 {
+            vec![have - 1]
+        } else {
+            (0..want).map(|i| (i * (have - 1) + (want - 1) / 2) / (want - 1)).collect()
+        };
+        kept.extend(picks.into_iter().map(|i| group[i]));
+    }
+    kept
+}
+
+/// No hit knocks anything out of our ship in the first this many seconds:
+/// a crew is still at its stations, or a lone boarder still crossing.
+const FAULT_GRACE_SECONDS: f32 = 45.0;
 
 /// Pressing the shield console drops that ship's shield.
 fn drop_shields(
@@ -265,9 +309,12 @@ fn damage_control(
         let mut rng = ChaCha8Rng::seed_from_u64(tick.0 as u64 ^ 0xda4a_6e);
         // More of the crew at home, more goes wrong there (the other
         // front): the base chance, plus twice it for each of them aboard.
+        // Nobody at home, nothing goes wrong there that matters: a lone
+        // boarder's ship holds while they're away (it's only time).
         let aboard = players.iter().filter(|(_, p, _)| p.mode.body() == Some(home)).count() as f32;
-        let chance = (tuning.hit_fault_chance * (1.0 + 2.0 * aboard)).min(0.9);
-        if rng.random::<f32>() < chance {
+        let chance = (tuning.hit_fault_chance * 3.0 * aboard).min(0.9);
+        let grace = tick.0.wrapping_sub(started) < (FAULT_GRACE_SECONDS * TICK_HZ as f32) as u32;
+        if !grace && rng.random::<f32>() < chance {
             let local = frame.point_to_local(at);
             let nearest = design
                 .devices

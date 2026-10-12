@@ -334,6 +334,10 @@ pub fn reference_overlay(
 /// How long a mark lingers after it goes (s): a beacon's marker lasts
 /// until about its next ping.
 const LINGER: f32 = 3.0;
+/// How long a mark lingers when the objective moves on without it (s): it
+/// was a step now done (the airlock, once aboard), not a beacon between
+/// pings, so it goes at once.
+const REPLACED_LINGER: f32 = 0.3;
 /// How long a new mark's ring takes to open (s).
 const APPEAR_RING: f32 = 0.5;
 
@@ -388,6 +392,11 @@ pub struct Objectives<'w, 's> {
 }
 
 impl Objectives<'_, '_> {
+    /// What the mission says to do now (empty without one).
+    fn objective(&self) -> String {
+        self.missions.single().map_or(String::new(), |m| m.objective.clone())
+    }
+
     /// Where the button for `action` on `ship` is, in the world.
     fn control(&self, ship: Entity, action: ControlAction) -> Option<Vec3> {
         let (_, _, transform, ..) = self.ships.get(ship).ok()?;
@@ -467,6 +476,8 @@ pub fn objective_markers(
     camera: CameraView,
     // Each mark by name: as last seen, when, and when it appeared.
     mut seen: Local<HashMap<(String, MarkKind), (Objective, f32, f32)>>,
+    // The objective last frame.
+    mut was: Local<String>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let (camera, cam) = *camera;
@@ -489,6 +500,16 @@ pub fn objective_markers(
     // A mark that goes (a beacon between pings, a goal just done) lingers
     // where it was last seen, fading; one that comes back (the next ping)
     // is fresh, and announces itself with a ring.
+    // The objective moved on: what it left behind is done, and goes now.
+    let objective = objectives.objective();
+    if *was != objective {
+        for (key, (_, last, _)) in seen.iter_mut() {
+            if !marks.iter().any(|m| m.label == key.0 && m.kind == key.1) {
+                *last = last.min(now - (LINGER - REPLACED_LINGER));
+            }
+        }
+        *was = objective;
+    }
     for mark in &marks {
         let key = (mark.label.clone(), mark.kind);
         let first = seen.get(&key).filter(|(_, last, _)| now - last < LINGER).map_or(now, |(.., first)| *first);

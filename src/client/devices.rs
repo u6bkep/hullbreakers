@@ -107,7 +107,12 @@ pub enum Part {
     /// A room light: on when live (an alarm flashes).
     Light { alarm: bool },
     /// A gate's strip: bright when it's the local player's next.
+    /// The edges of a gate's opening, on the face you fly in by: lit when
+    /// it's your next gate.
     GateStrip,
+    /// The same on the face you leave by: never lit, so a gate seen from
+    /// the wrong side looks dark.
+    GateStripBack,
     /// A length of conduit (lit through its conduit's [`CableGlow`]).
     Cable,
     /// The bead of light running along a live conduit's path (in the
@@ -293,17 +298,19 @@ pub fn build_devices(
                 None
             }
             DeviceKind::Gate { size } => {
-                // Strips along the opening's edges, on both faces of the frame.
+                // Strips along the opening's edges, on both faces of the
+                // frame (behind it, -z, is the way in).
                 let t = crate::sim::devices::GATE_FRAME;
-                for z in [-1.0, 1.0] {
-                    let z = z * (t / 2.0 + 0.01);
+                for side in [-1.0, 1.0] {
+                    let z = side * (t / 2.0 + 0.01);
+                    let part = if side < 0.0 { Part::GateStrip } else { Part::GateStripBack };
                     for (offset, extent) in [
                         (Vec3::Y * (size.y / 2.0 + 0.06), Vec3::new(size.x, 0.1, 0.02)),
                         (Vec3::NEG_Y * (size.y / 2.0 + 0.06), Vec3::new(size.x, 0.1, 0.02)),
                         (Vec3::X * (size.x / 2.0 + 0.06), Vec3::new(0.1, size.y, 0.02)),
                         (Vec3::NEG_X * (size.x / 2.0 + 0.06), Vec3::new(0.1, size.y, 0.02)),
                     ] {
-                        parts.push((Part::GateStrip, cuboid(&mut meshes, extent), look.gate.clone(), Transform::from_translation(offset.with_z(z))));
+                        parts.push((part.clone(), cuboid(&mut meshes, extent), look.gate.clone(), Transform::from_translation(offset.with_z(z))));
                     }
                 }
                 Some((facing, Vec::new()))
@@ -568,6 +575,7 @@ pub fn show_devices(
                     None => transform.scale = Vec3::ZERO,
                 }
             }
+            Part::GateStripBack => {}
             Part::GateStrip => {
                 let next = next_gate(mission, local, ids.get(of.ship).ok().copied()) == Some(of.index);
                 set(&mut material, if next { &look.gate_next } else { &look.gate });

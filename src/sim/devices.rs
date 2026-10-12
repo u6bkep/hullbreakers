@@ -297,14 +297,16 @@ impl Device {
     }
 
     /// Whether the straight move from `a` to `b` (ship coordinates) goes
-    /// through this gate's opening, either way.
+    /// through this gate's opening the way it faces (in from behind it, out
+    /// of its face): a course's hairpins can't be cut by flying a gate
+    /// backwards.
     pub fn passed_through(&self, a: Vec3, b: Vec3) -> bool {
         let DeviceKind::Gate { size } = self.kind else {
             return false;
         };
         let (r, u, n) = self.basis();
         let (da, db) = ((a - self.at).dot(n), (b - self.at).dot(n));
-        if da.signum() == db.signum() || da == db {
+        if !(da < 0.0 && db >= 0.0) {
             return false;
         }
         let p = a + (b - a) * (da / (da - db)) - self.at;
@@ -856,7 +858,7 @@ mod tests {
         let d = design("(id: \"g\", kind: Gate(size: (4.0, 4.0)), at: (0.0, 0.0, 10.0), face: (0.0, 0.0, 1.0))").unwrap();
         let g = &d.devices[0];
         assert!(g.passed_through(Vec3::new(1.0, 1.0, 9.5), Vec3::new(1.0, 1.0, 10.5)));
-        assert!(g.passed_through(Vec3::new(0.0, 0.0, 11.0), Vec3::new(0.0, 0.0, 9.0)), "either way");
+        assert!(!g.passed_through(Vec3::new(0.0, 0.0, 11.0), Vec3::new(0.0, 0.0, 9.0)), "the wrong way");
         assert!(!g.passed_through(Vec3::new(3.0, 0.0, 9.5), Vec3::new(3.0, 0.0, 10.5)), "beside it");
         assert!(!g.passed_through(Vec3::new(0.0, 0.0, 8.0), Vec3::new(0.0, 0.0, 9.9)), "short of it");
         // Its frame is structure.

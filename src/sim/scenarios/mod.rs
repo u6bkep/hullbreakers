@@ -43,6 +43,9 @@ pub struct Stage<'a, 'w, 's> {
     /// turn these off).
     pub asteroids: bool,
     pub robots: bool,
+    /// How many players there are (at least one): a scenario may size its
+    /// opposition to the crew.
+    pub players: usize,
 }
 
 pub struct Scenario {

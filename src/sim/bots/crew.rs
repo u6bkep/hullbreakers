@@ -124,7 +124,13 @@ pub fn compose_crew(design: &ShipDesign, threat: Threat, seed: u64) -> Vec<Posti
 /// at `frame`, at `tick`, which also seeds the roll): walkers standing on its
 /// decks, flyers holding station about it, turrets on its hull.
 pub fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, frame: &BodyFrame, tick: u32, threat: Threat) {
-    for (i, posting) in compose_crew(design, threat, tick as u64).into_iter().enumerate() {
+    man_posts(commands, tuning, ship, design, frame, compose_crew(design, threat, tick as u64));
+}
+
+/// Puts `crew` (composed by [`compose_crew`], perhaps thinned) at their
+/// posts aboard `ship`, as [`crew_ship`] does.
+pub fn man_posts(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, frame: &BodyFrame, crew: Vec<Posting>) {
+    for (i, posting) in crew.into_iter().enumerate() {
         let post = posting.post;
         let (mode, home_post) = match posting.robot.gait() {
             Gait::Walker => {
