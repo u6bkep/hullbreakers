@@ -85,8 +85,17 @@ pub enum SimSystems {
 /// generating components.
 pub struct SimSharedPlugin;
 
+/// Avian's solver substeps per tick. Its default (6) buys stiff joints and
+/// stacks; this world has neither (rocks and creatures in free flight that
+/// now and then collide; ropes and boots are our own, outside the solver),
+/// and the solver over hundreds of rocks was most of a tick. (Measured: see
+/// docs/perf.md.) `HULLBREAKERS_SUBSTEPS=n` overrides it, for comparing.
+pub const PHYSICS_SUBSTEPS: u32 = 2;
+
 impl Plugin for SimSharedPlugin {
     fn build(&self, app: &mut App) {
+        let substeps = std::env::var("HULLBREAKERS_SUBSTEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(PHYSICS_SUBSTEPS);
+        app.insert_resource(SubstepCount(substeps));
         if !app.world().contains_resource::<tuning::Tuning>() {
             let tuning = tuning::Tuning::load_or_default(std::path::Path::new(tuning::TUNING_PATH));
             app.insert_resource(tuning);

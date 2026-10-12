@@ -171,7 +171,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_robot)
             .add_observer(replicate_pickup)
             // Measured only when profiling (see `client::profile`).
-            .add_systems(PostUpdate, meter_sends.before(LinkSystems::Send).run_if(resource_exists::<SendMeter>))
+            .add_systems(PostUpdate, meter_sends.after(lightyear::transport::plugin::TransportSystems::Send).before(LinkSystems::Send).run_if(resource_exists::<SendMeter>))
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players, profiles::receive_profiles))
             .add_systems(

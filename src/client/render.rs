@@ -564,7 +564,9 @@ pub fn update_avatars(
     for (entity, avatar, mut transform) in &mut avatars {
         match players.get(avatar.player).ok().and_then(|(_, p, _, own)| pose(p, own)) {
             Some(pose) => {
-                *transform = pose;
+                // Written only when it moved: a write re-propagates the whole
+                // model under it, and idle robots and creatures are many.
+                transform.set_if_neq(pose);
                 seen.push(avatar.player);
             }
             None if players.contains(avatar.player) => seen.push(avatar.player),
