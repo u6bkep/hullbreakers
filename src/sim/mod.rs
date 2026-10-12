@@ -101,6 +101,8 @@ impl Plugin for SimSharedPlugin {
             .add_observer(asteroids::shape_asteroid)
             .add_observer(mission::shape_debris)
             .add_observer(scenarios::recovery::shape_pod)
+            // How its devices look here (a client's own presses at once).
+            .add_systems(Update, devices::show_devices)
             // A ship's closed doors are part of its collider, wherever it is.
             .add_systems(
                 FixedPostUpdate,

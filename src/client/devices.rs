@@ -17,7 +17,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use super::LocalPlayer;
 use super::combat_fx::{glyph, wrap};
 use crate::sim::SimTick;
-use crate::sim::devices::{Device, DeviceKind, DeviceState, Devices, face_basis};
+use crate::sim::devices::{Device, DeviceKind, DeviceState, ShownDevices, face_basis};
 use crate::sim::mission::{BodyId, Mission};
 use crate::sim::player::DeckSlot;
 use crate::sim::scenarios::recovery::Pod;
@@ -361,7 +361,7 @@ pub fn show_devices(
     time: Res<Time>,
     tick: Res<SimTick>,
     look: Res<DeviceLook>,
-    ships: Query<(&ShipHull, Option<&Devices>)>,
+    ships: Query<(&ShipHull, Option<&ShownDevices>)>,
     ids: Query<&BodyId>,
     mission: Option<Single<&Mission>>,
     local: Option<Single<&DeckSlot, With<LocalPlayer>>>,
@@ -372,7 +372,7 @@ pub fn show_devices(
     let local = local.map(|l| l.0);
     let dt = time.delta_secs();
     let flash = (time.elapsed_secs() * 2.4).fract() < 0.55;
-    let state_of = |of: &OfDevice| -> Option<(&'static Device, DeviceState, &Devices)> {
+    let state_of = |of: &OfDevice| -> Option<(&'static Device, DeviceState, &ShownDevices)> {
         let (hull, devices) = ships.get(of.ship).ok()?;
         let devices = devices?;
         let design = hull.design();
@@ -535,7 +535,7 @@ pub fn flash_beacons(
 
 /// How lit a ship's rooms are, if they're lit by its devices (a derelict):
 /// the fraction of its room lights (not alarms) that are on.
-fn lit_fraction(hull: &ShipHull, devices: Option<&Devices>) -> Option<f32> {
+fn lit_fraction(hull: &ShipHull, devices: Option<&ShownDevices>) -> Option<f32> {
     let design = hull.design();
     let rooms: Vec<usize> = design
         .devices
@@ -554,7 +554,7 @@ fn lit_fraction(hull: &ShipHull, devices: Option<&Devices>) -> Option<f32> {
 /// A ship whose rooms are lit by its devices (a derelict) is only as bright
 /// inside as its lights: its cabins' fill light goes with how many are on.
 pub fn dim_dark_cabins(
-    ships: Query<(&ShipHull, Option<&Devices>, &Children)>,
+    ships: Query<(&ShipHull, Option<&ShownDevices>, &Children)>,
     mut probes: Query<(Option<&mut EnvironmentMapLight>, Option<&mut GeneratedEnvironmentMapLight>), With<LightProbe>>,
 ) {
     for (hull, devices, children) in &ships {
@@ -594,7 +594,7 @@ const DARK_AMBIENT: f32 = 0.0;
 pub fn interior_ambient(
     time: Res<Time>,
     camera: Option<Single<&Transform, With<super::camera::PlayerCamera>>>,
-    ships: Query<(&ShipHull, Option<&Devices>, &GlobalTransform)>,
+    ships: Query<(&ShipHull, Option<&ShownDevices>, &GlobalTransform)>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut sky_fill: Query<(Entity, Option<&mut EnvironmentMapLight>, Option<&mut GeneratedEnvironmentMapLight>), (With<Camera3d>, Without<LightProbe>)>,
     mut space: Local<Option<f32>>,
@@ -706,6 +706,7 @@ mod tests {
 
     use super::*;
     use crate::client::camera::PlayerCamera;
+    use crate::sim::devices::Devices;
     use crate::sim::design::design;
 
     /// The derelict at `at`, and a camera at `eye`; how bright the ambient
@@ -728,7 +729,7 @@ mod tests {
                 }
             }
         }
-        app.world_mut().spawn((ShipHull::new("derelict"), devices, Transform::from_translation(at)));
+        app.world_mut().spawn((ShipHull::new("derelict"), ShownDevices(devices.0), Transform::from_translation(at)));
         app.world_mut().spawn((PlayerCamera, Transform::from_translation(eye)));
         for _ in 0..60 {
             app.update();

@@ -486,10 +486,18 @@ pub struct DeviceState {
     pub live: bool,
 }
 
-/// The state of every device on a ship, in its design's order. The
-/// authority's, replicated.
+/// The state of every device on a ship, in its design's order, and the
+/// tick it last changed on. The authority's, replicated (when it changes).
 #[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Devices(pub Vec<DeviceState>);
+pub struct Devices(pub Vec<DeviceState>, pub u32);
+
+/// The devices as this peer shows them: the authority's [`Devices`], with
+/// this peer's own players' presses since it last changed played over it
+/// (a client's own presses show at once, before the authority's answer
+/// comes back). Presentation reads this; the simulation (colliders,
+/// turrets, scenarios) reads [`Devices`].
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct ShownDevices(pub Vec<DeviceState>);
 
 impl Devices {
     /// As the design starts them, settled.
@@ -503,7 +511,7 @@ impl Devices {
             })
             .collect();
         step(design, &mut states, 0);
-        Devices(states)
+        Devices(states, 0)
     }
 
     /// The output of the device called `id` (false if there's none).
@@ -578,26 +586,76 @@ pub fn run_devices(
             }
         }
         for (player, _) in &players {
-            // Full hands can't work a switch.
-            if player.loadout.hands_full() {
-                continue;
-            }
-            for (at, event) in player.events.iter() {
-                if let PlayerEvent::Pressed {
-                    body,
-                    action: ControlAction::Device(i),
-                } = event
-                    && at == tick.0
-                    && body == ship
-                    && let Some(device) = design.devices.get(i as usize)
-                {
-                    press(device, &mut states[i as usize], tick.0, crew);
-                }
-            }
+            apply_presses(design, ship, &mut states, player, crew, |at| at == tick.0);
         }
         step(design, &mut states, tick.0);
         if states != devices.0 {
             devices.0 = states;
+            devices.1 = tick.0;
+        }
+    }
+}
+
+/// Applies `player`'s presses of `ship`'s devices, at the ticks `when`
+/// accepts, to `states` (unsettled). Full hands can't work a switch.
+fn apply_presses(
+    design: &super::design::ShipDesign,
+    ship: Entity,
+    states: &mut [DeviceState],
+    player: &Player,
+    crew: usize,
+    when: impl Fn(u32) -> bool,
+) {
+    if player.loadout.hands_full() {
+        return;
+    }
+    for (at, event) in player.events.iter() {
+        if let PlayerEvent::Pressed {
+            body,
+            action: ControlAction::Device(i),
+        } = event
+            && when(at)
+            && body == ship
+            && let Some(device) = design.devices.get(i as usize)
+        {
+            press(device, &mut states[i as usize], at, crew);
+        }
+    }
+}
+
+/// Every peer: what each ship's devices look like here. The authority's
+/// state, plus the presses of the players simulated here (a client's own,
+/// predicted) stamped after it last changed: those the authority hasn't
+/// answered yet. Once its answer arrives (stamped at or after the press),
+/// the press is in it, or isn't (someone else got there first), and the
+/// shown state is the authority's again. Reads the players' tick-stamped
+/// event logs, so a re-simulated tick changes nothing here.
+pub fn show_devices(
+    tick: Res<SimTick>,
+    simulated: Query<&Player, With<super::input::PlayerInput>>,
+    crew: Query<(), (With<Player>, Without<Robot>)>,
+    mut ships: Query<(Entity, &ShipHull, &Devices, Option<&mut ShownDevices>)>,
+    mut commands: Commands,
+) {
+    let crew = crew.iter().count();
+    for (ship, hull, devices, shown) in &mut ships {
+        let design = hull.design();
+        let mut states = devices.0.clone();
+        let mut pressed = false;
+        for player in &simulated {
+            let before = states.clone();
+            apply_presses(design, ship, &mut states, player, crew, |at| at > devices.1);
+            pressed |= states != before;
+        }
+        if pressed {
+            step(design, &mut states, tick.0);
+        }
+        match shown {
+            Some(mut shown) if shown.0 != states => shown.0 = states,
+            Some(_) => {}
+            None => {
+                commands.entity(ship).insert(ShownDevices(states));
+            }
         }
     }
 }
@@ -669,11 +727,11 @@ mod tests {
         .unwrap();
         let mut s = Devices::new(&d).0;
         assert!(!live(&d, &s, "plain") && !live(&d, &s, "latched"));
-        assert_eq!(closed_doors(&d, Some(&Devices(s.clone()))), vec![false, true, true]);
+        assert_eq!(closed_doors(&d, Some(&Devices(s.clone(), 0))), vec![false, true, true]);
         press_id(&d, &mut s, "lever", 1, 1);
         step(&d, &mut s, 1);
         assert!(live(&d, &s, "plain") && live(&d, &s, "latched"));
-        assert_eq!(closed_doors(&d, Some(&Devices(s.clone()))), vec![false, false, false]);
+        assert_eq!(closed_doors(&d, Some(&Devices(s.clone(), 0))), vec![false, false, false]);
         press_id(&d, &mut s, "lever", 2, 1);
         step(&d, &mut s, 2);
         assert!(!live(&d, &s, "plain"), "an unlatched door shuts with its power");
