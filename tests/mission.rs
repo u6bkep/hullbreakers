@@ -766,6 +766,21 @@ fn the_grapple_run_is_won_through_every_gate_in_order() {
     fly_the_gates(&mut app, 0..10);
     let report = mission(&mut app).report;
     assert!(report[0].contains("personal best"), "{report:?}");
+    // Someone else in the same slot, by the same name: their own record,
+    // none yet (records go by the profile's id).
+    let me = {
+        let world = app.world_mut();
+        world.query_filtered::<Entity, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>().iter(world).next().unwrap()
+    };
+    app.world_mut().entity_mut(me).insert(hullbreakers::sim::progression::Profile {
+        id: 77,
+        ..Default::default()
+    });
+    start(&mut app, ScenarioKind::GrappleRun);
+    ticks(&mut app, 30);
+    fly_the_gates(&mut app, 0..10);
+    let report = mission(&mut app).report;
+    assert!(report[0].starts_with("Player 1: ") && !report[0].contains("best"), "{report:?}");
 }
 
 #[test]

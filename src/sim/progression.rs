@@ -47,6 +47,38 @@ pub struct Profile {
     /// slot; see [`items::SLOTS`]).
     #[serde(default)]
     pub parts: u32,
+    /// Who it is, for good: made at random with the profile, never shown.
+    /// What's kept of a player across sessions (a personal best) is kept
+    /// by this, not by a name or a slot. 0: none yet (a file from before;
+    /// the machine that owns it gives it one on loading).
+    #[serde(default)]
+    pub id: u64,
+    /// What the crew call them: chosen in the menu; a callsign made from
+    /// the id until then (see [`callsign`]).
+    #[serde(default)]
+    pub name: String,
+}
+
+/// The longest a player's name may be (characters).
+pub const NAME_MAX: usize = 20;
+
+/// A callsign for a new profile, from its id: "Kestrel 42".
+pub fn callsign(id: u64) -> String {
+    const WORDS: [&str; 32] = [
+        "Kestrel", "Osprey", "Talon", "Vesper", "Halcyon", "Rook", "Corsair", "Lantern", "Sable", "Quill", "Ember", "Tern",
+        "Bramble", "Cinder", "Drift", "Flint", "Gannet", "Harrow", "Ibis", "Jackdaw", "Kite", "Lark", "Merlin", "Nomad",
+        "Petrel", "Raven", "Skua", "Thistle", "Umber", "Vireo", "Wren", "Yarrow",
+    ];
+    let mixed = id.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    format!("{} {}", WORDS[(mixed >> 59) as usize % WORDS.len()], 10 + (mixed >> 20) % 90)
+}
+
+/// A name as a player typed it, made fit to show: trimmed, no control
+/// characters, at most [`NAME_MAX`] characters; `None` if nothing's left.
+pub fn clean_name(name: &str) -> Option<String> {
+    let name: String = name.chars().filter(|c| !c.is_control()).take(NAME_MAX).collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 impl Profile {
@@ -190,6 +222,8 @@ pub enum ProfileWire {
     Upload(ProfileFile),
     /// Something done at the armory or workbench.
     Op(ProfileOp),
+    /// A new name, chosen in the menu.
+    Rename(String),
 }
 
 /// Something asked of a profile.
@@ -313,6 +347,7 @@ fn sanitized(mut file: ProfileFile) -> ProfileFile {
     }
     inv.all_weapons_mut().for_each(fix);
     inv.strip_cargo();
+    file.profile.name = clean_name(&file.profile.name).unwrap_or_else(|| callsign(file.profile.id));
     file.profile.salvage = file.profile.salvage.min(u32::MAX / 2);
     file.profile.xp = file.profile.xp.min(u32::MAX / 2);
     for kind in AmmoKind::ALL {
@@ -359,9 +394,17 @@ pub fn apply_profile_orders(
                 let before = player.loadout.held();
                 player.loadout.inventory = file.carried;
                 player.loadout.hands_changed(before);
-                commands.entity(entity).insert(file.profile);
+                // They're called what their profile calls them.
+                commands.entity(entity).insert((Name::new(file.profile.name.clone()), file.profile));
             }
             (ProfileWire::Upload(_), Some(_)) => {}
+            (ProfileWire::Rename(name), Some(mut profile)) => {
+                if let Some(name) = clean_name(&name) {
+                    profile.name = name.clone();
+                    commands.entity(entity).insert(Name::new(name));
+                }
+            }
+            (ProfileWire::Rename(_), None) => {}
             // The armory and workbench are aboard our ship.
             (ProfileWire::Op(op), Some(mut profile)) => {
                 if player.mode.body().is_some_and(|b| homes.contains(b)) {
@@ -605,6 +648,25 @@ pub fn settle_out(profile: &mut Profile) {
     let out = std::mem::take(&mut profile.out);
     if RECOVER_UNCLAIMED {
         profile.stash.extend(out);
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn names_are_cleaned_and_callsigns_are_stable() {
+        assert_eq!(clean_name("  Ripley \n"), Some("Ripley".into()));
+        assert_eq!(clean_name(" \t "), None);
+        assert_eq!(clean_name(&"x".repeat(50)).unwrap().chars().count(), NAME_MAX);
+        assert_eq!(callsign(7), callsign(7));
+        let calls: std::collections::HashSet<String> = (1..200u64).map(|i| callsign(i.wrapping_mul(0x1234_5678_9abc))).collect();
+        assert!(calls.len() > 150, "only {} callsigns", calls.len());
+        // An unnamed profile is called its callsign when it's made sound.
+        let mut file = ProfileFile::fresh();
+        file.profile.id = 99;
+        assert_eq!(sanitized(file).profile.name, callsign(99));
     }
 }
 

@@ -34,7 +34,7 @@ pub fn register(app: &mut App) {
 /// What this machine's armory and workbench ask of its profile, to go to
 /// the authority.
 #[derive(Resource, Default)]
-pub struct ProfileRequests(pub Vec<ProfileOp>);
+pub struct ProfileRequests(pub Vec<ProfileOp>, pub Option<String>);
 
 /// A playing machine: its profile and requests go to the authority, by the
 /// network or (a host) straight to its own simulation.
@@ -58,6 +58,7 @@ pub fn send_profile(
         }
         if let Some(mut requests) = requests {
             outgoing.extend(requests.0.drain(..).map(ProfileWire::Op));
+            outgoing.extend(requests.1.take().map(ProfileWire::Rename));
         }
         if outgoing.is_empty() {
             return;

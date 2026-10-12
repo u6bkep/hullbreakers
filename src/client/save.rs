@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 
-use crate::sim::progression::ProfileFile;
+use crate::sim::progression::{ProfileFile, callsign};
 
 pub const PROFILE_PATH: &str = "profile.ron";
 
@@ -37,12 +37,27 @@ impl ProfileStore {
     pub fn open(path: impl Into<PathBuf>) -> ProfileStore {
         let path = path.into();
         let (file, writable) = read(&path);
-        ProfileStore {
-            file,
+        let mut store = ProfileStore {
+            file: file.clone(),
             path,
             uploaded: false,
             writable,
+        };
+        // A profile is someone: a new one (or one from before ids) gets an
+        // id and a callsign, kept at once.
+        let mut known = file;
+        if known.profile.id == 0 {
+            known.profile.id = rand::random::<u64>().max(1);
         }
+        if known.profile.name.is_empty() {
+            known.profile.name = callsign(known.profile.id);
+        }
+        if known != store.file {
+            if !store.save(known.clone()) {
+                store.file = known;
+            }
+        }
+        store
     }
 
     /// Writes `file` if it's not what's there already. Whether it wrote.
@@ -149,7 +164,12 @@ mod tests {
     fn a_missing_profile_starts_fresh_and_saves() {
         let path = temp("missing");
         let mut store = ProfileStore::open(&path);
-        assert_eq!(store.file, ProfileFile::fresh());
+        // Fresh, but someone: an id and a callsign, kept at once.
+        let id = store.file.profile.id;
+        assert_ne!(id, 0);
+        assert_eq!(store.file.profile.name, callsign(id));
+        assert_eq!(load(&path), store.file);
+        assert_eq!(ProfileStore::open(&path).file.profile.id, id, "a new id each time");
         let mut file = ProfileFile::fresh();
         file.profile.salvage = 77;
         assert!(store.save(file.clone()));

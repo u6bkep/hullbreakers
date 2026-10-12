@@ -21,6 +21,7 @@ use crate::sim::design::{ShipDesign, design};
 use crate::sim::devices::DeviceKind;
 use crate::sim::mission::{CrewTally, MarkedBodies, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, clock, countdown};
 use crate::sim::player::{DeckSlot, Player};
+use crate::sim::progression::Profile;
 use crate::sim::ship;
 use crate::sim::tuning::Tuning;
 use crate::sim::{SimTick, TICK_HZ, asteroids};
@@ -127,6 +128,9 @@ struct Run {
 
 struct Runner {
     name: String,
+    /// Who they are, for their records: their profile's id (a player
+    /// whose profile hasn't arrived is only themselves this run).
+    who: u64,
     /// Their deck slot, which their markers go by.
     slot: u32,
     /// The gate they're to fly next (an index into the course's gates).
@@ -138,11 +142,13 @@ struct Runner {
     last: Option<Vec3>,
 }
 
-/// The best times so far, kept by the host across runs: each runner's,
-/// and the crew's (the last of them home).
+/// The best times so far, kept by the host across runs: each runner's (by
+/// their profile's id, not their name or slot: a new player in a slot, or
+/// one who takes another's name, doesn't inherit a best), and the crew's
+/// (the last of them home).
 #[derive(Resource, Default)]
 pub struct RunRecords {
-    pub best: HashMap<String, f32>,
+    pub best: HashMap<u64, f32>,
     pub crew: Option<f32>,
 }
 
@@ -152,7 +158,7 @@ fn run_course(
     tuning: Res<Tuning>,
     bodies: Bodies,
     run: Option<Single<&mut Run>>,
-    players: Query<(Entity, &Player, Option<&Name>, Option<&BodyTuning>, Option<&DeckSlot>), Without<Robot>>,
+    players: Query<(Entity, &Player, Option<&Name>, Option<&BodyTuning>, Option<&DeckSlot>, Option<&Profile>), Without<Robot>>,
     marked: MarkedBodies,
     mission: Single<&mut Mission>,
     mut tally: ResMut<CrewTally>,
@@ -171,15 +177,21 @@ fn run_course(
     let started = mission.started;
     let time = |at: u32| at.wrapping_sub(started) as f32 / TICK_HZ as f32;
     let underway = mission.phase == Phase::Underway;
-    for (entity, player, name, own, slot) in &players {
+    for (entity, player, name, own, slot, profile) in &players {
+        let who = profile.map(|p| p.id).filter(|id| *id != 0).unwrap_or(1 << 63 | entity.to_bits());
         let runner = run.runners.entry(entity).or_insert_with(|| Runner {
-            name: name.map_or("?".to_string(), |n| n.to_string()),
+            name: String::new(),
+            who,
             slot: slot.map_or(0, |s| s.0),
             next: 0,
             splits: Vec::new(),
             finished: None,
             last: None,
         });
+        // As they're called now (a rename shows at once), and who they
+        // are once their profile's in.
+        runner.name = name.map_or("?".to_string(), |n| n.to_string());
+        runner.who = who;
         let frame = player.mode.body().and_then(|b| bodies.frame(b));
         let (center, _) = player.mode.world_kinematics(tuning_of(&tuning, own), frame.as_ref());
         let here = course_frame.point_to_local(center);
@@ -197,13 +209,13 @@ fn run_course(
                 runner.finished = Some(tick.0);
                 let t = time(tick.0);
                 tally.credit(entity, format!("ran the course in {}", clock(t)));
-                let line = match records.best.get(&runner.name) {
+                let line = match records.best.get(&runner.who) {
                     Some(&best) if t < best => format!("{}: {} — a personal best (was {})", runner.name, clock(t), clock(best)),
                     Some(&best) => format!("{}: {} (best {})", runner.name, clock(t), clock(best)),
                     None => format!("{}: {}", runner.name, clock(t)),
                 };
                 mission.report.push(line);
-                let best = records.best.entry(runner.name.clone()).or_insert(t);
+                let best = records.best.entry(runner.who).or_insert(t);
                 *best = best.min(t);
             }
         }
