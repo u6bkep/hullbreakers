@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use egui::{Align2, Color32, Rect, Stroke, pos2, vec2};
 
-use super::style::{self, BODY, DISPLAY, EDGE, FRIENDLY, HAIR, HOSTILE, INK, INK_DIM, MICRO, OBJECTIVE, SHIELD, SMALL, TITLE, WARNING};
+use super::style::{self, BODY, DISPLAY, EDGE, FRIENDLY, HAIR, HOSTILE, INK, INK_DIM, MICRO, OBJECTIVE, SHIELD, SMALL, SUIT, TITLE, WARNING};
 use crate::client::camera::CameraFx;
 use crate::sim::SimTick;
 use crate::sim::combat::Combatant;
@@ -209,7 +209,15 @@ fn debrief_card(painter: &egui::Painter, screen: Rect, debrief: &Debrief, alpha:
     let credit_rows = debrief.crew.iter().filter(|c| !c.credits.is_empty()).count();
     let width = lines.iter().chain(&awards).map(|g| g.size().x + 14.0).fold(table_w.max(440.0), f32::max) + 40.0;
     let crew_h = if debrief.crew.is_empty() { 0.0 } else { 30.0 + debrief.crew.len() as f32 * 22.0 + credit_rows as f32 * 18.0 };
-    let height = 84.0 + lines.len() as f32 * 24.0 + crew_h + awards.len() as f32 * 24.0 + 10.0;
+    // Wide enough for each crew member's line of what they were paid for.
+    let why_w = debrief.rewards.iter().map(|r| style::galley(painter, why(r), style::ui(SMALL), ink, 0.0).size().x + 52.0);
+    let width = why_w.fold(width, f32::max);
+    let pay_h = if debrief.rewards.is_empty() {
+        0.0
+    } else {
+        26.0 + debrief.rewards.iter().map(|r| 40.0 + r.new_rank.len() as f32 * 18.0).sum::<f32>()
+    };
+    let height = 84.0 + lines.len() as f32 * 24.0 + crew_h + pay_h + awards.len() as f32 * 24.0 + 10.0;
     let plate = Rect::from_min_size(pos2(screen.center().x - width / 2.0, screen.min.y + screen.height() * 0.14), vec2(width, height));
     style::plate(painter, plate, color, alpha);
     let (x, right) = (plate.min.x + 20.0, plate.max.x - 20.0);
@@ -263,12 +271,37 @@ fn debrief_card(painter: &egui::Painter, screen: Rect, debrief: &Debrief, alpha:
         }
         y += 6.0;
     }
+    // Pay: what each crew member earned, what for, and a new rank.
+    if !debrief.rewards.is_empty() {
+        style::caps(painter, pos2(x, y), Align2::LEFT_TOP, "Pay", MICRO, dim);
+        style::caps(painter, pos2(right, y), Align2::RIGHT_TOP, "Salvage   XP", MICRO, dim);
+        y += 20.0;
+        for r in &debrief.rewards {
+            style::text(painter, pos2(x, y + 9.0), Align2::LEFT_CENTER, r.name.clone(), style::ui(BODY), ink);
+            let gain = style::fade(FRIENDLY, alpha);
+            let xp = style::text(painter, pos2(right, y + 9.0), Align2::RIGHT_CENTER, format!("+{}", r.xp), style::num(SMALL), gain);
+            style::text(painter, pos2(xp.min.x - 24.0, y + 9.0), Align2::RIGHT_CENTER, format!("+{}", r.salvage), style::num(SMALL), gain);
+            y += 22.0;
+            style::text(painter, pos2(x + 12.0, y + 7.0), Align2::LEFT_CENTER, why(r), style::ui(SMALL), dim);
+            y += 18.0;
+            for line in &r.new_rank {
+                style::caps(painter, pos2(x + 12.0, y + 7.0), Align2::LEFT_CENTER, line, MICRO, style::fade(SUIT, alpha));
+                y += 18.0;
+            }
+        }
+        y += 6.0;
+    }
     for g in awards {
         // A small diamond: an award.
         painter.add(egui::Shape::convex_polygon(style::diamond(pos2(x + 4.0, y + 11.0), 4.0), style::fade(OBJECTIVE, alpha), Stroke::NONE));
         painter.galley(pos2(x + 14.0, y), g, ink);
         y += 24.0;
     }
+}
+
+/// What a crew member was paid for, in a line ("Won · Shield dropped").
+fn why(r: &crate::sim::progression::Reward) -> String {
+    r.lines.iter().map(|l| l.split(':').next().unwrap_or(l)).collect::<Vec<_>>().join("  ·  ")
 }
 
 /// A big centred word with rules either side.

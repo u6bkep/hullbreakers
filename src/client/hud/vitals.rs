@@ -141,7 +141,7 @@ pub fn vitals_hud(
     time: Res<Time>,
     tuning: Res<Tuning>,
     memory: Res<HudMemory>,
-    vitals: Option<Single<&Vitals, With<LocalPlayer>>>,
+    vitals: Option<Single<(&Vitals, Option<&crate::sim::bots::BodyTuning>), With<LocalPlayer>>>,
     camera: CameraView,
     // What the bar shows (eased), and the white trail of what was lost.
     mut shown: Local<Option<(f32, f32)>>,
@@ -150,12 +150,14 @@ pub fn vitals_hud(
     mut flash: Local<f32>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-    let Some(vitals) = vitals else {
+    let Some((vitals, own)) = vitals.map(|v| *v) else {
         return Ok(());
     };
     let dt = time.delta_secs();
     let now = memory.now;
-    let fraction = (vitals.health / tuning.player_health).clamp(0.0, 1.0);
+    // Out of the suit's own most: rank plates it (see `sim::progression`).
+    let most = crate::sim::bots::tuning_of(&tuning, own).player_health;
+    let fraction = (vitals.health / most).clamp(0.0, 1.0);
     let (bar, trail) = shown.get_or_insert((fraction, fraction));
     if last.is_some_and(|before| fraction < before - 0.001) {
         *flash = 1.0;

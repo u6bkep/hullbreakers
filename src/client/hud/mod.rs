@@ -11,12 +11,14 @@
 //! - [`vitals`]: health, regen, low-health and damage-direction cues, and
 //!   dying.
 //! - [`hands`]: a card per hand and the stances, from [`view`].
+//! - [`progress`]: salvage and experience earned, and a new rank.
 //! - [`tuning`]: the F1 panel (a debug panel, left as one).
 
 pub mod flight;
 pub mod hands;
 pub mod markers;
 pub mod mission;
+pub mod progress;
 pub mod reticle;
 pub mod style;
 pub mod tuning;
@@ -55,6 +57,7 @@ impl Plugin for HudPlugin {
                     mission::mission_hud,
                     vitals::vitals_hud,
                     hands::hands_hud,
+                    progress::progress_hud,
                     reticle::hit_markers,
                     vitals::death_overlay,
                     tuning::tuning_panel,

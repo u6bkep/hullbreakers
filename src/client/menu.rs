@@ -293,6 +293,19 @@ fn ask(ops: &mut ItemOps, op: ItemOp) {
 }
 
 /// An inventory place's card, three to a row.
+/// A section's heading on the inventory, armory and workbench screens: the
+/// HUD's label style (hud-style.md: caps, spaced, dim).
+pub(super) fn heading(text: &str) -> egui::RichText {
+    use super::hud::style;
+    egui::RichText::new(text.to_uppercase()).font(style::ui(style::MICRO)).color(style::INK_DIM).extra_letter_spacing(style::MICRO * 0.08)
+}
+
+/// An item's name as the screens title it, in its colour.
+pub(super) fn title(text: impl Into<String>, color: egui::Color32) -> egui::RichText {
+    use super::hud::style;
+    egui::RichText::new(text).font(style::bold(style::TITLE)).color(color)
+}
+
 pub(super) const CELL: egui::Vec2 = egui::vec2(150.0, 46.0);
 pub(super) const GAP: f32 = 8.0;
 /// The height of the inventory above the stances (fixed, so the stances
@@ -303,36 +316,31 @@ const ITEMS_HEIGHT: f32 = 365.0;
 /// colour. `chosen` is lit; `target` (where the chosen item could go) is
 /// outlined.
 pub(super) fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chosen: bool, target: bool) -> egui::Response {
+    use super::hud::style;
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    let painter = ui.painter_at(rect);
-    let color = item.as_ref().map_or(DIM, items_hud::item_color);
-    let hovered = response.hovered();
-    painter.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(if chosen { 230 } else if hovered { 200 } else { 160 }));
-    let stroke = if chosen {
-        egui::Stroke::new(2.0, color)
+    let painter = ui.painter_at(rect.expand(2.0));
+    let color = item.as_ref().map_or(style::INK_DIM, items_hud::item_color);
+    // A HUD plate (scrim, hairline, cut corners: hud-style.md), its tick
+    // in the item's colour; lit when chosen or hovered.
+    let lift = if chosen { 1.0 } else if response.hovered() { 0.85 } else { 0.7 };
+    style::plate(&painter, rect, if item.is_some() { color } else { style::INK_FAINT }, lift);
+    let outline = style::cut_rect(rect, style::CUT);
+    if chosen {
+        style::glow_line(&painter, outline, color, style::LINE, true);
     } else if target {
-        egui::Stroke::new(1.0, INK.gamma_multiply(0.45))
-    } else if item.is_some() {
-        egui::Stroke::new(1.0, color.gamma_multiply(0.6))
-    } else {
-        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(25))
-    };
-    painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
-    // A rarity edge down the left.
-    if item.is_some() {
-        painter.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())), 2.0, color);
+        painter.add(egui::Shape::closed_line(outline, egui::Stroke::new(style::HAIR, style::fade(style::SUIT, 0.6))));
     }
     let inner = rect.shrink2(egui::vec2(9.0, 5.0));
-    painter.text(inner.left_top(), egui::Align2::LEFT_TOP, tag, egui::FontId::monospace(9.0), DIM);
+    style::caps(&painter, inner.left_top(), egui::Align2::LEFT_TOP, tag, style::MICRO - 3.0, style::INK_DIM);
     let Some(item) = item else {
-        painter.text(inner.left_center() + egui::vec2(0.0, 5.0), egui::Align2::LEFT_CENTER, "empty", egui::FontId::proportional(12.0), DIM);
+        style::text(&painter, inner.left_center() + egui::vec2(0.0, 5.0), egui::Align2::LEFT_CENTER, "empty", style::ui(style::MICRO), style::fade(style::INK_DIM, 0.7));
         return response;
     };
-    let name = painter.layout_no_wrap(item.name(), egui::FontId::proportional(13.0), color);
+    let name = style::galley(&painter, item.name(), style::ui(style::SMALL), color, 0.0);
     let name = if name.size().x <= inner.width() {
         name
     } else {
-        painter.layout_no_wrap(item.name(), egui::FontId::proportional(10.5), color)
+        style::galley(&painter, item.name(), style::ui(style::MICRO - 1.0), color, 0.0)
     };
     painter.galley(inner.left_top() + egui::vec2(0.0, 11.0), name, color);
     let detail = match item {
@@ -341,7 +349,7 @@ pub(super) fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<
         Item::Cargo(c) if c.bulky() => "bulky: both hands".into(),
         Item::Cargo(_) => "cargo".into(),
     };
-    painter.text(inner.left_bottom(), egui::Align2::LEFT_BOTTOM, detail, egui::FontId::monospace(9.0), DIM);
+    style::text(&painter, inner.left_bottom(), egui::Align2::LEFT_BOTTOM, detail, style::num(style::MICRO - 3.0), style::INK_DIM);
     response
 }
 
@@ -397,7 +405,7 @@ fn inventory_tab(
         // than fit).
         egui::ScrollArea::vertical().id_salt("carried").max_height(ITEMS_HEIGHT).show(ui, |ui| ui.vertical(|ui| {
             ui.set_width(3.0 * CELL.x + 2.0 * GAP);
-            ui.label(egui::RichText::new("Weapon slots").strong());
+            ui.label(heading("Weapon slots"));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
                 for i in 0..inv.weapon_slots() as u8 {
@@ -409,7 +417,7 @@ fn inventory_tab(
                 }
             });
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("Pack").strong());
+            ui.label(heading("Pack"));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
                 for i in 0..inv.pack_slots() as u8 {
@@ -473,7 +481,7 @@ fn inventory_tab(
     ui.separator();
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Stances").strong());
+        ui.label(heading("Stances"));
         ui.label(
             egui::RichText::new("A gun with the other hand empty is braced: it shoots tighter. Without the grapple in hand, a rope that's out stays out.")
                 .small()
@@ -548,7 +556,7 @@ fn details(ui: &mut egui::Ui, player: Option<&Player>, chosen: &mut Option<Place
         return;
     };
     let inv = &player.loadout.inventory;
-    ui.label(egui::RichText::new(item.name()).size(17.0).strong().color(items_hud::item_color(&item)));
+    ui.label(title(item.name(), items_hud::item_color(&item)));
     match item {
         Item::Weapon(weapon) => {
             for (line, color) in items_hud::weapon_lines(&weapon) {

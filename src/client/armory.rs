@@ -11,7 +11,7 @@ use bevy_egui::egui;
 
 use super::events::Presented;
 use super::items_hud::{self, DIM};
-use super::menu::{CELL, GAP, Menu, Tab, cell};
+use super::menu::{CELL, GAP, Menu, Tab, cell, heading, title};
 use crate::net::ProfileRequests;
 use crate::sim::events::PlayerEvent;
 use crate::sim::items::{Item, Place, Weapon};
@@ -35,7 +35,7 @@ pub fn open_on_press(mut presented: MessageReader<Presented>, mut menu: ResMut<M
 
 /// The stash, three cards to a row, with what's chosen lit.
 pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Holding>, height: f32) {
-    ui.label(egui::RichText::new(format!("Stash  {} / {STASH_CAP}", profile.stash.len())).strong());
+    ui.label(heading(&format!("Stash  {} / {STASH_CAP}", profile.stash.len())));
     egui::ScrollArea::vertical()
         .id_salt("stash")
         .max_height(height)
@@ -61,7 +61,7 @@ pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Hold
 /// What you carry, as cards: weapon slots, then the pack.
 pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Holding>) {
     let inv = &player.loadout.inventory;
-    ui.label(egui::RichText::new("Carried").strong());
+    ui.label(heading("Carried"));
     // Three rows show; more (from rank) scroll.
     egui::ScrollArea::vertical().id_salt("carried at the armory").max_height(3.0 * (CELL.y + 6.0)).show(ui, |ui| ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
@@ -79,7 +79,7 @@ pub fn carried_grid(ui: &mut egui::Ui, player: &Player, chosen: &mut Option<Hold
 
 /// A chosen gun's details, against what it's compared with.
 pub fn weapon_details(ui: &mut egui::Ui, player: &Player, weapon: &Weapon) {
-    ui.label(egui::RichText::new(weapon.name()).size(17.0).strong().color(items_hud::rarity_color(weapon.rarity)));
+    ui.label(title(weapon.name(), items_hud::rarity_color(weapon.rarity)));
     for (line, color) in items_hud::weapon_lines(weapon) {
         ui.label(egui::RichText::new(line).small().color(color));
     }
@@ -122,7 +122,8 @@ pub fn armory_tab(
     ui.separator();
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
-            ui.set_width(3.0 * CELL.x + 2.0 * GAP);
+            // Three cards to a row, and room for a scroll bar.
+            ui.set_width(3.0 * CELL.x + 2.0 * GAP + 14.0);
             carried_grid(ui, player, chosen);
             ui.add_space(6.0);
             stash_grid(ui, profile, chosen, 230.0);

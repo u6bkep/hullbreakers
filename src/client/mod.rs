@@ -19,7 +19,6 @@ pub mod items_hud;
 pub mod menu;
 pub mod pickup_look;
 pub mod profile;
-pub mod progress_hud;
 pub mod render;
 pub mod robot_fx;
 pub mod save;

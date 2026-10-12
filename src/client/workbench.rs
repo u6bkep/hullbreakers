@@ -10,7 +10,7 @@ use bevy_egui::egui;
 
 use super::armory::{carried_grid, stash_grid, weapon_details};
 use super::items_hud::{self, AMBER, DIM, INK};
-use super::menu::{CELL, GAP};
+use super::menu::{CELL, GAP, heading, title};
 use crate::net::ProfileRequests;
 use crate::sim::items::{PAINTS, Rarity, SLOTS, Weapon};
 use crate::sim::player::Player;
@@ -35,7 +35,8 @@ pub fn workbench_tab(
     ui.separator();
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
-            ui.set_width(3.0 * CELL.x + 2.0 * GAP);
+            // Three cards to a row, and room for a scroll bar.
+            ui.set_width(3.0 * CELL.x + 2.0 * GAP + 14.0);
             carried_grid(ui, player, chosen);
             ui.add_space(6.0);
             stash_grid(ui, profile, chosen, 230.0);
@@ -65,9 +66,10 @@ pub fn workbench_tab(
 
 /// Rank, experience to the next, salvage, and what's unlocked.
 pub fn progress_strip(ui: &mut egui::Ui, profile: &Profile) {
+    use super::hud::style;
     let r = rank(profile.xp);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(format!("Rank {r}")).strong().color(INK));
+        ui.label(egui::RichText::new(format!("RANK {r}")).font(style::bold(style::BODY)).color(style::SUIT));
         if r < progression::MAX_RANK {
             let (from, to) = (progression::xp_for(r), progression::xp_for(r + 1));
             let bar = egui::ProgressBar::new((profile.xp - from) as f32 / (to - from) as f32)
@@ -75,7 +77,8 @@ pub fn progress_strip(ui: &mut egui::Ui, profile: &Profile) {
                 .text(egui::RichText::new(format!("{} / {} xp", profile.xp - from, to - from)).small());
             ui.add(bar);
         }
-        ui.label(egui::RichText::new(format!("{} salvage", profile.salvage)).color(AMBER));
+        ui.label(egui::RichText::new(format!("{}", profile.salvage)).font(style::num(style::BODY)).color(style::INK));
+        ui.label(egui::RichText::new("SALVAGE").font(style::ui(style::MICRO)).color(style::INK_DIM));
         let parts = profile.parts.count_ones();
         ui.label(egui::RichText::new(format!("{parts} parts unlocked")).small().color(DIM));
         if let Some((at, what)) = progression::LADDER.iter().find(|(at, _)| *at > r) {
@@ -98,7 +101,7 @@ fn bench(
         ui.label(egui::RichText::new("Standard issue: nothing to do to it here.").small().color(DIM));
         return;
     }
-    ui.label(egui::RichText::new(weapon.name()).size(17.0).strong().color(items_hud::rarity_color(weapon.rarity)));
+    ui.label(title(weapon.name(), items_hud::rarity_color(weapon.rarity)));
     for (line, color) in items_hud::weapon_lines(weapon) {
         ui.label(egui::RichText::new(line).small().color(color));
     }
@@ -124,13 +127,13 @@ fn bench(
     ui.add_space(4.0);
 
     // Refit.
-    ui.label(egui::RichText::new(format!("Refit a part ({REFIT_COST} salvage)")).strong());
+    ui.label(heading(&format!("Refit a part: {REFIT_COST} salvage")));
     let fitted = weapon.build().parts.slots();
     egui::Grid::new("refits").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| for (slot, options) in SLOTS.iter().enumerate() {
         {
             ui.label(egui::RichText::new(fitted[slot].slot()).small().color(DIM));
             egui::ComboBox::from_id_salt(("refit", slot))
-                .width(200.0)
+                .width(150.0)
                 .selected_text(fitted[slot].name())
                 .show_ui(ui, |ui| {
                     if weapon.refit.parts[slot] != 0 && ui.selectable_label(false, "As it was made").clicked() {
@@ -157,9 +160,9 @@ fn bench(
     // Repaint.
     let r = rank(profile.xp);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(format!("Paint ({REPAINT_COST} salvage)")).strong());
+        ui.label(heading(&format!("Paint: {REPAINT_COST} salvage")));
         let current = weapon.refit.paint.checked_sub(1).and_then(|i| PAINTS.get(i as usize)).map_or("Maker's own", |p| p.0);
-        egui::ComboBox::from_id_salt("paint").width(170.0).selected_text(current).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("paint").width(140.0).selected_text(current).show_ui(ui, |ui| {
             if weapon.refit.paint != 0 && ui.selectable_label(false, "Maker's own").clicked() {
                 ask(ProfileOp::Repaint(h, None));
             }
