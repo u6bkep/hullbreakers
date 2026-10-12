@@ -451,7 +451,7 @@ fn the_carriers_gunners_stand_at_their_posts() {
     let gunners: Vec<Mode> = world
         .query::<(&Robot, &Player, &hullbreakers::sim::bots::Brain)>()
         .iter(world)
-        .filter(|(r, ..)| **r == Robot::Gunner)
+        .filter(|(r, ..)| r.gait() == hullbreakers::sim::bots::Gait::Walker)
         .map(|(_, p, b)| {
             if !matches!(p.mode, Mode::Booted { .. }) {
                 eprintln!("off its feet: {:?} post {}", p.events.iter().collect::<Vec<_>>(), b.post);

@@ -136,7 +136,7 @@ fn bullets_hurt_the_other_side_and_pass_through_our_own() {
 /// A Gunner held still (no brain or input) floating at `at`, turned by
 /// `facing`; returns it.
 fn still_gunner(app: &mut App, at: Vec3, facing: Quat) -> Entity {
-    use hullbreakers::sim::bots::{Robot, new_robot};
+    use hullbreakers::sim::bots::{Affixes, Robot, new_robot};
     let ship = {
         let world = app.world_mut();
         world.query_filtered::<Entity, With<HomeShip>>().single(world).unwrap()
@@ -149,7 +149,7 @@ fn still_gunner(app: &mut App, at: Vec3, facing: Quat) -> Entity {
     };
     let robot = app
         .world_mut()
-        .spawn(new_robot(Robot::Gunner, mode, ship, at, &Tuning::default(), 0))
+        .spawn(new_robot(Robot::Gunner, Affixes::NONE, mode, ship, at, &Tuning::default(), 0))
         .id();
     app.world_mut().entity_mut(robot).remove::<PlayerInput>();
     ticks(app, 2);

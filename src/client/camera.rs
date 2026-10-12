@@ -208,6 +208,11 @@ pub struct CameraFx {
 }
 
 impl CameraFx {
+    /// Adds to the shake (0..1, as trauma).
+    pub fn shake(&mut self, amount: f32) {
+        self.trauma = (self.trauma + amount).min(1.0);
+    }
+
     /// Opacity of the black overlay (see [`PlayerEvent::Respawned`]).
     pub fn fade(&self) -> f32 {
         self.fade

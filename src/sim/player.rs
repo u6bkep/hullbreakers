@@ -267,7 +267,42 @@ impl Player {
             self.reference_body = None;
         }
     }
+
+    /// Shoved (by a blast): `dv` (world, m/s) is added to the player's
+    /// velocity. On boots (`frame` the body underfoot's), a shove that beats
+    /// their grip, lifting them off the deck or sliding them along it, knocks
+    /// them off; a lesser one is a stagger along the deck.
+    pub fn shove(&mut self, dv: Vec3, frame: Option<&BodyFrame>, tuning: &Tuning) {
+        match self.mode {
+            Mode::Eva { ref mut velocity, .. } => *velocity += dv,
+            Mode::Booted {
+                feet,
+                up,
+                velocity,
+                orientation,
+                pitch,
+                ..
+            } => {
+                let Some(frame) = frame else { return };
+                let local = frame.dir_to_local(dv);
+                let peel = local.dot(up);
+                let along = local - up * peel;
+                if peel > tuning.adhesion_accel * SHOVE_SECONDS || along.length() > tuning.shear_accel * SHOVE_SECONDS {
+                    self.mode = booted_to_eva(frame, feet, up, velocity + local, orientation, pitch, tuning);
+                    self.detach_timer = tuning.detach_cooldown;
+                    self.emit(PlayerEvent::Detached(Detach::Blasted));
+                } else if let Mode::Booted { velocity, .. } = &mut self.mode {
+                    *velocity += along;
+                }
+            }
+        }
+    }
 }
+
+/// How long a shove lasts (s): its change of velocity over this is the pull
+/// the boots have to hold against (their adhesion, off the deck; their
+/// shear, along it), so a stronger grip shrugs off more.
+const SHOVE_SECONDS: f32 = 0.1;
 
 /// Ticks after a beam shoves a player before it can again.
 const BEAM_HIT_COOLDOWN: u32 = 30;
@@ -693,9 +728,13 @@ fn receive_rope(
 /// Solves `a`'s rope to another player, changing both at once (the other
 /// only if it is simulated here). A booted end is first held by its boots
 /// (the body underfoot takes the pull); if the pull breaks their grip, the
-/// rope is re-solved with that player free and they're yanked off.
+/// rope is re-solved with that player free and they're yanked off. Each end
+/// is moved by its own build (`ctx` is `a`'s; `base` is the crew's, for a
+/// `b` without one of its own): a robot's rope pulls a crew member as what
+/// they are.
 fn player_rope(
     ctx: &TickContext,
+    base: &Tuning,
     bodies: &mut Bodies,
     players: &mut Query<PlayerQuery>,
     a: Entity,
@@ -705,11 +744,14 @@ fn player_rope(
     let Ok((_, player_a, ..)) = players.get(a) else { return };
     let Some(mut grapple) = player_a.grapple else { return };
     let b = grapple.target;
-    let Ok([(_, mut pa, ..), (_, mut pb, input_b, ..)]) = players.get_many_mut([a, b]) else {
+    let Ok([(_, mut pa, ..), (_, mut pb, input_b, _, _, own_b)]) = players.get_many_mut([a, b]) else {
         return;
     };
+    let tb = own_b.map_or(base, |o| &o.0).clone();
+    let ctx_b = ctx.with_tuning(&tb);
+    let tb = &tb;
     let b_simulated = input_b.is_some();
-    let (Some(ha), Some(hb)) = (RopeHolder::of(&pa, bodies, t), RopeHolder::of(&pb, bodies, t))
+    let (Some(ha), Some(hb)) = (RopeHolder::of(&pa, bodies, t), RopeHolder::of(&pb, bodies, tb))
     else {
         return;
     };
@@ -721,16 +763,32 @@ fn player_rope(
     grapple.tension = 0.0;
     let mut snapped = false;
     loop {
+        let (inverse_a, inverse_b) = (ha.inverse_mass(held_a, t, dir), hb.inverse_mass(held_b, tb, dir));
+        // Both ends held fast by boots on bodies that won't give (one ship,
+        // say): nothing moves, so a running winch pulls with all it has,
+        // and whichever boots that beats let go.
+        if winch.is_some() && inverse_a + inverse_b <= 0.0 && distance >= grapple.length - 0.02 {
+            let pull = dir * max_impulse / ctx.dt;
+            if held_a && ha.breaks_grip(pull, t) {
+                held_a = false;
+                continue;
+            }
+            if held_b && hb.breaks_grip(-pull, tb) {
+                held_b = false;
+                continue;
+            }
+            break;
+        }
         let Some(imp) = solve_rope(
             RopeEnd {
                 position: ha.center,
                 velocity: ha.velocity,
-                inverse_mass: ha.inverse_mass(held_a, t, dir),
+                inverse_mass: inverse_a,
             },
             RopeEnd {
                 position: hb.center,
                 velocity: hb.velocity,
-                inverse_mass: hb.inverse_mass(held_b, t, dir),
+                inverse_mass: inverse_b,
             },
             grapple.length,
             ctx.dt,
@@ -745,14 +803,14 @@ fn player_rope(
             held_a = false;
             continue;
         }
-        if held_b && hb.breaks_grip(-on_a / ctx.dt, t) {
+        if held_b && hb.breaks_grip(-on_a / ctx.dt, tb) {
             held_b = false;
             continue;
         }
         grapple.tension = imp.magnitude / ctx.dt;
         receive_rope(&mut pa, &ha, held_a, on_a, bodies, ctx);
         if b_simulated {
-            receive_rope(&mut pb, &hb, held_b, -on_a, bodies, ctx);
+            receive_rope(&mut pb, &hb, held_b, -on_a, bodies, &ctx_b);
         }
         snapped = imp.clamped && winch.is_none();
         break;
@@ -941,7 +999,12 @@ pub fn player_tick(
             .and_then(|(_, p, ..)| p.grapple)
             .is_some_and(|g| points.iter().any(|p| p.entity == g.target));
         if tied_to_player {
-            player_rope(&ctx, &mut bodies, &mut players, *entity, cmd);
+            let own = players.get(*entity).ok().and_then(|(.., own)| own.map(|t| t.0.clone()));
+            let ctx = match &own {
+                Some(t) => ctx.with_tuning(t),
+                None => ctx.with_tuning(&tuning),
+            };
+            player_rope(&ctx, &tuning, &mut bodies, &mut players, *entity, cmd);
         }
     }
     // Then everyone moves (ropes to bodies are solved as part of moving).

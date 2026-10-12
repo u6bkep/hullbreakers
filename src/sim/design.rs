@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 
 use super::SimMaterial;
-use super::bots::Robot;
+use super::bots::{self, Gait, Robot};
 use super::devices::{Device, DeviceFile};
 use super::mission::ScenarioKind;
 use super::nav::NavGrid;
@@ -159,8 +159,9 @@ pub struct Cabin {
 }
 
 /// Where a robot is posted: a walker stands there (its feet), a flyer
-/// holds station there; facing `facing` degrees about +Y from −Z.
-#[derive(Deserialize, Clone, Copy, Debug)]
+/// holds station there, a mount is bolted there (on a hull surface); facing
+/// `facing` degrees about +Y from −Z.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Post {
     pub robot: Robot,
@@ -448,8 +449,8 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
     let entry_node = entry.and_then(|e| grid.standing_on(e));
     let reachable = |p: Vec3| entry.is_some_and(|e| grid.path(e, p).is_some_and(|path| path.last().is_some_and(|end| near(*end, p, 0.8))));
     for (i, post) in ship.posts.iter().enumerate() {
-        match post.robot {
-            Robot::Gunner => {
+        match post.robot.gait() {
+            Gait::Walker => {
                 let on = grid.standing_on(post.at).map(|n| grid.point(n));
                 if !on.is_some_and(|p| near(p, post.at, 0.6)) {
                     problems.push(format!("post {i} ({:?} at {}): not a place a walker can stand", post.robot, post.at));
@@ -457,9 +458,14 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
                     problems.push(format!("post {i} ({:?} at {}): can't be walked to from the entry", post.robot, post.at));
                 }
             }
-            Robot::Swarmer => {
+            Gait::Flyer => {
                 if ship.boxes.iter().any(|b| inside(b, post.at, 1.0)) {
-                    problems.push(format!("post {i} (Swarmer at {}): inside the hull", post.at));
+                    problems.push(format!("post {i} ({:?} at {}): inside the hull", post.robot, post.at));
+                }
+            }
+            Gait::Mount => {
+                if bots::mount(ship, post.at).is_none() {
+                    problems.push(format!("post {i} ({:?} at {}): not on an open hull surface", post.robot, post.at));
                 }
             }
         }
@@ -564,6 +570,7 @@ mod tests {
                (robot: Gunner, at: (3.0, 0.0, 3.0)), \
                (robot: Gunner, at: (0.0, 2.0, 0.0)), \
                (robot: Swarmer, at: (0.0, -0.1, 0.0)), \
+               (robot: Turret, at: (0.0, 5.0, 0.0)), \
              ], \
              markers: {\"entry\": (-4.0, 0.0, 0.0)})",
         )]);
@@ -575,6 +582,7 @@ mod tests {
         assert!(has("post 1 (Gunner at [3, 0, 3]): can't be walked to"), "{problems:#?}");
         assert!(has("post 2 (Gunner at [0, 2, 0]): not a place"), "{problems:#?}");
         assert!(has("post 3 (Swarmer"), "{problems:#?}");
+        assert!(has("post 4 (Turret"), "{problems:#?}");
         assert!(has("no \"objective\" marker"), "{problems:#?}");
         assert!(!problems.iter().any(|p| p.contains("post 0")), "{problems:#?}");
     }
