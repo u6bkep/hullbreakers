@@ -16,8 +16,9 @@
 //! | Alt+LMB / Alt+RMB   | that hand's second alternate (grapple: pay out) |
 //! | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple |
 //! | R                | reload (main hand first)                   |
-//! | 1-4              | stance (by default SMG+grapple, rifle+grapple, rifle braced, grapple only; see the menu's loadout) |
-//! | I                | the menu, on your loadout                  |
+//! | 1-4              | stance (by default weapon slot 1+grapple, slot 2+grapple, slot 2 braced, grapple only; see the inventory) |
+//! | I                | the menu, on your inventory                |
+//! | G                | put down what's in hand                    |
 //! | F1               | tuning panel (frees cursor)                |
 //! | Escape           | the menu (frees cursor)                    |
 //! | L                | debug: ship lurch                          |
