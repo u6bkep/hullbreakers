@@ -43,6 +43,7 @@ use crate::sim::{PlayerSimPlugin, SimPlugin, SimSharedPlugin, SimSystems, SimTic
 
 mod extrapolate;
 mod profiles;
+pub mod robots;
 
 pub use profiles::ProfileRequests;
 
@@ -183,7 +184,7 @@ impl Plugin for NetPlugin {
             .add_systems(Update, (publish_tuning, spawn_players, profiles::receive_profiles))
             .add_systems(
                 FixedPostUpdate,
-                extrapolate::track_motion.after(SimSystems::Players),
+                (extrapolate::track_motion, robots::publish_robots).after(SimSystems::Players),
             );
         } else {
             // Bodies here are posed from their motion, not simulated: Avian
@@ -221,6 +222,7 @@ impl Plugin for NetPlugin {
                 ),
             )
             .add_systems(Update, report_rollbacks)
+            .add_systems(Update, robots::present_robots.in_set(lightyear::prelude::InterpolationSystems::Interpolate))
             .add_systems(
                 PostUpdate,
                 (
@@ -305,6 +307,14 @@ impl Plugin for ProtocolPlugin {
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
         app.component::<Robot>().replicate_once();
+        // A robot reaches a remote client as what's drawn of it, not its
+        // whole player (see `robots`).
+        app.component::<robots::RobotView>()
+            .replicate()
+            .add_interpolation_with(robots::interpolate_view);
+        app.component::<robots::RobotLog>()
+            .replicate()
+            .add_interpolation_with(robots::snap);
         app.component::<Affixes>().replicate_once();
         app.component::<Condition>().replicate();
         app.component::<Wrecked>().replicate_once();
@@ -328,9 +338,10 @@ impl Plugin for ProtocolPlugin {
             .replicate()
             .predict()
             .with_rollback_condition(|_, _| false);
-        // A client predicts its own player and interpolates the others.
+        // A client predicts its own player and interpolates the others'.
+        // (Robots' go as their `RobotView`.)
         app.component::<Player>()
-            .replicate()
+            .replicate_filtered::<Without<Robot>>()
             .predict()
             .with_rollback_condition(player_diverged)
             .add_interpolation_with(interpolate_player);
@@ -427,8 +438,10 @@ fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
 /// (and one body) positions and orientations blend; across a change of mode
 /// or body the state switches at the halfway point. Everything else (flags,
 /// grapple, the event log) comes from the nearer state.
-fn interpolate_player(start: Player, end: Player, t: f32) -> Player {
-    let mode = match (start.mode, end.mode) {
+/// A player's (or robot's) mode, between two states: blended within a
+/// mode on one body, else the nearer end.
+pub(crate) fn interpolate_mode(start: Mode, end: Mode, t: f32) -> Mode {
+    match (start, end) {
         (
             Mode::Eva {
                 position: p0,
@@ -473,9 +486,13 @@ fn interpolate_player(start: Player, end: Player, t: f32) -> Player {
             orientation: o0.slerp(o1, t),
             pitch: a0 + (a1 - a0) * t,
         },
-        _ if t < 0.5 => start.mode,
-        _ => end.mode,
-    };
+        _ if t < 0.5 => start,
+        _ => end,
+    }
+}
+
+fn interpolate_player(start: Player, end: Player, t: f32) -> Player {
+    let mode = interpolate_mode(start.mode, end.mode, t);
     let mut player = if t < 0.5 { start } else { end };
     player.mode = mode;
     player
@@ -685,8 +702,8 @@ fn replicate_gallery(add: On<Add, GalleryAnchor>, mut commands: Commands) {
         .insert(Replicate::to_clients(NetworkTarget::All));
 }
 
-/// Robots reach clients like other people's players: interpolated, never
-/// predicted. (The host shares the authority's world.)
+/// Robots reach clients interpolated, never predicted, as what's drawn of
+/// them (see [`robots`]). (The host shares the authority's world.)
 fn replicate_robot(add: On<Add, Robot>, mut commands: Commands) {
     commands.entity(add.entity).insert((
         Replicate::to_clients(NetworkTarget::All),

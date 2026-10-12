@@ -492,6 +492,71 @@ fn robots_reach_clients() {
     assert!(rate <= 0.5, "robots upset prediction: {rate:.1}/s");
 }
 
+/// A robot reaches a client as what's drawn of it (`net::robots`), not its
+/// whole player: the client's `Player` for it is built from that, standing
+/// where the server has it, with the events it had; and the boarding action
+/// (the carrier's crew all moving and aiming) is cheap on the wire.
+#[test]
+fn robots_reach_clients_as_what_is_drawn_of_them() {
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::events::PlayerEvent;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    let (_guard, mut s) = session(0);
+    s.step(240);
+    // Where each still limpet's feet are on its rock (they lurk; one
+    // lunging is drawn where it was an interpolation delay ago).
+    let feet = |app: &mut App| -> Vec<Vec3> {
+        let world = app.world_mut();
+        world
+            .query::<(&Robot, &Player)>()
+            .iter(world)
+            .filter_map(|(k, p)| match (*k, p.mode) {
+                (Robot::Limpet, Mode::Booted { feet, velocity, .. }) if velocity.length() < 0.01 => Some(feet),
+                _ => None,
+            })
+            .collect()
+    };
+    let (truth, seen) = (feet(&mut s.server), feet(&mut s.client));
+    for at in &truth {
+        let off = seen.iter().map(|q| q.distance(*at)).fold(f32::MAX, f32::min);
+        assert!(off < 0.005, "a still limpet is drawn {off} m from where the server has it");
+    }
+    // Something a robot does reaches the client in its log.
+    let world = s.server.world_mut();
+    let mut limpets = world.query_filtered::<&mut Player, With<Robot>>();
+    limpets.iter_mut(world).next().unwrap().events.push(PlayerEvent::Respawned);
+    s.step(30);
+    let world = s.client.world_mut();
+    let heard = world
+        .query_filtered::<&Player, With<Robot>>()
+        .iter(world)
+        .any(|p| p.events.iter().any(|(_, e)| matches!(e, PlayerEvent::Respawned)));
+    assert!(heard, "a robot's event never reached the client");
+    // The boarding action.
+    s.server.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
+    s.step(240);
+    // Its robots (some with affixes that change their size) are hit where
+    // they are on a client: their capsules there are the server's.
+    let sizes = |app: &mut App| -> Vec<(i32, i32)> {
+        let world = app.world_mut();
+        let mut v: Vec<(i32, i32)> = world
+            .query_filtered::<&Collider, (With<Robot>, With<Player>)>()
+            .iter(world)
+            .filter_map(|c| c.shape().as_capsule().map(|k| ((k.radius * 1000.0) as i32, (k.half_height() * 1000.0) as i32)))
+            .collect();
+        v.sort();
+        v
+    };
+    let (truth, seen) = (sizes(&mut s.server), sizes(&mut s.client));
+    assert!(!truth.is_empty());
+    assert_eq!(seen, truth, "robots' capsules on the client differ from the server's");
+    let rate = s.received_rate(180);
+    eprintln!("robots on the wire: boarding, standing aboard our ship, {rate:.0} B/s");
+    // Measured 2026-10-12: 37.8 kB/s with robots sent as whole players,
+    // 12.9 as their views.
+    assert!(rate < 20_000.0, "boarding costs {rate:.0} B/s");
+}
+
 /// The field's fauna reach clients: grazers as bodies posed from their
 /// motion (which changes only at their pulses), where the server has them;
 /// limpets as players. Neither upsets the client's prediction.
@@ -1113,6 +1178,8 @@ fn replicated_changes() {
             track!(Motion, "Motion");
             track!(PlayerTelemetry, "PlayerTelemetry");
             track!(Player, "Player");
+            track!(hullbreakers::net::robots::RobotView, "RobotView");
+            track!(hullbreakers::net::robots::RobotLog, "RobotLog");
         }
         let rate = s.received_rate(180);
         let mut v: Vec<_> = counts.into_iter().collect();

@@ -255,7 +255,6 @@ impl Plugin for SimPlugin {
                     .after(SimSystems::Beams)
                     .before(SimSystems::Players),
             )
-            .add_systems(FixedPostUpdate, bots::quiet_idle_robots.after(SimSystems::Players).before(SimSystems::Mission))
             .configure_sets(
                 FixedPostUpdate,
                 (
