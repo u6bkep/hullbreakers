@@ -442,7 +442,7 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
     if !walked {
         return problems;
     }
-    let grid = NavGrid::for_design(ship);
+    let grid = walk_grid(ship);
     // Robots stand where a walker can, and every walker's post is reachable
     // from wherever boarders come in; flyers hold station clear of the hull.
     let entry = ship.markers.get("entry").copied();
@@ -523,6 +523,23 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
         }
     }
     problems
+}
+
+/// The walking grid a crew can make of a design: every bridge out, every
+/// door open (doors aren't boxes). Robots' own grids are the design's as
+/// built, so they never cross a bridge.
+pub fn walk_grid(ship: &ShipDesign) -> NavGrid {
+    let mut boxes = ship.boxes.clone();
+    boxes.extend(ship.devices.iter().filter_map(|d| match d.kind {
+        super::devices::DeviceKind::Bridge { size } => Some(HullBox {
+            center: d.at,
+            size,
+            rotation: Quat::IDENTITY,
+            material: SimMaterial::Hull,
+        }),
+        _ => None,
+    }));
+    NavGrid::for_boxes(&boxes)
 }
 
 /// How far from where they stand a player can press a control (m, from

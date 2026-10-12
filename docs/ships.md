@@ -88,6 +88,12 @@ Interactive things beyond buttons, in a module's `devices: [...]` (the code is
  power: All([On("key_a"), On("key_b")])),
 ```
 
+`fault: true` marks a device a hit can knock out of its starting setting
+(our ship's breakers and main bus, in the boarding action). A device
+`turret_<N>` gates that turret's beam: it fires only while the device is
+live. A device `shield` on our ship is its shield's emitter. Nobody with
+full hands (bulky cargo) can press a device.
+
 `id` names it for other devices and for scenarios (unique in the ship);
 `label` is what players see (default: the id); `at` its middle; `face` the
 way it looks, out of the wall it's on (a gate's way through); `start` a
@@ -100,6 +106,8 @@ lever's (1 thrown) or junction's (its way) first setting.
 | `Key(hold, solo)` | turns it | on for `hold` s (`solo` s for a crew of one) |
 | `Junction(ways)` | turns it to its next way | on; `Port(id, k)` is on while it's set to way *k* |
 | `Door(size, latch)` | no | open (a latched door stays open once opened); shut, it's in the collider |
+| `Bridge(size)` | no | extended: a floor panel (a gangway) in the collider only then |
+| `Sensor(size)` | no | on while a crew member stands in its box (a door held open over its doorway) |
 | `Lamp` | no | lit |
 | `Board(size, rows: [(label, cond)])` | no | lit, a lamp per row showing its condition |
 | `Lights(at: [...], color, flash)` | no | room lights at those points; `flash` for alarms |

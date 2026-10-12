@@ -27,6 +27,7 @@ use super::tuning::Tuning;
 
 pub mod boarding;
 pub mod dead_ship;
+pub mod escort;
 pub mod field;
 pub mod gallery;
 pub mod grapple_run;
@@ -73,6 +74,7 @@ pub fn scenario(kind: ScenarioKind) -> &'static Scenario {
         ScenarioKind::GrappleRun => &grapple_run::SCENARIO,
         ScenarioKind::DeadShip => &dead_ship::SCENARIO,
         ScenarioKind::Recovery => &recovery::SCENARIO,
+        ScenarioKind::Escort => &escort::SCENARIO,
         ScenarioKind::Gallery => &gallery::SCENARIO,
     }
 }

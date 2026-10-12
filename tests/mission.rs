@@ -1159,3 +1159,135 @@ fn hits_do_more_damage_with_crew_at_home() {
     assert!(home > away, "{home} with crew at home, {away} without");
 }
 
+// ---------------------------------------------------------------------------
+// Escort
+
+fn cell_pickups(app: &mut App) -> Vec<hullbreakers::sim::pickups::Pickup> {
+    use hullbreakers::sim::scenarios::escort::CELL;
+    let world = app.world_mut();
+    world
+        .query::<&hullbreakers::sim::pickups::Pickup>()
+        .iter(world)
+        .filter(|p| p.items.contains(&CELL))
+        .cloned()
+        .collect()
+}
+
+fn carrying_cell(app: &mut App) -> bool {
+    player(app).loadout.inventory.carrying == Some(hullbreakers::sim::items::CargoKind::PowerCell)
+}
+
+#[test]
+fn the_escort_starts_with_robots_aboard_and_the_cell_in_the_bay() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Director>().robots = true;
+    start(&mut app, ScenarioKind::Escort);
+    ticks(&mut app, 30);
+    let freighter = ship_of(&mut app, "freighter").expect("no freighter");
+    let world = app.world_mut();
+    let aboard = world.query_filtered::<&Player, With<Robot>>().iter(world).filter(|p| p.mode.body() == Some(freighter)).count();
+    assert!(aboard >= 4, "{aboard} robots aboard");
+    let cells = cell_pickups(&mut app);
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].body, Some(freighter));
+    assert!(cells[0].at.z < -14.0, "not in the bay: {}", cells[0].at);
+    let m = mission(&mut app);
+    assert!(m.objective.starts_with("Board the freighter"), "{}", m.objective);
+    assert!(m.status.iter().any(|l| l == "Power cell: in the freighter's bay"), "{:?}", m.status);
+}
+
+/// The bay door opens at a turn of its key, for 3 s, and stays open while
+/// anyone stands in its doorway.
+#[test]
+fn the_bay_door_holds_for_its_key_and_for_whoever_is_in_the_doorway() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Escort);
+    let freighter = ship_of(&mut app, "freighter").unwrap();
+    press_device(&mut app, freighter, "bay_key_hall");
+    assert!(live(&mut app, freighter, "bay_door"));
+    ticks(&mut app, 4 * 60);
+    assert!(!live(&mut app, freighter, "bay_door"), "still open after its key's time");
+    press_device(&mut app, freighter, "bay_key_hall");
+    stand(&mut app, freighter, Vec3::new(0.0, 0.01, -14.0), Vec3::NEG_Z);
+    ticks(&mut app, 6 * 60);
+    assert!(live(&mut app, freighter, "bay_door"), "shut on someone in the doorway");
+    stand(&mut app, freighter, Vec3::new(0.0, 0.01, -10.0), Vec3::NEG_Z);
+    ticks(&mut app, 2);
+    assert!(!live(&mut app, freighter, "bay_door"), "didn't shut once the doorway was clear");
+}
+
+/// The breach can't be walked until the gangway runs out (its lever on the
+/// far side); then it can.
+#[test]
+fn the_gangway_bridges_the_breach() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Escort);
+    let freighter = ship_of(&mut app, "freighter").unwrap();
+    let walk_aft = |app: &mut App| {
+        stand(app, freighter, Vec3::new(0.0, 0.01, -7.0), Vec3::Z);
+        walk_forward(app, true);
+        ticks(app, 5 * 60);
+        walk_forward(app, false);
+        player(app).mode
+    };
+    let mode = walk_aft(&mut app);
+    let across = matches!(mode, Mode::Booted { feet, up, .. } if feet.z > 3.0 && feet.y > -0.05 && up.y > 0.99);
+    assert!(!across, "walked the breach without the gangway: {mode:?}");
+    press_device(&mut app, freighter, "gangway_lever");
+    assert!(live(&mut app, freighter, "gangway"));
+    let mode = walk_aft(&mut app);
+    assert!(
+        matches!(mode, Mode::Booted { feet, up, body, .. } if body == freighter && feet.z > 3.0 && up.y > 0.99),
+        "the gangway didn't take us across: {mode:?}"
+    );
+}
+
+/// Pick the cell up (both hands), find you can't work a switch with it,
+/// set it down, pick it up again, and bring it home.
+#[test]
+fn the_escort_is_won_with_the_cell_in_our_hold() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::Escort);
+    let freighter = ship_of(&mut app, "freighter").unwrap();
+    // Into the bay, and take the cell.
+    press_device(&mut app, freighter, "bay_key_hall");
+    let take = |app: &mut App| {
+        let cell = cell_pickups(app)[0].at;
+        let feet = Vec3::new(cell.x, 0.01, cell.z + 1.4);
+        stand(app, freighter, feet, cell - (feet + Vec3::Y * eye_height()));
+        interact(app);
+        ticks(app, 2);
+    };
+    take(&mut app);
+    assert!(carrying_cell(&mut app), "didn't pick the cell up");
+    assert!(cell_pickups(&mut app).is_empty());
+    ticks(&mut app, 1);
+    assert!(mission(&mut app).status[0].starts_with("Power cell: carried by Player 1"), "{:?} {:?}", mission(&mut app).status, player(&mut app).loadout.inventory);
+    // Hands full: the key won't turn.
+    ticks(&mut app, 4 * 60);
+    press_device(&mut app, freighter, "bay_key_bay");
+    assert!(!live(&mut app, freighter, "bay_door"), "worked a switch with full hands");
+    // Set it down, turn the key, pick it up again.
+    {
+        let world = app.world_mut();
+        let mut input = world.query_filtered::<&mut PlayerInput, Without<Robot>>().single_mut(world).unwrap();
+        input.presses.drop.press();
+    }
+    ticks(&mut app, 3);
+    assert!(!carrying_cell(&mut app));
+    assert_eq!(cell_pickups(&mut app).len(), 1, "set down, it isn't anywhere");
+    assert!(mission(&mut app).status[0].starts_with("Power cell: set down"), "{:?}", mission(&mut app).status);
+    press_device(&mut app, freighter, "bay_key_bay");
+    assert!(live(&mut app, freighter, "bay_door"));
+    take(&mut app);
+    assert!(carrying_cell(&mut app), "didn't pick it up again");
+    // Home, into the hold.
+    let ship = home(&mut app);
+    stand(&mut app, ship, Vec3::new(0.0, 0.01, 9.0), Vec3::NEG_Z);
+    ticks(&mut app, 2);
+    let m = mission(&mut app);
+    assert_eq!((m.phase, m.outcome.as_str()), (Phase::Won, "POWER RESTORED"));
+    assert_eq!(m.result_of("cell_home"), Some(1.0));
+    assert!(m.report[0].contains("carried by Player 1"), "{:?}", m.report);
+}
+

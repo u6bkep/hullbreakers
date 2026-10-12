@@ -17,7 +17,7 @@ The crew's ship has a **mission wall** on the port side of the bridge: click
 a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
 **asteroid field**, and its button takes you back there.
-`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `recovery`, `gallery`) starts in
+`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `recovery`, `escort`, `gallery`) starts in
 another. When a mission is decided a banner says how; back in the field, the
 **debrief** gives its report, every crew member's score card (time in vacuum,
 longest swing on one rope, presses, deaths, and what they did) and awards.
@@ -32,6 +32,15 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   clear: it breaks apart and throws boarders into space. Beams shove and
   burn anyone in EVA who crosses them: three hits kill. Lose our ship and
   the crew drifts a while, then returns to the field.
+  **Damage control**: our turrets and shield run on a power network, the
+  main bus junction and two breakers on the hold's port wall, with a power
+  board on the bridge's starboard wall. A carrier hit can trip the breaker
+  or knock the bus off its way nearest where it lands: lose the shield and
+  our hull goes in 2 minutes instead of 3.5; lose the turrets and the
+  carrier never goes down, shield or no shield. The board, a status line
+  and a marker say what's out; press it back (a junction back to way 0).
+  The more of the crew at home, the more goes wrong there, so it's a
+  second front; a ship left empty (a lone boarder) is rarely hit hard.
 
 - **Grapple run**: ten gates strung through a cluster of rocks, from just
   off our stern, out and back past our bow (about 430 m gate to gate). Fly
@@ -63,6 +72,16 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   you). A survivor is light; the lifeboat is 600 kg, so a second rope on it
   nearly doubles the pull. Win with everyone accounted for and at least 4
   of the 8 home; alone you can't reach them all, so split up.
+
+- **Escort**: a disabled freighter lies 20 m off our stern, robots
+  aboard, a power cell in its cargo bay. Bring the cell to our hold. It's
+  bulky: whoever carries it can't shoot, grapple or work a switch, so the
+  crew escorts them, or alone you set it down (G) and pick it up again
+  (F). The way out: the bay door opens for 3 s at a turn of either key
+  (one in the hall, one in the bay) and stays open while anyone stands in
+  the doorway; the ship is broken in two at the breach, which a gangway
+  spans only once someone on the far side throws its lever (or jump it on
+  your jetpack); then the gap home.
 
 - **Model gallery** (debug): every model under `assets/` in a row behind
   our ship, turning slowly, labelled with its path and size, sockets drawn

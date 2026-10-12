@@ -118,6 +118,16 @@ impl ShipHull {
 /// The crew's ship's design.
 pub const HOME: &str = "home";
 
+/// Our ship's hold, and the open cargo door behind it (ship coordinates):
+/// where what the crew brings home counts as home.
+const HOLD_LO: Vec3 = Vec3::new(-3.7, -0.5, 0.2);
+const HOLD_HI: Vec3 = Vec3::new(3.7, 3.2, 17.0);
+
+/// Whether `local` (in our ship's coordinates) is in its hold.
+pub fn in_hold(local: Vec3) -> bool {
+    local.cmpge(HOLD_LO).all() && local.cmple(HOLD_HI).all()
+}
+
 /// The crew's ship, drifting with the field at the origin.
 pub fn drifting_home_ship() -> impl Bundle {
     (
@@ -212,7 +222,9 @@ pub fn build_hull(add: On<Add, ShipHull>, hulls: Query<&ShipHull>, mut commands:
 /// index).
 pub fn ship_collider(ship: &ShipDesign, closed: &[bool]) -> Collider {
     let doors = ship.devices.iter().zip(closed).filter(|(_, c)| **c).filter_map(|(d, _)| match d.kind {
-        super::devices::DeviceKind::Door { size, .. } => Some((d.at, Quat::IDENTITY, Collider::cuboid(size.x, size.y, size.z))),
+        super::devices::DeviceKind::Door { size, .. } | super::devices::DeviceKind::Bridge { size } => {
+            Some((d.at, Quat::IDENTITY, Collider::cuboid(size.x, size.y, size.z)))
+        }
         _ => None,
     });
     Collider::compound(

@@ -133,8 +133,13 @@ const AROUND: [(i32, i32); 8] = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -
 
 impl NavGrid {
     pub fn for_design(ship: &ShipDesign) -> NavGrid {
-        let solids: Vec<Solid> = ship
-            .boxes
+        NavGrid::for_boxes(&ship.boxes)
+    }
+
+    /// The grid over these boxes (a design's, and perhaps some of its
+    /// devices').
+    pub fn for_boxes(boxes: &[super::design::HullBox]) -> NavGrid {
+        let solids: Vec<Solid> = boxes
             .iter()
             .map(|b| {
                 let (center, size, rotation) = (b.center, b.size, b.rotation);

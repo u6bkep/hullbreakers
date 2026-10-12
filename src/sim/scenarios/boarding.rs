@@ -143,7 +143,7 @@ fn build(stage: &mut Stage) -> Entity {
     });
     commands.spawn((Name::new("Damage control"), Staged, Damage::default()));
     if stage.robots {
-        bots::crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave, tick, BOARDING_THREAT);
+        bots::crew_ship(commands, tuning, carrier, ShipHull::new(CARRIER).design(), &weave.frame(tick, Vec3::ZERO), tick, BOARDING_THREAT);
     }
     crate::sim::pickups::stock_ship(commands, carrier, ShipHull::new(CARRIER).design(), tick);
     home

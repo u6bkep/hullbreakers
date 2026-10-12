@@ -95,7 +95,8 @@ pub enum Part {
     /// A junction's pointer, at its way.
     Pointer { ways: u8 },
     /// A door's panel: in the doorway shut, slid along `slide` open.
-    DoorPanel { slide: Vec3 },
+    /// (A bridge's panel the other way round: in place while live.)
+    DoorPanel { slide: Vec3, away_when_live: bool },
     /// A door's strip: dim red shut, cyan open.
     DoorStrip,
     /// A board's text (lit while the board has power), and a row's lamp.
@@ -178,7 +179,12 @@ pub fn build_devices(
                 // Doors are boxes in the ship's axes; they slide along their
                 // longer side into the wall.
                 let slide = if size.x >= size.z { Vec3::X * size.x } else { Vec3::Z * size.z };
-                parts.push((Part::DoorPanel { slide }, cuboid(&mut meshes, *size), look.door.clone(), Transform::IDENTITY));
+                parts.push((
+                    Part::DoorPanel { slide, away_when_live: true },
+                    cuboid(&mut meshes, *size),
+                    look.door.clone(),
+                    Transform::IDENTITY,
+                ));
                 let strip = Vec3::new(
                     if size.x >= size.z { size.x * 0.8 } else { size.x + 0.02 },
                     0.06,
@@ -187,6 +193,25 @@ pub fn build_devices(
                 parts.push((Part::DoorStrip, cuboid(&mut meshes, strip), look.shut.clone(), at(0.0, 0.25, 0.0)));
                 None
             }
+            DeviceKind::Bridge { size } => {
+                // A gangway: run out along its length when live, back in
+                // when not; lit along its edges when it's out.
+                let slide = if size.x >= size.z { Vec3::X * size.x } else { Vec3::Z * size.z };
+                parts.push((
+                    Part::DoorPanel { slide, away_when_live: false },
+                    cuboid(&mut meshes, *size),
+                    look.door.clone(),
+                    Transform::from_translation(slide),
+                ));
+                let edge = if size.x >= size.z { Vec3::new(size.x, 0.04, 0.06) } else { Vec3::new(0.06, 0.04, size.z) };
+                let across = if size.x >= size.z { Vec3::Z * (size.z / 2.0) } else { Vec3::X * (size.x / 2.0) };
+                for side in [-1.0, 1.0] {
+                    parts.push((Part::Live, cuboid(&mut meshes, edge), look.dark.clone(), Transform::from_translation(across * side + Vec3::Y * (size.y / 2.0))));
+                }
+                None
+            }
+            // A sensor is felt, not seen.
+            DeviceKind::Sensor { .. } => None,
             DeviceKind::Lamp => {
                 parts.push((Part::Live, cuboid(&mut meshes, Vec3::new(0.14, 0.14, 0.06)), look.dark.clone(), at(0.0, 0.0, 0.03)));
                 Some((facing, vec![(cuboid(&mut meshes, Vec3::new(0.22, 0.22, 0.04)), look.panel.clone())]))
@@ -274,10 +299,10 @@ pub fn build_devices(
                     b.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::default()));
                 }
                 for (part, mesh, material, transform) in parts {
-                    let door = matches!(part, Part::DoorPanel { .. });
+                    let door = match part { Part::DoorPanel { away_when_live, .. } => Some(if away_when_live { 0.0 } else { 1.0 }), _ => None };
                     let mut e = b.spawn((part, of, Mesh3d(mesh), MeshMaterial3d(material), transform));
-                    if door {
-                        e.insert(DoorEase(0.0));
+                    if let Some(away) = door {
+                        e.insert(DoorEase(away));
                     }
                 }
                 for (color, offset) in lights {
@@ -406,9 +431,9 @@ pub fn show_devices(
                 let x = way_x(s.set, ways);
                 transform.rotation = Quat::from_rotation_z(-(x / 0.2).atan());
             }
-            &Part::DoorPanel { slide } => {
+            &Part::DoorPanel { slide, away_when_live } => {
                 let Some(mut ease) = ease else { continue };
-                let target = if s.live { 1.0 } else { 0.0 };
+                let target = if s.live == away_when_live { 1.0 } else { 0.0 };
                 ease.0 += (target - ease.0).clamp(-dt * 1.4, dt * 1.4);
                 transform.translation = slide * ease.0;
             }
