@@ -89,6 +89,7 @@ impl Plugin for SimSharedPlugin {
         }
         app.add_message::<ship::ShipCommand>()
             .add_message::<bots::SpawnRobots>()
+            .add_message::<pickups::SpawnLoot>()
             .init_resource::<nav::NavGrids>()
             .init_resource::<SimTick>()
             .add_observer(player::add_player_hull)
@@ -211,6 +212,7 @@ impl Plugin for SimPlugin {
                     vitals::apply_damage,
                     pickups::remove_taken,
                     pickups::spawn_drops,
+                    pickups::debug_spawn_loot,
                     vitals::settle_deaths,
                     pickups::drop_robot_loot,
                     bots::settle_robot_deaths,

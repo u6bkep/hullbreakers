@@ -141,9 +141,10 @@ pub fn pickup_card(
     bodies: Bodies,
     controls: Query<(&Control, &Transform, &ChildOf)>,
     pickups: Query<(&Pickup, &Transform)>,
+    menu: Res<super::menu::Menu>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-    let Some(player) = player else { return Ok(()) };
+    let Some(player) = player.filter(|_| !menu.open) else { return Ok(()) };
     let (own, player) = *player;
     let Ok(dir) = Dir3::new(camera.rotation * Vec3::NEG_Z) else { return Ok(()) };
     let eye = camera.translation;
@@ -180,7 +181,7 @@ pub fn pickup_card(
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha(190))
+                .fill(egui::Color32::from_black_alpha(230))
                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(40)))
                 .corner_radius(4.0)
                 .inner_margin(egui::Margin::symmetric(10, 7))

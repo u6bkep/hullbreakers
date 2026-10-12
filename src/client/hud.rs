@@ -174,7 +174,7 @@ pub fn hud(
             if captured.0 {
                 ui.label(
                     egui::RichText::new(format!(
-                        "{}: menu   {}: loadout   {}: tuning panel",
+                        "{}: menu   {}: inventory   {}: tuning panel",
                         bindings.label(Action::Menu),
                         bindings.label(Action::Loadout),
                         bindings.label(Action::TuningPanel)
@@ -828,7 +828,9 @@ pub fn loadout_hud(
             None if slot == Slot::Grapple => ink,
             None => dim,
         };
-        painter.text(inner.left_top() + egui::vec2(0.0, 14.0), egui::Align2::LEFT_TOP, name, mono(15.0), name_color);
+        // Rolled names run long: smaller, clear of the mag count.
+        let size = if name.chars().count() > 12 { 11.0 } else { 15.0 };
+        painter.text(inner.left_top() + egui::vec2(0.0, 14.0), egui::Align2::LEFT_TOP, name, mono(size), name_color);
         let bar = egui::Rect::from_min_size(inner.left_bottom() - egui::vec2(0.0, 4.0), egui::vec2(inner.width(), 4.0));
         match (slot, gun) {
             (Slot::Gun(_), Some(gun)) => {

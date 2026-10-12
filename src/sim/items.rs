@@ -1176,6 +1176,27 @@ mod tests {
     });
 
     #[test]
+    fn parts_roll_by_their_weights() {
+        let mut counts = std::collections::HashMap::new();
+        for s in 0..4000 {
+            *counts.entry(Weapon::roll(draw(s, 7), 50).build().parts.barrel).or_insert(0) += 1;
+        }
+        // Standard, long, short, heavy: none of them most of the time.
+        assert!(counts.values().all(|n| *n < 1800), "{counts:?}");
+        // Nor in crates rolled from consecutive ticks.
+        let mut counts = std::collections::HashMap::new();
+        for tick in 1000..1400 {
+            let seed = draw(tick, 0);
+            for item in crate_loot(seed, draw(seed, 99) % 101) {
+                if let Item::Weapon(w) = item {
+                    *counts.entry((w.build().parts.barrel, w.build().maker)).or_insert(0) += 1;
+                }
+            }
+        }
+        assert!(counts.values().all(|n| *n < 100), "{counts:?}");
+    }
+
+    #[test]
     fn seeds_make_different_guns() {
         let guns: Vec<Weapon> = (0..400).map(|s| Weapon::roll(s, 50)).collect();
         let names: std::collections::HashSet<String> = guns.iter().map(Weapon::name).collect();

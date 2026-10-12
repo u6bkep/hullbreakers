@@ -160,6 +160,9 @@ fn carrier_vantages() -> Vec<(&'static str, Vantage)> {
         ("carrier_upper_room", booted(Vec3::new(-4.8, upper + 0.01, 12.5), Vec3::NEG_Z, 0.0)),
         ("carrier_upper", booted(Vec3::new(0.0, upper + 0.01, 10.0), Vec3::NEG_Z, 0.0)),
         ("carrier_bridge", booted(Vec3::new(0.0, upper + 0.01, -21.0), Vec3::NEG_Z, -0.2)),
+        // Loot crates (the hull's `loot…` markers).
+        ("carrier_loot_hangar", booted(Vec3::new(2.4, 0.01, 24.2), Vec3::new(1.0, 0.0, -1.0), -0.45)),
+        ("carrier_loot_bridge", booted(Vec3::new(1.8, upper + 0.01, -25.8), Vec3::new(1.0, 0.0, -1.0), -0.45)),
     ]
 }
 

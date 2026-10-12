@@ -324,3 +324,36 @@ pub fn stock_ship(commands: &mut Commands, ship: Entity, design: &ShipDesign, se
         ));
     }
 }
+
+/// Debug: asks the authority for a loot crate at a player's feet (for
+/// looking over what generation makes).
+#[derive(Message, Clone, Copy, Debug)]
+pub struct SpawnLoot {
+    pub near: Entity,
+}
+
+/// Authority: debug loot crates, rolled from the tick, of middling luck.
+pub fn debug_spawn_loot(
+    tick: Res<SimTick>,
+    mut orders: MessageReader<SpawnLoot>,
+    players: Query<&Player>,
+    mut commands: Commands,
+) {
+    for (i, order) in orders.read().enumerate() {
+        let Ok(player) = players.get(order.near) else { continue };
+        let (body, at, velocity) = dropped_where(&player.mode);
+        let at = at + Vec3::Y * (CRATE_HALF.y - PICKUP_HALF.y) * body.is_some() as u32 as f32;
+        let seed = draw(tick.0, i as u32);
+        commands.spawn((
+            Name::new("Debug loot"),
+            Pickup {
+                body,
+                at,
+                velocity,
+                since: tick.0,
+                items: crate_loot(seed, draw(seed, 99) % 101),
+                kind: PickupKind::Crate,
+            },
+        ));
+    }
+}

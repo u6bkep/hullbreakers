@@ -266,8 +266,12 @@ fn ask(ops: &mut ItemOps, op: ItemOp) {
     ops.0.push_back(op);
 }
 
-const CELL: egui::Vec2 = egui::vec2(196.0, 46.0);
-const PACK_CELL: egui::Vec2 = egui::vec2(128.0, 46.0);
+/// An inventory place's card, three to a row.
+const CELL: egui::Vec2 = egui::vec2(150.0, 46.0);
+const GAP: f32 = 8.0;
+/// The height of the inventory above the stances (fixed, so the stances
+/// don't move as the chosen item's details change).
+const ITEMS_HEIGHT: f32 = 365.0;
 
 /// One place in the inventory, drawn as a card: what's there, in its
 /// colour. `chosen` is lit; `target` (where the chosen item could go) is
@@ -281,7 +285,7 @@ fn cell(ui: &mut egui::Ui, size: egui::Vec2, tag: &str, item: Option<Item>, chos
     let stroke = if chosen {
         egui::Stroke::new(2.0, color)
     } else if target {
-        egui::Stroke::new(1.5, INK)
+        egui::Stroke::new(1.0, INK.gamma_multiply(0.45))
     } else if item.is_some() {
         egui::Stroke::new(1.0, color.gamma_multiply(0.6))
     } else {
@@ -360,13 +364,15 @@ fn inventory_tab(
     }
     let target = |chosen: &Option<Place>, to: Place| chosen.is_some_and(|from| from != to && can_move(inv, from, to));
 
-    ui.horizontal_top(|ui| {
+    let size = egui::vec2(ui.available_width(), ITEMS_HEIGHT);
+    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        ui.set_min_height(ITEMS_HEIGHT);
         // Left: what's carried.
         ui.vertical(|ui| {
-            ui.set_width(2.0 * CELL.x + 8.0);
+            ui.set_width(3.0 * CELL.x + 2.0 * GAP);
             ui.label(egui::RichText::new("Weapon slots").strong());
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
                 for i in 0..WEAPON_SLOTS as u8 {
                     let place = Place::Weapon(i);
                     let in_hand = Hand::BOTH.iter().any(|h| loadout.weapon_slot(*h) == Some(i as usize));
@@ -378,10 +384,10 @@ fn inventory_tab(
             ui.add_space(4.0);
             ui.label(egui::RichText::new("Pack").strong());
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                ui.spacing_mut().item_spacing = egui::vec2(GAP, 6.0);
                 for i in 0..PACK_SLOTS as u8 {
                     let place = Place::Pack(i);
-                    let r = cell(ui, PACK_CELL, "PACK", inv.get(place), *chosen == Some(place), target(chosen, place));
+                    let r = cell(ui, CELL, "PACK", inv.get(place), *chosen == Some(place), target(chosen, place));
                     click(inv, place, &r, ops, chosen);
                 }
             });
@@ -394,7 +400,8 @@ fn inventory_tab(
                         .desired_width(170.0)
                         .text(egui::RichText::new(format!("{rounds} / {}", kind.cap())).monospace().small());
                     ui.add(bar);
-                    let drop = egui::Button::new(egui::RichText::new(format!("Drop {}", rounds.min(kind.box_rounds()))).small());
+                    let label = if rounds > 0 { format!("Drop {}", rounds.min(kind.box_rounds())) } else { "Drop".into() };
+                    let drop = egui::Button::new(egui::RichText::new(label).small());
                     if ui
                         .add_enabled(rounds > 0, drop)
                         .on_hover_text("Leave a box of it at your feet, for a crewmate")
@@ -423,7 +430,7 @@ fn inventory_tab(
         ui.separator();
         // Right: the chosen item.
         ui.vertical(|ui| {
-            ui.set_width(300.0);
+            ui.set_width(ui.available_width());
             let item = chosen.and_then(|p| inv.get(p));
             details(ui, player, chosen, item, ops);
         });

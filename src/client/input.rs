@@ -101,16 +101,17 @@ pub fn read_input(
     tuning: Res<Tuning>,
     stances: Res<StanceLayout>,
     mut ops: ResMut<ItemOps>,
-    player: Option<Single<&crate::sim::player::Player, With<LocalPlayer>>>,
+    player: Option<Single<(Entity, &crate::sim::player::Player), With<LocalPlayer>>>,
     mut local: ResMut<LocalInput>,
     mut ship_orders: MessageWriter<ShipCommand>,
+    mut loot_orders: MessageWriter<crate::sim::pickups::SpawnLoot>,
 ) {
     let cmd = &mut local.0;
     cmd.stances = Some(stances.0);
     // The inventory screen's changes, one at a time: the next once the
     // simulation has done the last. (Without a player, they're dropped.)
-    match player {
-        Some(player) if player.input.item_op_done(cmd) => {
+    match player.as_deref() {
+        Some((_, player)) if player.input.item_op_done(cmd) => {
             if let Some(op) = ops.0.pop_front() {
                 cmd.item_op = op;
                 cmd.presses.item_op.press();
@@ -184,5 +185,10 @@ pub fn read_input(
 
     if held.started(&bindings, Action::DebugLurch) {
         ship_orders.write(ShipCommand::Lurch);
+    }
+    if held.started(&bindings, Action::DebugLoot)
+        && let Some((near, _)) = player.as_deref()
+    {
+        loot_orders.write(crate::sim::pickups::SpawnLoot { near: *near });
     }
 }

@@ -67,10 +67,12 @@ pub enum Action {
     TuningPanel,
     Menu,
     DebugLurch,
+    /// A loot crate at your feet (host only).
+    DebugLoot,
 }
 
 impl Action {
-    pub const ALL: [Action; 35] = [
+    pub const ALL: [Action; 36] = [
         Action::Forward,
         Action::Back,
         Action::Left,
@@ -106,6 +108,7 @@ impl Action {
         Action::TuningPanel,
         Action::Menu,
         Action::DebugLurch,
+        Action::DebugLoot,
     ];
 
     fn defaults(self) -> &'static [&'static str] {
@@ -145,6 +148,7 @@ impl Action {
             Action::TuningPanel => &["F1"],
             Action::Menu => &["Escape"],
             Action::DebugLurch => &["L"],
+            Action::DebugLoot => &["K"],
         }
     }
 
@@ -191,6 +195,7 @@ impl Action {
             Action::TuningPanel => "Tuning panel",
             Action::Menu => "Menu",
             Action::DebugLurch => "Debug: ship lurch",
+            Action::DebugLoot => "Debug: loot crate (host)",
         }
     }
 
@@ -224,7 +229,7 @@ impl Action {
             | Action::ReloadOff => "Hands",
             Action::ReelIn | Action::PayOut => "Grapple",
             Action::Stance1 | Action::Stance2 | Action::Stance3 | Action::Stance4 => "Stances",
-            Action::Loadout | Action::TuningPanel | Action::Menu | Action::DebugLurch => "Interface",
+            Action::Loadout | Action::TuningPanel | Action::Menu | Action::DebugLurch | Action::DebugLoot => "Interface",
         }
     }
 }
