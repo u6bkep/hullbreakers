@@ -119,15 +119,22 @@ client's title is `Hullbreakers — HOST:PORT`.
 | Alt+LMB / Alt+RMB (hold)   | that hand's second alternate: for the grapple, pay out ||
 | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple ||
 | R            | reload (main hand first; a dry gun reloads itself) ||
-| 1-4          | stance: SMG + grapple, rifle + grapple, rifle braced, grapple alone ||
+| 1-4          | stance: by default SMG + grapple, rifle + grapple, rifle braced, grapple alone ||
+| I            | the menu, on your loadout           ||
+| Escape       | the menu (frees the mouse)          ||
 | F1           | tuning panel (frees the mouse)      ||
-| Escape       | free the mouse                      ||
 | L            | debug: ship lurches forward         ||
 
-These are the defaults. To remap them, write a `keybinds.ron` next to the game
-listing only the actions you change, each with up to two bindings. A binding
-is a key or mouse button with optional modifiers (Shift, Ctrl, Alt, Tab,
-CapsLock):
+The menu (Escape) has two pages. **Loadout** shows what you carry and lets you
+choose what each stance puts in each hand; that's saved to `stances.ron`.
+**Controls** remaps every action: click a binding and press the key, button or
+chord you want. Right-click clears a binding. The game goes on while the menu
+is open.
+
+The controls above are the defaults. The menu saves your changes to a
+`keybinds.ron` next to the game, which you can also write by hand. It lists
+only the actions you change, each with up to two bindings. A binding is a key
+or mouse button with optional modifiers (Shift, Ctrl, Alt, Tab, CapsLock):
 
 ```ron
 { "ReelIn": ["RMB", "Ctrl+LMB"], "ToggleBoots": ["G"], "Interact": ["F", "MMB"] }

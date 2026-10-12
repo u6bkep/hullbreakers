@@ -12,6 +12,7 @@ pub mod events;
 pub mod gallery;
 pub mod hud;
 pub mod input;
+pub mod menu;
 pub mod profile;
 pub mod render;
 pub mod sfx;
@@ -53,6 +54,8 @@ impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin))
             .insert_resource(input::MouseCaptured(true))
+            .init_resource::<input::TuningOpen>()
+            .init_resource::<menu::Menu>()
             .init_resource::<camera::CameraFx>()
             .insert_resource(ViewCorrection {
                 rotation: Quat::IDENTITY,
@@ -67,11 +70,16 @@ impl Plugin for ClientPlugin {
             .add_observer(sky::add_sky_to_cameras)
             .add_observer(gallery::set_out_gallery)
             .add_observer(viewmodel::spawn_view_hands)
+            .add_observer(camera::light_view_model::<PointLight>)
+            .add_observer(camera::light_view_model::<SpotLight>)
+            .add_observer(camera::light_view_model::<DirectionalLight>)
+            .add_observer(camera::layer_world_mesh)
             .add_systems(
                 PreStartup,
                 (
                     render::setup_materials,
                     bindings::load_bindings,
+                    menu::load_stances,
                     sky::setup_sky,
                 ),
             )
@@ -88,7 +96,7 @@ impl Plugin for ClientPlugin {
             )
             .add_systems(
                 PreUpdate,
-                (input::toggle_capture, input::read_input)
+                (input::toggle_capture, menu::capture_binding, input::read_input)
                     .chain()
                     .after(bevy::input::InputSystems),
             )
@@ -146,7 +154,9 @@ impl Plugin for ClientPlugin {
                     hud::loadout_hud,
                     gallery::label_exhibits,
                     hud::hit_markers,
-                ),
+                    menu::menu,
+                )
+                    .chain(),
             );
         if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)

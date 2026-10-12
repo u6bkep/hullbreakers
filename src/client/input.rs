@@ -16,9 +16,10 @@
 //! | Alt+LMB / Alt+RMB   | that hand's second alternate (grapple: pay out) |
 //! | Mouse4 / Mouse5 (hold) | reel in / pay out, whichever hand holds the grapple |
 //! | R                | reload (main hand first)                   |
-//! | 1-4              | stance: SMG+grapple, rifle+grapple, rifle braced, grapple only |
+//! | 1-4              | stance (by default SMG+grapple, rifle+grapple, rifle braced, grapple only; see the menu's loadout) |
+//! | I                | the menu, on your loadout                  |
 //! | F1               | tuning panel (frees cursor)                |
-//! | Escape           | free the cursor                            |
+//! | Escape           | the menu (frees cursor)                    |
 //! | L                | debug: ship lurch                          |
 
 use bevy::input::mouse::AccumulatedMouseMotion;
@@ -27,28 +28,58 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::LocalInput;
 use super::bindings::{Action, Bindings, Held};
+use super::menu::{Menu, StanceLayout, Tab};
 use crate::sim::input::HandHeld;
 use crate::sim::ship::ShipCommand;
 use crate::sim::tuning::Tuning;
 
-/// Whether the mouse is captured for look. False while the tuning panel is open.
+/// Whether the mouse is captured for look: false while the menu or the
+/// tuning panel is open.
 #[derive(Resource)]
 pub struct MouseCaptured(pub bool);
 
+/// Whether the tuning panel is open.
+#[derive(Resource, Default)]
+pub struct TuningOpen(pub bool);
+
+/// Opens and closes the menu and the tuning panel, and frees the cursor
+/// while either is open. Escape always opens and closes the menu, whatever
+/// else is bound to it.
 pub fn toggle_capture(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     bindings: Res<Bindings>,
+    mut menu: ResMut<Menu>,
+    mut tuning: ResMut<TuningOpen>,
     mut captured: ResMut<MouseCaptured>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let held = Held { keys: &keys, mouse: &mouse };
-    if held.started(&bindings, Action::TuningPanel) {
-        captured.0 = !captured.0;
+    // A key being bound in the menu is only that.
+    if !menu.binding() {
+        // Escape works whatever Menu is bound to, so the menu can't be lost.
+        let escape = keys.just_pressed(KeyCode::Escape);
+        if held.started(&bindings, Action::Menu) || escape {
+            if menu.open {
+                menu.close();
+            } else if tuning.0 {
+                tuning.0 = false;
+            } else {
+                menu.open = true;
+            }
+        }
+        if held.started(&bindings, Action::Loadout) {
+            if menu.open && menu.tab == Tab::Loadout {
+                menu.close();
+            } else {
+                menu.open_on(Tab::Loadout);
+            }
+        }
+        if held.started(&bindings, Action::TuningPanel) {
+            tuning.0 = !tuning.0;
+        }
     }
-    if held.started(&bindings, Action::ReleaseMouse) {
-        captured.0 = false;
-    }
+    captured.0 = !menu.open && !tuning.0;
     let (grab_mode, visible) = if captured.0 {
         (CursorGrabMode::Locked, false)
     } else {
@@ -67,10 +98,12 @@ pub fn read_input(
     bindings: Res<Bindings>,
     captured: Res<MouseCaptured>,
     tuning: Res<Tuning>,
+    stances: Res<StanceLayout>,
     mut local: ResMut<LocalInput>,
     mut ship_orders: MessageWriter<ShipCommand>,
 ) {
     let cmd = &mut local.0;
+    cmd.stances = Some(stances.0);
     if !captured.0 {
         cmd.movement = Vec3::ZERO;
         cmd.roll = 0.0;

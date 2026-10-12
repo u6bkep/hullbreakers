@@ -7,13 +7,18 @@
 //! on the rifle's foregrip. Shots kick the hand that fired, a reload dips
 //! it, a stance change drops both hands out of view and brings them back,
 //! and the hands lag a little behind the look. Purely visual.
+//!
+//! The hands are drawn by a camera of their own, on their own render layer
+//! (see `camera::spawn_camera`): over the world rather than in it, so they
+//! never clip into a wall, and lit by every light but your own headlamp.
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::world_serialization::WorldAssetRoot;
 
 use super::{LocalInput, LocalPlayer};
-use super::camera::PlayerCamera;
+use super::camera::{PlayerCamera, VIEW_MODEL_LAYER};
 use super::gallery::asset_root;
 use crate::sim::events::PlayerEvent;
 use crate::sim::player::Player;
@@ -249,10 +254,11 @@ pub fn pose_view_hands(
     }
 }
 
-/// Model details the hands look after once loaded: each arms model shows
-/// only its own hand's arm, nothing held casts a shadow (the headlamp is
-/// right behind it), and the grapple's reel turns and its harpoon is gone
-/// while it's out on the line.
+/// Model details the hands look after once loaded: everything held is on
+/// the view model's layer and casts no shadow (hands with no body behind
+/// them would cast a puzzling one), each arms model shows only its own
+/// hand's arm, and the grapple's reel turns and its harpoon is gone while
+/// it's out on the line.
 pub fn dress_view_hands(
     player: Option<Single<&Player, With<LocalPlayer>>>,
     hands: Query<(Entity, &ViewHand)>,
@@ -260,6 +266,7 @@ pub fn dress_view_hands(
     children: Query<&Children>,
     names: Query<&Name>,
     unshadowed: Query<(), (With<Mesh3d>, Without<NotShadowCaster>)>,
+    layers: Query<&RenderLayers, With<Mesh3d>>,
     undimmed: Query<&MeshMaterial3d<StandardMaterial>, Without<Dimmed>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut parts: Query<(&mut Transform, &mut Visibility, Option<&RestPose>), Without<ViewHand>>,
@@ -270,6 +277,9 @@ pub fn dress_view_hands(
         for child in children.iter_descendants(root) {
             if unshadowed.contains(child) {
                 commands.entity(child).insert(NotShadowCaster);
+            }
+            if layers.get(child).is_ok_and(|l| *l != RenderLayers::layer(VIEW_MODEL_LAYER)) {
+                commands.entity(child).insert(RenderLayers::layer(VIEW_MODEL_LAYER));
             }
             // Lights made to be seen across a room glare at arm's length.
             if let Ok(material) = undimmed.get(child)

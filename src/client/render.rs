@@ -3,12 +3,14 @@
 
 use avian3d::prelude::*;
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::RenderLayers;
+use bevy::light::CascadeShadowConfigBuilder;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use super::camera::{PlayerCamera, render_frame};
+use super::camera::{HAND_SUN_LAYER, PlayerCamera, SHADOWS_HANDS_LAYER, render_frame};
 use super::{LocalInput, LocalPlayer};
 use crate::sim::SimMaterial;
 use crate::sim::asteroids::FIELD_DIRECTION;
@@ -151,14 +153,27 @@ pub fn setup_lighting(mut commands: Commands) {
         brightness: 60.0,
         ..default()
     });
+    let sun = DirectionalLight {
+        illuminance: 12_000.0,
+        shadow_maps_enabled: true,
+        ..default()
+    };
+    let towards = Transform::default().looking_to(-super::sky::SUN_DIRECTION, Vec3::Y);
+    commands.spawn((Name::new("Sun"), sun, RenderLayers::layer(0), towards));
+    // The same sun on your hands (see `camera::spawn_camera`), its shadows
+    // only as far as they reach.
     commands.spawn((
-        Name::new("Sun"),
-        DirectionalLight {
-            illuminance: 12_000.0,
-            shadow_maps_enabled: true,
+        Name::new("Sun on the hands"),
+        sun,
+        CascadeShadowConfigBuilder {
+            num_cascades: 1,
+            minimum_distance: 0.01,
+            maximum_distance: 1.5,
             ..default()
-        },
-        Transform::default().looking_to(-super::sky::SUN_DIRECTION, Vec3::Y),
+        }
+        .build(),
+        RenderLayers::from_layers(&[HAND_SUN_LAYER, SHADOWS_HANDS_LAYER]),
+        towards,
     ));
 }
 

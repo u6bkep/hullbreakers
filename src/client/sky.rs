@@ -236,10 +236,20 @@ pub fn setup_sky(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     });
 }
 
-/// Gives every 3D camera the sky.
-pub fn add_sky_to_cameras(add: On<Add, Camera3d>, sky: Option<Res<Sky>>, mut commands: Commands) {
-    if let Some(sky) = sky {
-        commands.entity(add.entity).insert(sky.camera_components());
+/// Gives every 3D camera the sky: the view-model camera only its light,
+/// since it draws over the world, sky and all.
+pub fn add_sky_to_cameras(
+    add: On<Add, Camera3d>,
+    sky: Option<Res<Sky>>,
+    view_model: Query<(), With<super::camera::ViewModelCamera>>,
+    mut commands: Commands,
+) {
+    let Some(sky) = sky else { return };
+    let (skybox, light) = sky.camera_components();
+    if view_model.contains(add.entity) {
+        commands.entity(add.entity).insert(light);
+    } else {
+        commands.entity(add.entity).insert((skybox, light));
     }
 }
 

@@ -4,3 +4,7 @@ target/
 # Rendered by each asset build script
 assets/**/preview/
 __pycache__/
+
+# Each player's own settings, saved by the menu
+keybinds.ron
+stances.ron

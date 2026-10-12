@@ -138,7 +138,7 @@ impl Gun {
 }
 
 /// What a hand holds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 pub enum Slot {
     Empty,
     Grapple,
@@ -168,7 +168,7 @@ impl Hand {
 }
 
 /// What each hand holds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 pub struct Stance {
     pub main: Slot,
     pub off: Slot,
@@ -181,7 +181,29 @@ impl Stance {
             Hand::Off => self.off,
         }
     }
+
+    /// The stance as it can be held with `guns` gun slots: no slot that
+    /// isn't there, and nothing in both hands at once.
+    fn sanitized(self, guns: usize) -> Stance {
+        let fit = |slot| match slot {
+            Slot::Gun(i) if i as usize >= guns => Slot::Empty,
+            slot => slot,
+        };
+        let (main, off) = (fit(self.main), fit(self.off));
+        Stance {
+            main,
+            off: if off == main { Slot::Empty } else { off },
+        }
+    }
 }
+
+/// The stances a new player starts with (see [`Loadout::default`]).
+pub const DEFAULT_STANCES: [Stance; STANCES] = [
+    Stance { main: Slot::Gun(0), off: Slot::Grapple },
+    Stance { main: Slot::Gun(1), off: Slot::Grapple },
+    Stance { main: Slot::Gun(1), off: Slot::Empty },
+    Stance { main: Slot::Grapple, off: Slot::Empty },
+];
 
 pub const STANCES: usize = 4;
 /// Seconds to change stance.
@@ -257,16 +279,9 @@ impl Default for Loadout {
     /// 1. SMG and grapple; 2. rifle and grapple; 3. rifle, braced;
     /// 4. grapple alone, on the primary button.
     fn default() -> Loadout {
-        let (smg, rifle) = (Slot::Gun(0), Slot::Gun(1));
-        let stance = |main, off| Stance { main, off };
         Loadout {
             guns: vec![Gun::full(GunKind::Smg), Gun::full(GunKind::Rifle)],
-            stances: [
-                stance(smg, Slot::Grapple),
-                stance(rifle, Slot::Grapple),
-                stance(rifle, Slot::Empty),
-                stance(Slot::Grapple, Slot::Empty),
-            ],
+            stances: DEFAULT_STANCES,
             current: 0,
             switching: 0.0,
             hands: [HandState::default(); 2],
@@ -354,9 +369,27 @@ impl Loadout {
         }
     }
 
+    /// Takes up a player's own choice of what each stance holds. A change
+    /// to what's in hand now takes as long as a stance switch.
+    pub fn set_stances(&mut self, wanted: &[Stance; STANCES]) {
+        let wanted = wanted.map(|s| s.sanitized(self.guns.len()));
+        if wanted == self.stances {
+            return;
+        }
+        let before = self.stance();
+        self.stances = wanted;
+        if self.stance() != before {
+            self.switching = SWITCH_SECONDS;
+            self.cancel_reloads();
+        }
+    }
+
     /// Runs the hands for one tick of `dt` seconds.
     pub fn tick(&mut self, cmd: &TickInput, dt: f32) -> HandsOut {
         let mut out = HandsOut::default();
+        if let Some(stances) = &cmd.stances {
+            self.set_stances(stances);
+        }
         let wanted = cmd.stance.min(STANCES as u8 - 1);
         if cmd.stance_pressed && wanted != self.current {
             self.current = wanted;
@@ -600,6 +633,33 @@ mod tests {
         assert!(!l.guns[0].carried);
         l.take(&[Gun::full(GunKind::Rifle)]);
         assert_eq!(l.guns[1].reserve, 150 + 30 + 150);
+    }
+
+    #[test]
+    fn players_choose_what_each_stance_holds() {
+        let mut l = Loadout::default();
+        let mut cmd = TickInput::default();
+        let mut wanted = DEFAULT_STANCES;
+        // Rifle in the main hand of stance 1, and an SMG in both hands of
+        // stance 3 (which can't be: the off hand comes up empty).
+        wanted[0].main = Slot::Gun(1);
+        wanted[2] = Stance { main: Slot::Gun(0), off: Slot::Gun(0) };
+        wanted[3].off = Slot::Gun(7);
+        cmd.stances = Some(wanted);
+        cmd.main.held = true;
+        let out = l.tick(&cmd, DT);
+        assert!(out.shots.is_empty(), "changing what's in hand takes a switch");
+        assert_eq!(l.stances[0].main, Slot::Gun(1));
+        assert_eq!(l.stances[2], Stance { main: Slot::Gun(0), off: Slot::Empty });
+        assert_eq!(l.stances[3].off, Slot::Empty, "no such gun slot");
+        let shots: usize = (0..60).map(|_| l.tick(&cmd, DT).shots.len()).sum();
+        assert_eq!(l.guns[1].mag, 30 - shots as u16, "the rifle fired");
+        // Changing only another stance doesn't interrupt this one.
+        wanted[1].off = Slot::Empty;
+        cmd.stances = Some(wanted);
+        l.tick(&cmd, DT);
+        assert_eq!(l.stances[1].off, Slot::Empty);
+        assert_eq!(l.switching, 0.0);
     }
 
     #[test]

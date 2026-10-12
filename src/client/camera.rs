@@ -6,7 +6,12 @@
 //! Events that relocate the view (landing, edge wraps, wall transitions) are
 //! smoothed over by a decaying pose offset.
 
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{CameraOutputMode, Hdr};
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::cluster::GlobalClusterSettings;
 use bevy::prelude::*;
+use bevy::render::render_resource::BlendState;
 
 use super::events::Presented;
 use super::sfx::STEP_LENGTH;
@@ -30,30 +35,141 @@ pub struct CameraSmoothing {
     bob_phase: f32,
 }
 
-pub fn spawn_camera(mut commands: Commands, tuning: Res<Tuning>) {
+/// The render layer the first-person view model (your hands and what they
+/// hold) is on. Only the view-model camera draws it.
+pub const VIEW_MODEL_LAYER: usize = 1;
+/// The view model's own sun (see `render::setup_lighting`) is on these: one
+/// the view-model camera sees and the world doesn't, and one every world
+/// mesh is on as well, so the world still shadows your hands.
+pub const HAND_SUN_LAYER: usize = 2;
+pub const SHADOWS_HANDS_LAYER: usize = 3;
+
+/// The camera that draws the view model over the world (see
+/// [`spawn_camera`]).
+#[derive(Component)]
+pub struct ViewModelCamera;
+
+/// The view is drawn by two cameras into one picture. The player camera
+/// draws the world; the view-model camera, riding with it, then draws your
+/// hands on top with a depth buffer of their own (so a gun never pokes into
+/// a wall) and finishes the picture: bloom, tonemapping and the HUD happen
+/// once, there, over both. Your own headlamp lights only the world: at arm's
+/// length it would only glare off your sleeve. Every other light lights
+/// both (see [`light_view_model`]), but the sun: the hands have one of their
+/// own, with a single short shadow cascade where they are (a second set of
+/// the sun's full cascades just for them cost 0.3 ms a frame in a
+/// firefight).
+pub fn spawn_camera(
+    mut commands: Commands,
+    tuning: Res<Tuning>,
+    egui: Option<ResMut<bevy_egui::EguiGlobalSettings>>,
+    clustering: Option<ResMut<GlobalClusterSettings>>,
+) {
+    // Bevy's GPU light clustering lights every view with every point and
+    // spot light, whatever their layers (0.19); its CPU clustering honours
+    // them, which keeps your headlamp off your hands.
+    if let Some(mut clustering) = clustering {
+        clustering.gpu_clustering = None;
+    }
+    // The HUD goes on the camera that finishes the picture, not on
+    // whichever camera egui would pick.
+    if let Some(mut egui) = egui {
+        egui.auto_create_primary_context = false;
+    }
+    let player_camera = commands
+        .spawn((
+            Name::new("Camera"),
+            PlayerCamera,
+            Camera3d::default(),
+            Camera {
+                // The view-model camera writes the finished picture out.
+                output_mode: CameraOutputMode::Skip,
+                ..default()
+            },
+            // HDR, tonemapped (and bloomed, so lasers, alarms and explosions
+            // glow) by the view-model camera.
+            Hdr,
+            Tonemapping::None,
+            Projection::Perspective(PerspectiveProjection {
+                fov: tuning.fov_deg.to_radians(),
+                near: 0.05,
+                far: 20_000.0,
+                ..default()
+            }),
+            CameraSmoothing {
+                rotation_offset: Quat::IDENTITY,
+                last_rotation: Quat::IDENTITY,
+                ..default()
+            },
+            // Ears for other players' sounds (see `sfx::play_remote_sounds`).
+            SpatialListener::new(0.2),
+            Transform::default(),
+            // A little right of and below the eye, so what it lights shows
+            // some shape. The world's layer only: not on your own hands.
+            children![(
+                headlamp(true),
+                RenderLayers::layer(0),
+                Transform::from_xyz(0.2, -0.15, 0.0)
+            )],
+        ))
+        .id();
     commands.spawn((
-        Name::new("Camera"),
-        PlayerCamera,
+        Name::new("View-model camera"),
+        ViewModelCamera,
         Camera3d::default(),
-        // HDR with bloom, so lasers, alarms and explosions glow.
-        bevy::post_process::bloom::Bloom::NATURAL,
-        Projection::Perspective(PerspectiveProjection {
-            fov: tuning.fov_deg.to_radians(),
-            near: 0.05,
-            far: 20_000.0,
-            ..default()
-        }),
-        CameraSmoothing {
-            rotation_offset: Quat::IDENTITY,
-            last_rotation: Quat::IDENTITY,
+        Camera {
+            order: 1,
+            // Over the world, as drawn.
+            clear_color: ClearColorConfig::None,
+            // The whole picture, as it is: nothing under it to blend with.
+            output_mode: CameraOutputMode::Write {
+                blend_state: Some(BlendState::REPLACE),
+                clear_color: ClearColorConfig::None,
+            },
             ..default()
         },
-        // Ears for other players' sounds (see `sfx::play_remote_sounds`).
-        SpatialListener::new(0.2),
+        Hdr,
+        bevy::post_process::bloom::Bloom::NATURAL,
+        // Its field of view follows the player camera's (see `update_camera`).
+        Projection::Perspective(PerspectiveProjection {
+            fov: tuning.fov_deg.to_radians(),
+            near: 0.01,
+            far: 5.0,
+            ..default()
+        }),
+        RenderLayers::from_layers(&[VIEW_MODEL_LAYER, HAND_SUN_LAYER]),
+        bevy_egui::PrimaryEguiContext,
         Transform::default(),
-        // A little right of and below the eye, so what it lights shows some shape.
-        children![(headlamp(true), Transform::from_xyz(0.2, -0.15, 0.0))],
+        ChildOf(player_camera),
     ));
+}
+
+/// Every light lights the view model as well as the world, unless it was
+/// given layers of its own (your headlamp).
+pub fn light_view_model<L: Component>(
+    add: On<Add, L>,
+    layered: Query<(), With<RenderLayers>>,
+    mut commands: Commands,
+) {
+    if !layered.contains(add.entity) {
+        commands
+            .entity(add.entity)
+            .insert(RenderLayers::from_layers(&[0, VIEW_MODEL_LAYER]));
+    }
+}
+
+/// Every mesh is in the world, and shadows the hands, unless it was given
+/// layers of its own.
+pub fn layer_world_mesh(
+    add: On<Add, Mesh3d>,
+    layered: Query<(), With<RenderLayers>>,
+    mut commands: Commands,
+) {
+    if !layered.contains(add.entity) {
+        commands
+            .entity(add.entity)
+            .insert(RenderLayers::from_layers(&[0, SHADOWS_HANDS_LAYER]));
+    }
 }
 
 /// A suit's headlamp: a spot along the view. Only your own casts shadows.
@@ -151,6 +267,7 @@ pub fn update_camera(
     player: Single<(&Player, Option<&PreviousMode>, &PlayerTelemetry), With<LocalPlayer>>,
     transforms: Query<&Transform, Without<PlayerCamera>>,
     camera: Single<(&mut Transform, &mut CameraSmoothing, &mut Projection), With<PlayerCamera>>,
+    mut view_model: Query<&mut Projection, (With<ViewModelCamera>, Without<PlayerCamera>)>,
 ) {
     let (player, previous, telemetry) = *player;
     let input = &local.0;
@@ -255,7 +372,13 @@ pub fn update_camera(
 
     cam_transform.translation = eye;
     cam_transform.rotation = rotation;
+    let fov = (tuning.fov_deg + fx.fov_kick).to_radians();
     if let Projection::Perspective(p) = &mut *projection {
-        p.fov = (tuning.fov_deg + fx.fov_kick).to_radians();
+        p.fov = fov;
+    }
+    for mut projection in &mut view_model {
+        if let Projection::Perspective(p) = &mut *projection {
+            p.fov = fov;
+        }
     }
 }

@@ -9,7 +9,7 @@ use super::camera::{CameraFx, PlayerCamera};
 use super::LocalPlayer;
 use super::events::EventCursor;
 use super::bindings::{Action, Bindings};
-use super::input::MouseCaptured;
+use super::input::{MouseCaptured, TuningOpen};
 use crate::sim::bots::{Robot, SpawnRobots};
 use crate::sim::pickups::{PICKUP_HALF, Pickup};
 use crate::sim::vitals::{Hit, HitLog, Vitals};
@@ -32,6 +32,7 @@ pub fn hud(
     mut tuning: ResMut<Tuning>,
     mut panel: ResMut<PanelState>,
     captured: Res<MouseCaptured>,
+    tuning_open: Res<TuningOpen>,
     bindings: Res<Bindings>,
     player: Single<(Entity, &Player), With<LocalPlayer>>,
     bodies: Bodies,
@@ -172,14 +173,19 @@ pub fn hud(
             ui.label(text(events.last_text.clone()));
             if captured.0 {
                 ui.label(
-                    egui::RichText::new(format!("{}: tuning panel", bindings.label(Action::TuningPanel)))
-                        .size(12.0)
-                        .color(egui::Color32::GRAY),
+                    egui::RichText::new(format!(
+                        "{}: menu   {}: loadout   {}: tuning panel",
+                        bindings.label(Action::Menu),
+                        bindings.label(Action::Loadout),
+                        bindings.label(Action::TuningPanel)
+                    ))
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
                 );
             }
         });
 
-    if captured.0 {
+    if !tuning_open.0 {
         return Ok(());
     }
     egui::Window::new("Tuning")
@@ -764,7 +770,10 @@ pub fn vitals_hud(
     Ok(())
 }
 
-/// What's in each hand, ammo and reloads, and the stances, bottom right.
+/// What's in your hands, bottom right: a card for each hand (off hand
+/// left, main hand right, as you hold them), with the gun's mag and spare
+/// rounds, its reload, and whether it's braced; above them, the stances,
+/// the current one lit.
 pub fn loadout_hud(
     mut contexts: EguiContexts,
     bindings: Res<Bindings>,
@@ -777,52 +786,147 @@ pub fn loadout_hud(
     let loadout = &player.loadout;
     let screen = ctx.content_rect();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("loadout")));
-    let font = egui::FontId::monospace(13.0);
     let ink = egui::Color32::from_rgb(200, 225, 235);
     let dim = egui::Color32::from_rgb(110, 125, 135);
-    let name = |slot: Slot| match slot {
-        Slot::Empty => "—".to_string(),
-        Slot::Grapple => "Grapple".to_string(),
-        Slot::Gun(i) => loadout
-            .guns
-            .get(i as usize)
-            .filter(|g| g.carried)
-            .map_or("—".into(), |g| g.kind.stats().name.to_string()),
-    };
-    let mut y = screen.max.y - 24.0;
-    let x = screen.max.x - 16.0;
-    // Hands, off hand above main.
-    for (hand, action) in [(Hand::Main, Action::MainUse), (Hand::Off, Action::OffUse)] {
-        let slot = loadout.stance().slot(hand);
-        let state = loadout.hands[hand as usize];
-        let mut line = format!("[{}] {}", bindings.label(action), name(slot));
-        if let Some(gun) = loadout.gun(hand) {
-            line += &format!("  {:>2} | {}", gun.mag, gun.reserve);
-            if state.reloading.is_some() {
-                line += "  reloading";
-            } else if state.reload_queued {
-                line += "  queued";
-            }
-            if loadout.braced(hand) {
-                line += "  braced";
-            }
-        }
-        painter.text(egui::pos2(x, y), egui::Align2::RIGHT_BOTTOM, line, font.clone(), ink);
-        y -= 18.0;
-    }
-    // Stances.
-    y -= 6.0;
-    for (i, stance) in loadout.stances.iter().enumerate().rev() {
-        let current = i == loadout.current as usize;
-        let text = format!("{} {} + {}", i + 1, name(stance.main), name(stance.off));
-        let color = if current { ink } else { dim };
-        let text = if current && loadout.switching > 0.0 {
-            format!("{text}  …")
-        } else {
-            text
+    let amber = egui::Color32::from_rgb(255, 190, 70);
+    let red = egui::Color32::from_rgb(255, 95, 80);
+    let cyan = egui::Color32::from_rgb(120, 220, 255);
+    let mono = egui::FontId::monospace;
+
+    const CARD: egui::Vec2 = egui::vec2(200.0, 70.0);
+    const GAP: f32 = 8.0;
+    let right = screen.max.x - 16.0;
+    let bottom = screen.max.y - 16.0;
+    let stance = loadout.stance();
+    let switching = loadout.switching > 0.0;
+    for (column, (hand, action)) in [(Hand::Main, Action::MainUse), (Hand::Off, Action::OffUse)].into_iter().enumerate() {
+        let max = egui::pos2(right - column as f32 * (CARD.x + GAP), bottom);
+        let card = egui::Rect::from_min_max(max - CARD, max);
+        let slot = stance.slot(hand);
+        let gun = loadout.gun(hand);
+        let lit = !switching && slot != Slot::Empty;
+        painter.rect_filled(card, 4.0, egui::Color32::from_black_alpha(if lit { 190 } else { 120 }));
+        painter.rect_stroke(
+            card,
+            4.0,
+            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(if lit { 50 } else { 20 })),
+            egui::StrokeKind::Inside,
+        );
+        let inner = card.shrink2(egui::vec2(10.0, 7.0));
+        let side = match hand {
+            Hand::Main => "MAIN",
+            Hand::Off => "OFF",
         };
-        painter.text(egui::pos2(x, y), egui::Align2::RIGHT_BOTTOM, text, egui::FontId::monospace(11.0), color);
-        y -= 14.0;
+        painter.text(inner.left_top(), egui::Align2::LEFT_TOP, format!("{side} · {}", bindings.label(action)), mono(10.0), dim);
+        let name = match slot {
+            Slot::Gun(i) => loadout.guns.get(i as usize).map_or("—", |g| g.kind.stats().name),
+            Slot::Grapple => "Grapple",
+            Slot::Empty => "—",
+        };
+        let name_color = if gun.is_some() || slot == Slot::Grapple { ink } else { dim };
+        painter.text(inner.left_top() + egui::vec2(0.0, 14.0), egui::Align2::LEFT_TOP, name, mono(15.0), name_color);
+        let bar = egui::Rect::from_min_size(inner.left_bottom() - egui::vec2(0.0, 4.0), egui::vec2(inner.width(), 4.0));
+        match (slot, gun) {
+            (Slot::Gun(_), Some(gun)) => {
+                let stats = gun.kind.stats();
+                let state = loadout.hands[hand as usize];
+                let fill = gun.mag as f32 / stats.mag as f32;
+                let color = match fill {
+                    0.0 => red,
+                    f if f < 0.25 => amber,
+                    _ => ink,
+                };
+                painter.text(inner.right_top() + egui::vec2(0.0, 6.0), egui::Align2::RIGHT_TOP, gun.mag.to_string(), mono(26.0), color);
+                painter.text(
+                    inner.right_top() + egui::vec2(0.0, 36.0),
+                    egui::Align2::RIGHT_TOP,
+                    format!("/ {}", gun.reserve),
+                    mono(11.0),
+                    if gun.reserve == 0 { red } else { dim },
+                );
+                let mut tag = None;
+                painter.rect_filled(bar, 1.0, egui::Color32::from_white_alpha(25));
+                if let Some(left) = state.reloading {
+                    let done = 1.0 - (left / stats.reload).clamp(0.0, 1.0);
+                    painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * done, bar.height())), 1.0, cyan);
+                    tag = Some(("RELOADING", cyan));
+                } else {
+                    painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * fill, bar.height())), 1.0, color);
+                    if state.reload_queued {
+                        tag = Some(("QUEUED", cyan));
+                    } else if gun.mag == 0 && gun.reserve == 0 {
+                        tag = Some(("EMPTY", red));
+                    } else if loadout.braced(hand) {
+                        tag = Some(("BRACED", dim));
+                    }
+                }
+                if let Some((tag, color)) = tag {
+                    painter.text(inner.left_top() + egui::vec2(0.0, 34.0), egui::Align2::LEFT_TOP, tag, mono(10.0), color);
+                }
+            }
+            (Slot::Gun(_), None) => {
+                painter.text(inner.left_top() + egui::vec2(0.0, 34.0), egui::Align2::LEFT_TOP, "not carried", mono(10.0), amber);
+            }
+            (Slot::Grapple, _) => {
+                let text = match &player.grapple {
+                    Some(g) => format!("line out {:.0} m", g.length),
+                    None => "ready".into(),
+                };
+                painter.text(inner.left_top() + egui::vec2(0.0, 34.0), egui::Align2::LEFT_TOP, text, mono(10.0), dim);
+            }
+            (Slot::Empty, _) => {}
+        }
+    }
+
+    // Stances, a strip over the cards: "1 SMG+Grapple".
+    let short = |slot: Slot| match slot {
+        Slot::Empty => "—",
+        Slot::Grapple => "GRP",
+        Slot::Gun(i) => match loadout.guns.get(i as usize) {
+            Some(g) if g.carried => match g.kind {
+                crate::sim::weapons::GunKind::Smg => "SMG",
+                crate::sim::weapons::GunKind::Rifle => "RFL",
+                _ => "GUN",
+            },
+            _ => "—",
+        },
+    };
+    let strip_width = 2.0 * CARD.x + GAP;
+    let chip = egui::vec2((strip_width - 3.0 * 4.0) / 4.0, 20.0);
+    let top = bottom - CARD.y - 6.0 - chip.y;
+    for (i, s) in loadout.stances.iter().enumerate() {
+        let min = egui::pos2(right - strip_width + i as f32 * (chip.x + 4.0), top);
+        let rect = egui::Rect::from_min_size(min, chip);
+        let current = i == loadout.current as usize;
+        painter.rect_filled(rect, 3.0, egui::Color32::from_black_alpha(if current { 160 } else { 80 }));
+        if current {
+            let underline = egui::Rect::from_min_size(rect.left_bottom() - egui::vec2(0.0, 2.0), egui::vec2(chip.x, 2.0));
+            let done = if switching { 1.0 - loadout.switching / crate::sim::weapons::SWITCH_SECONDS } else { 1.0 };
+            painter.rect_filled(
+                egui::Rect::from_min_size(underline.min, egui::vec2(chip.x * done, 2.0)),
+                0.0,
+                ink,
+            );
+        }
+        // Off hand first, as the cards are.
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("{} {}·{}", i + 1, short(s.off), short(s.main)),
+            mono(11.0),
+            if current { ink } else { dim },
+        );
+    }
+
+    // No guns at all: say where they are.
+    if !loadout.guns.iter().any(|g| g.carried) {
+        painter.text(
+            egui::pos2(right, top - 6.0),
+            egui::Align2::RIGHT_BOTTOM,
+            format!("Unarmed: guns are in the weapons locker ({}: loadout)", bindings.label(Action::Loadout)),
+            mono(12.0),
+            amber,
+        );
     }
     Ok(())
 }

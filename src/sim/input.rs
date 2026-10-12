@@ -14,6 +14,8 @@ use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::weapons::{STANCES, Stance};
+
 /// A button press counter. Wraps; only differences matter.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 pub struct Press(u8);
@@ -72,6 +74,9 @@ pub struct PlayerInput {
     /// The stance last asked for (0-based); it's taken up when
     /// `presses.stance` counts a new press.
     pub stance: u8,
+    /// What the player wants each stance to hold, if they say (robots
+    /// don't: theirs are set when they're made).
+    pub stances: Option<[Stance; STANCES]>,
     pub presses: Presses,
 }
 
@@ -137,6 +142,7 @@ pub struct TickInput {
     pub reload_off: bool,
     pub stance: u8,
     pub stance_pressed: bool,
+    pub stances: Option<[Stance; STANCES]>,
     pub interact: bool,
     pub set_reference: bool,
 }
@@ -188,6 +194,7 @@ impl InputCursor {
             reload_off: p.reload_off.since(seen.reload_off),
             stance: input.stance,
             stance_pressed: p.stance.since(seen.stance),
+            stances: input.stances,
             interact: p.interact.since(seen.interact),
             set_reference: p.set_reference.since(seen.set_reference),
         };

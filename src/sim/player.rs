@@ -219,6 +219,7 @@ impl Player {
     /// Puts the player back aboard `ship`, on deck spot `slot`, as at the
     /// start of a game: boots on, nothing grappled.
     pub fn respawn(&mut self, ship: Entity, slot: u32) {
+        let stances = self.loadout.stances;
         self.mode = deck_mode(ship, slot);
         self.boots_on = true;
         self.grapple = None;
@@ -227,6 +228,8 @@ impl Player {
         // The base kit: guns are in the weapons locker (and whatever was
         // carried before was left where it was dropped).
         self.loadout = Loadout::base();
+        // Still in the stances they chose (so taking them up isn't a switch).
+        self.loadout.stances = stances;
         self.emit(PlayerEvent::Respawned);
     }
 
