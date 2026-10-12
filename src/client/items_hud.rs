@@ -13,7 +13,7 @@ use super::LocalPlayer;
 use super::bindings::{Action, Bindings};
 use super::camera::PlayerCamera;
 use crate::sim::bodies::Bodies;
-use crate::sim::items::{Item, Rarity, Weapon};
+use crate::sim::items::{Item, Rarity, Taken, Weapon};
 use crate::sim::pickups::Pickup;
 use crate::sim::player::{CONTROL_REACH, Player, ray_box};
 use crate::sim::ship::Control;
@@ -140,7 +140,7 @@ pub fn pickup_card(
     spatial: SpatialQuery,
     bodies: Bodies,
     controls: Query<(&Control, &Transform, &ChildOf)>,
-    pickups: Query<(&Pickup, &Transform)>,
+    pickups: Query<(&Pickup, &Transform, &Visibility)>,
     menu: Res<super::menu::Menu>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -162,7 +162,8 @@ pub fn pickup_card(
         .fold(f32::MAX, f32::min);
     let Some((_, pickup)) = pickups
         .iter()
-        .filter_map(|(pickup, transform)| {
+        .filter(|(.., visibility)| **visibility != Visibility::Hidden)
+        .filter_map(|(pickup, transform, _)| {
             let turn = transform.rotation.inverse();
             let t = ray_box(turn * (eye - transform.translation), turn * *dir, pickup.half())?;
             (t <= CONTROL_REACH && t <= blocked + 0.25 && t < button).then_some((t, pickup))
@@ -174,7 +175,7 @@ pub fn pickup_card(
 
     let center = ctx.content_rect().center();
     let mut room = player.loadout.inventory;
-    let fits: Vec<bool> = pickup.items.iter().map(|item| room.take(*item)).collect();
+    let fits: Vec<bool> = pickup.items.iter().map(|item| room.take_what_fits(*item) != Taken::Nothing).collect();
     egui::Area::new(egui::Id::new("pickup card"))
         .fixed_pos(center + egui::vec2(24.0, 22.0))
         .order(egui::Order::Foreground)

@@ -749,11 +749,12 @@ impl Weapon {
         // Rarer guns come stock less often.
         let plain = 40 - 8 * self.rarity.tier();
         let part = |i: u32, options: &[PartVariant]| -> PartVariant {
-            let weighted: Vec<(PartVariant, u32)> = options
-                .iter()
-                .map(|&p| (p, if p.standard() { plain } else { 20 * maker.favours(p) }))
-                .collect();
-            pick(draw(s, salt::PARTS + i), &weighted)
+            // On the stack: stats are derived every tick, rollbacks too.
+            let mut weighted = [(options[0], 0); 4];
+            for (w, &p) in weighted.iter_mut().zip(options) {
+                *w = (p, if p.standard() { plain } else { 20 * maker.favours(p) });
+            }
+            pick(draw(s, salt::PARTS + i), &weighted[..options.len()])
         };
         use PartVariant as P;
         let parts = Parts {
@@ -904,6 +905,15 @@ impl Item {
     }
 }
 
+/// How much of an item was taken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Taken {
+    All,
+    /// Some of a box of ammo: `left` rounds stay behind.
+    Part { left: u16 },
+    Nothing,
+}
+
 /// Weapon slots: what stances point at.
 pub const WEAPON_SLOTS: usize = 3;
 /// Pack slots, for spares and small cargo.
@@ -1023,17 +1033,25 @@ impl Inventory {
             .find(|p| Self::fits(*p, item) && self.get(*p).is_none())
     }
 
-    /// Takes `item` in: a gun into the first free weapon slot, else the
-    /// pack; ammo into its pool (unless the pool is full; what's over the
-    /// pool's cap is lost); cargo into the hands or the pack. Whether it
-    /// was taken.
+    /// Puts up to `rounds` of `kind` in its pool, as many as fit under its
+    /// cap. How many went in.
+    pub fn add_ammo(&mut self, kind: AmmoKind, rounds: u16) -> u16 {
+        let pool = self.ammo_mut(kind);
+        let fits = kind.cap().saturating_sub(*pool).min(rounds);
+        *pool += fits;
+        fits
+    }
+
+    /// Takes `item` in whole: a gun into the first free weapon slot, else
+    /// the pack; ammo into its pool, if it all fits; cargo into the hands or
+    /// the pack. Whether it was taken. (Picking up takes part of a box of
+    /// ammo, too: see `pickups::take_from`.)
     pub fn take(&mut self, item: Item) -> bool {
         if let Item::Ammo { kind, rounds } = item {
-            let pool = self.ammo_mut(kind);
-            if *pool >= kind.cap() {
+            if kind.cap().saturating_sub(self.ammo(kind)) < rounds {
                 return false;
             }
-            *pool = pool.saturating_add(rounds).min(kind.cap());
+            self.add_ammo(kind, rounds);
             return true;
         }
         match self.free_place(&item) {
@@ -1042,6 +1060,20 @@ impl Inventory {
                 true
             }
             None => false,
+        }
+    }
+
+    /// Takes what fits of `item`: all of it (as [`Self::take`]), or, of a
+    /// box of ammo, as many rounds as the pool has room for.
+    pub fn take_what_fits(&mut self, item: Item) -> Taken {
+        match item {
+            Item::Ammo { kind, rounds } => match self.add_ammo(kind, rounds) {
+                0 => Taken::Nothing,
+                n if n == rounds => Taken::All,
+                n => Taken::Part { left: rounds - n },
+            },
+            item if self.take(item) => Taken::All,
+            _ => Taken::Nothing,
         }
     }
 
@@ -1132,10 +1164,12 @@ mod tests {
     #[test]
     fn a_pool_takes_ammo_until_its_cap() {
         let mut inv = Inventory::default();
-        assert!(inv.take(Item::Ammo { kind: AmmoKind::Heavy, rounds: 150 }));
-        assert!(inv.take(Item::Ammo { kind: AmmoKind::Heavy, rounds: 150 }));
+        let heavy = |rounds| Item::Ammo { kind: AmmoKind::Heavy, rounds };
+        assert!(inv.take(heavy(150)));
+        assert!(!inv.take(heavy(150)), "took more than fits, whole");
+        assert_eq!(inv.take_what_fits(heavy(150)), Taken::Part { left: 100 });
         assert_eq!(inv.ammo(AmmoKind::Heavy), AmmoKind::Heavy.cap());
-        assert!(!inv.take(Item::Ammo { kind: AmmoKind::Heavy, rounds: 1 }), "full pool");
+        assert_eq!(inv.take_what_fits(heavy(1)), Taken::Nothing, "full pool");
     }
 
     const ROLLED: [Rarity; 4] = [Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Exotic];

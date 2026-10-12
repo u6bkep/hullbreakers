@@ -53,7 +53,7 @@ pub struct Presses {
     pub set_reference: Press,
     /// Drop what's in hand.
     pub drop: Press,
-    /// Do [`PlayerInput::item_op`] to the inventory.
+    /// Inventory changes asked for (see [`PlayerInput::item_ops`]).
     pub item_op: Press,
 }
 
@@ -82,9 +82,11 @@ pub struct PlayerInput {
     /// What the player wants each stance to hold, if they say (robots
     /// don't: theirs are set when they're made).
     pub stances: Option<[Stance; STANCES]>,
-    /// The last thing asked of the inventory (from the inventory screen);
-    /// it's done when `presses.item_op` counts a new press.
-    pub item_op: ItemOp,
+    /// The last few things asked of the inventory (from the inventory
+    /// screen): change number `n` (as `presses.item_op` counts them) is at
+    /// `n % ITEM_OPS`. Keeping several means a run of lost inputs can skip
+    /// that many changes without losing one. See [`PlayerInput::ask`].
+    pub item_ops: [ItemOp; ITEM_OPS],
     pub presses: Presses,
 }
 
@@ -112,6 +114,12 @@ impl MapEntities for PlayerInput {
 }
 
 impl PlayerInput {
+    /// Asks for an inventory change.
+    pub fn ask(&mut self, op: ItemOp) {
+        self.presses.item_op.press();
+        self.item_ops[self.presses.item_op.0 as usize % ITEM_OPS] = op;
+    }
+
     /// Adds mouse look (radians), keeping the total wrapped.
     pub fn add_look(&mut self, delta: Vec2) {
         self.look += delta;
@@ -154,8 +162,12 @@ pub struct TickInput {
     pub interact: bool,
     pub set_reference: bool,
     pub drop: bool,
-    pub item_op: Option<ItemOp>,
+    /// Inventory changes asked for since the last tick, oldest first.
+    pub item_ops: [Option<ItemOp>; ITEM_OPS],
 }
+
+/// How many inventory changes the input carries.
+pub const ITEM_OPS: usize = 4;
 
 impl TickInput {
     pub fn hand(&self, hand: super::weapons::Hand) -> HandInput {
@@ -214,7 +226,16 @@ impl InputCursor {
             interact: p.interact.since(seen.interact),
             set_reference: p.set_reference.since(seen.set_reference),
             drop: p.drop.since(seen.drop),
-            item_op: p.item_op.since(seen.item_op).then_some(input.item_op),
+            item_ops: {
+                // The changes since the cursor, as many as the input keeps.
+                let new = (p.item_op.0.wrapping_sub(seen.item_op.0) as usize).min(ITEM_OPS);
+                let mut ops = [None; ITEM_OPS];
+                for (k, op) in ops.iter_mut().take(new).enumerate() {
+                    let number = p.item_op.0.wrapping_sub((new - 1 - k) as u8);
+                    *op = Some(input.item_ops[number as usize % ITEM_OPS]);
+                }
+                ops
+            },
         };
         self.look = input.look;
         self.presses = p;
@@ -280,5 +301,26 @@ mod tests {
         let mut input = PlayerInput::default();
         input.add_look(Vec2::new(4.0, 0.0));
         assert!((cursor.advance(&input).look.x - 4.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn inventory_changes_skipped_over_are_caught_up_in_order() {
+        use crate::sim::items::{ItemOp, Place};
+        let mut cursor = InputCursor::default();
+        let mut input = PlayerInput::default();
+        let ops = [ItemOp::Drop(Place::Pack(0)), ItemOp::Drop(Place::Pack(1)), ItemOp::Drop(Place::Pack(2))];
+        // Three asked for over ticks the simulation never saw.
+        for op in ops {
+            input.ask(op);
+        }
+        let tick = cursor.advance(&input);
+        assert_eq!(tick.item_ops, [Some(ops[0]), Some(ops[1]), Some(ops[2]), None]);
+        assert!(cursor.item_op_done(&input));
+        assert_eq!(cursor.advance(&input).item_ops, [None; ITEM_OPS], "done twice");
+        // Past wrapping the counter, too.
+        for _ in 0..300 {
+            input.ask(ops[0]);
+            assert_eq!(cursor.advance(&input).item_ops[0], Some(ops[0]));
+        }
     }
 }

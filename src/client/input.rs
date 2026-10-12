@@ -114,8 +114,7 @@ pub fn read_input(
     match player.as_deref() {
         Some((_, player)) if player.input.item_op_done(cmd) => {
             if let Some(op) = ops.0.pop_front() {
-                cmd.item_op = op;
-                cmd.presses.item_op.press();
+                cmd.ask(op);
             }
         }
         Some(_) => {}

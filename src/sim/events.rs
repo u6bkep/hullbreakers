@@ -80,10 +80,12 @@ pub enum PlayerEvent {
     /// Ran out of health (a respawn follows).
     Died,
     /// Took from a pickup: the items whose bits are set in `taken` (by
-    /// their index in it).
+    /// their index in it), and some of up to two boxes of ammo (their
+    /// index, and the rounds left in them).
     PickedUp {
         pickup: Entity,
         taken: u32,
+        partly: [Option<(u8, u16)>; 2],
     },
     /// Couldn't take anything from a pickup: no room for it.
     InventoryFull,

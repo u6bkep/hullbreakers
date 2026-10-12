@@ -110,8 +110,7 @@ fn interact(app: &mut App) {
 
 fn ask(app: &mut App, op: ItemOp) {
     input(app, |i| {
-        i.item_op = op;
-        i.presses.item_op.press();
+        i.ask(op);
     });
     ticks(app, 2);
 }
@@ -323,6 +322,40 @@ fn the_carrier_has_loot_crates_aboard() {
     app.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
     ticks(&mut app, 3);
     assert_eq!(pickups(&mut app).into_iter().filter(|(_, p)| p.kind == PickupKind::Crate).count(), 5);
+}
+
+#[test]
+fn a_nearly_full_pool_takes_part_of_a_box() {
+    let mut app = app();
+    let light = AmmoKind::Light;
+    set_player(&mut app, |p| *p.loadout.inventory.ammo_mut(light) = light.cap() - 10);
+    let at = DECK + Vec3::new(0.0, 0.2, -1.5);
+    let case = lay_pickup(&mut app, at, vec![Item::Ammo { kind: light, rounds: 60 }]);
+    stand_looking_at(&mut app, DECK, at);
+    interact(&mut app);
+    assert_eq!(player(&mut app).loadout.inventory.ammo(light), light.cap());
+    let left = app.world().get::<Pickup>(case).expect("the box went").items.clone();
+    assert_eq!(left, vec![Item::Ammo { kind: light, rounds: 50 }], "rounds lost or made");
+}
+
+#[test]
+fn what_lies_on_a_ship_that_goes_is_left_adrift() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
+    ticks(&mut app, 3);
+    let carrier = {
+        let world = app.world_mut();
+        world.query::<(Entity, &ShipHull)>().iter(world).find(|(_, h)| h.0 == "carrier").map(|(e, _)| e).unwrap()
+    };
+    let at = app.world().get::<Position>(carrier).unwrap().0;
+    app.world_mut().entity_mut(carrier).despawn();
+    ticks(&mut app, 2);
+    let crates: Vec<Pickup> = pickups(&mut app).into_iter().map(|(_, p)| p).filter(|p| p.kind == PickupKind::Crate).collect();
+    assert_eq!(crates.len(), 5);
+    for c in &crates {
+        assert_eq!(c.body, None, "still on a ship that's gone");
+        assert!(c.at.distance(at) < 40.0, "{} far from the carrier at {at}", c.at);
+    }
 }
 
 #[test]

@@ -150,7 +150,10 @@ pub fn draw_pickups(
     time: Res<Time>,
     tick: Res<crate::sim::SimTick>,
     bodies: Query<&Transform, (Without<Pickup>, Without<Showcase>)>,
-    mut pickups: Query<(Entity, &Pickup, Option<&mut Transform>, Option<&PickupShown>, Option<&Children>), Without<Showcase>>,
+    mut pickups: Query<
+        (Entity, &Pickup, Option<&mut Transform>, Option<&mut Visibility>, Option<&PickupShown>, Option<&Children>),
+        Without<Showcase>,
+    >,
     parts: Query<(), With<PickupPart>>,
     mut showcases: Query<&mut Transform, With<Showcase>>,
 ) {
@@ -158,9 +161,20 @@ pub fn draw_pickups(
     for mut t in &mut showcases {
         t.rotation = spin;
     }
-    for (entity, pickup, transform, shown, children) in &mut pickups {
+    for (entity, pickup, transform, visibility, shown, children) in &mut pickups {
         let frame = pickup.body.and_then(|b| bodies.get(b).ok()).map(|t| (t.translation, t.rotation));
-        let Some((at, turn)) = pickup.pose(frame, tick.0, 0.0) else { continue };
+        // Its body isn't here (yet, or any more): not drawn, not offered.
+        let Some((at, turn)) = pickup.pose(frame, tick.0, 0.0) else {
+            if let Some(mut visibility) = visibility {
+                *visibility = Visibility::Hidden;
+            }
+            continue;
+        };
+        if let Some(mut visibility) = visibility
+            && *visibility == Visibility::Hidden
+        {
+            *visibility = Visibility::Inherited;
+        }
         let pose = Transform::from_translation(at).with_rotation(turn);
         let crate_kind = pickup.kind == PickupKind::Crate;
         match transform {

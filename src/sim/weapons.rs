@@ -184,6 +184,8 @@ pub struct HandState {
     pub reloading: Option<f32>,
     /// Waiting for the other hand to finish reloading before starting.
     pub reload_queued: bool,
+    /// Shots this hand has fired (for perks that count them).
+    pub fired: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -243,6 +245,9 @@ impl Loadout {
                 self.inventory.take(Item::Weapon(issue));
             }
         }
+        // A gun just issued into a hand comes up; topping up mags is no
+        // reason to lower the guns already there.
+        self.hands_changed(before);
         for kind in AmmoKind::ALL {
             let pool = self.inventory.ammo_mut(kind);
             *pool = (*pool).max(kind.cap());
@@ -250,7 +255,6 @@ impl Loadout {
         for weapon in self.inventory.all_weapons_mut() {
             weapon.mag = weapon.stats().mag;
         }
-        self.hands_changed(before);
     }
 
     /// What's in hand now (guns as they are, and whether cargo fills both
@@ -259,16 +263,12 @@ impl Loadout {
         (Hand::BOTH.map(|h| self.weapon(h).copied()), self.inventory.carrying.is_some())
     }
 
-    /// After the inventory changed: if what's in hand isn't the same gun as
-    /// `before` was, the hands bring up what's there now (a switch).
+    /// After the inventory changed: if what's in hand isn't as `before`
+    /// had it, the hands bring up what's there now (a switch). That counts
+    /// a gun just like the old one but with another mag: swapping an empty
+    /// gun for a full twin is no faster than a reload.
     pub fn hands_changed(&mut self, before: ([Option<Weapon>; 2], bool)) {
-        let now = self.held();
-        let same = |a: Option<Weapon>, b: Option<Weapon>| match (a, b) {
-            (Some(a), Some(b)) => a.same_gun(&b),
-            (None, None) => true,
-            _ => false,
-        };
-        if before.1 != now.1 || !same(before.0[0], now.0[0]) || !same(before.0[1], now.0[1]) {
+        if self.held() != before {
             self.begin_switch();
         }
     }
@@ -402,6 +402,9 @@ impl Loadout {
 
     fn start_reload(&mut self, hand: Hand) -> bool {
         if !self.wants_reload(hand) {
+            // Nothing to load (the other hand took the last of the pool):
+            // it isn't waiting for anything.
+            self.hands[hand.index()].reload_queued = false;
             return false;
         }
         let reload = self.weapon(hand).expect("a gun").stats().reload;
@@ -537,10 +540,13 @@ impl Loadout {
                             break;
                         }
                         let last = mag == 1;
-                        let free = stats.has(Perk::Recycler) && self.shots % 4 == 3;
+                        // Every fourth shot of this hand's, but never the
+                        // last round (which stays the last word).
+                        let free = stats.has(Perk::Recycler) && self.hands[h].fired % 4 == 3 && !last;
                         if !free {
                             self.gun_mut(i).mag -= 1;
                         }
+                        self.hands[h].fired = self.hands[h].fired.wrapping_add(1);
                         self.hands[h].cooldown += 1.0 / stats.rate;
                         let cone = if self.braced(hand) {
                             stats.spread_braced
@@ -811,11 +817,65 @@ mod tests {
         l.inventory.weapons[0] = Some(Weapon::new(GunKind::Smg, 5, Rarity::Common));
         l.hands_changed(before);
         assert!(l.switching > 0.0, "swapped the gun in hand without a switch");
-        // Only the mag changing isn't a new gun.
+        // A full twin of the empty gun in hand is a switch too, not a free
+        // reload.
         l.switching = 0.0;
+        l.inventory.weapons[0] = Some(Weapon { mag: 0, ..Weapon::issue(GunKind::Smg) });
         let before = l.held();
-        l.inventory.weapons[0].as_mut().unwrap().mag = 2;
+        l.inventory.weapons[0] = Some(Weapon::issue(GunKind::Smg));
         l.hands_changed(before);
+        assert!(l.switching > 0.0);
+        // The locker topping up the mag in hand isn't.
+        l.switching = 0.0;
+        l.inventory.weapons[0].as_mut().unwrap().mag = 2;
+        l.restock();
         assert_eq!(l.switching, 0.0);
+        assert_eq!(l.inventory.weapons[0].unwrap().mag, 40);
+    }
+
+    #[test]
+    fn a_hand_queued_for_a_reload_the_other_emptied_the_pool_for_gives_up() {
+        let mut l = Loadout::default();
+        l.stances[0] = Stance { main: Slot::Gun(0), off: Slot::Gun(2) };
+        l.inventory.weapons[2] = Some(Weapon { mag: 0, ..Weapon::issue(GunKind::Smg) });
+        l.inventory.weapons[0].as_mut().unwrap().mag = 0;
+        *l.inventory.ammo_mut(AmmoKind::Light) = 30;
+        let mut cmd = TickInput::default();
+        cmd.reload = true;
+        l.tick(&cmd, DT);
+        assert!(l.hands[1].reload_queued);
+        cmd.reload = false;
+        for _ in 0..120 {
+            l.tick(&cmd, DT);
+        }
+        assert_eq!(mag(&l, 0), 30);
+        assert!(!l.hands[1].reload_queued && l.hands[1].reloading.is_none(), "{:?}", l.hands[1]);
+        // Ammo picked up: the dry off hand reloads itself when fired.
+        *l.inventory.ammo_mut(AmmoKind::Light) = 100;
+        cmd.off.held = true;
+        let shots: usize = (0..150).map(|_| l.tick(&cmd, DT).shots.iter().filter(|s| s.hand == Hand::Off).count()).sum();
+        assert!(shots > 0, "the off hand never came back");
+    }
+
+    #[test]
+    fn a_recycler_saves_every_fourth_shot_of_its_own_hand() {
+        let mut l = Loadout::default();
+        let seed = (0..10_000)
+            .find(|s| {
+                let stats = Weapon::new(GunKind::Smg, *s, Rarity::Rare).stats();
+                stats.has(Perk::Recycler) && stats.mag >= 40
+            })
+            .expect("no recycler SMG");
+        let gun = Weapon::new(GunKind::Smg, seed, Rarity::Rare);
+        l.inventory.weapons[0] = Some(gun);
+        // Dual-wielded with another gun firing alongside.
+        l.stances[0] = Stance { main: Slot::Gun(0), off: Slot::Gun(1) };
+        let mut cmd = holding(true);
+        cmd.off.held = true;
+        let mut fired = 0;
+        while fired < 40 {
+            fired += l.tick(&cmd, DT).shots.iter().filter(|s| s.hand == Hand::Main).count();
+        }
+        assert_eq!(gun.mag - mag(&l, 0), fired as u16 - (fired as u16) / 4, "fired {fired}");
     }
 }

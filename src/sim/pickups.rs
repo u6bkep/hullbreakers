@@ -13,6 +13,7 @@
 //! out of the inventory and records a [`PlayerEvent::Dropped`]; the
 //! authority leaves it as a pickup at their feet.
 
+use avian3d::prelude::{AngularVelocity, LinearVelocity, Position, RigidBody, Rotation};
 use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -22,7 +23,7 @@ use super::bots::{BodyTuning, Robot};
 use super::design::ShipDesign;
 use super::events::PlayerEvent;
 use super::input::TickInput;
-use super::items::{Item, ItemOp, Place, Rarity, Weapon, crate_loot, draw, robot_loot};
+use super::items::{Item, ItemOp, Place, Rarity, Taken, Weapon, crate_loot, draw, robot_loot};
 use super::player::{Mode, Player};
 use super::vitals::Vitals;
 use super::weapons::Hand;
@@ -163,20 +164,34 @@ pub struct PickupPoint {
     pub items: Vec<Item>,
 }
 
-/// Player simulation: takes what fits from a pickup, skipping the items in
-/// `claimed` (taken by someone else this tick). Returns what it took (bits
-/// by index).
+/// Player simulation: takes what fits from a pickup (of a box of ammo, as
+/// many rounds as fit), skipping the items in `claimed` (taken from by
+/// someone else this tick). Returns the items it took from (bits by index).
 pub fn take_from(player: &mut Player, pickup: &PickupPoint, claimed: u32) -> u32 {
     let before = player.loadout.held();
     let mut taken = 0u32;
+    let mut partly = [None; 2];
+    let mut touched = 0u32;
     for (i, item) in pickup.items.iter().enumerate().take(32) {
         let bit = 1 << i;
-        if claimed & bit == 0 && player.loadout.inventory.take(*item) {
-            taken |= bit;
+        if claimed & bit != 0 {
+            continue;
         }
+        match player.loadout.inventory.take_what_fits(*item) {
+            Taken::All => taken |= bit,
+            // Once a pool is full, no more of its kind fits: one part-taken
+            // box per kind at most.
+            Taken::Part { left } => {
+                if let Some(free) = partly.iter_mut().find(|p| p.is_none()) {
+                    *free = Some((i as u8, left));
+                }
+            }
+            Taken::Nothing => continue,
+        }
+        touched |= bit;
     }
     player.loadout.hands_changed(before);
-    if taken == 0 {
+    if touched == 0 {
         if pickup.items.iter().enumerate().any(|(i, _)| claimed & (1 << i) == 0) {
             player.events.push(PlayerEvent::InventoryFull);
         }
@@ -184,9 +199,10 @@ pub fn take_from(player: &mut Player, pickup: &PickupPoint, claimed: u32) -> u32
         player.events.push(PlayerEvent::PickedUp {
             pickup: pickup.entity,
             taken,
+            partly,
         });
     }
-    taken
+    touched
 }
 
 /// Player simulation: dropping what's in hand, and what the inventory
@@ -208,18 +224,20 @@ pub fn handle_inventory(player: &mut Player, cmd: &TickInput) {
         dropped.extend(place.and_then(|p| player.loadout.inventory.remove(p)));
     }
     let inventory = &mut player.loadout.inventory;
-    match cmd.item_op {
-        None | Some(ItemOp::None) => {}
-        Some(ItemOp::Move { from, to }) => {
-            inventory.move_item(from, to);
-        }
-        Some(ItemOp::Drop(place)) => dropped.extend(inventory.remove(place)),
-        Some(ItemOp::DropAmmo(kind)) => {
-            let pool = inventory.ammo_mut(kind);
-            let rounds = (*pool).min(kind.box_rounds());
-            if rounds > 0 {
-                *pool -= rounds;
-                dropped.push(Item::Ammo { kind, rounds });
+    for op in cmd.item_ops.into_iter().flatten() {
+        match op {
+            ItemOp::None => {}
+            ItemOp::Move { from, to } => {
+                inventory.move_item(from, to);
+            }
+            ItemOp::Drop(place) => dropped.extend(inventory.remove(place)),
+            ItemOp::DropAmmo(kind) => {
+                let pool = inventory.ammo_mut(kind);
+                let rounds = (*pool).min(kind.box_rounds());
+                if rounds > 0 {
+                    *pool -= rounds;
+                    dropped.push(Item::Ammo { kind, rounds });
+                }
             }
         }
     }
@@ -237,21 +255,32 @@ pub fn remove_taken(
     mut pickups: Query<&mut Pickup>,
     mut commands: Commands,
 ) {
-    let mut taken: Vec<(Entity, u32)> = Vec::new();
+    let mut taken: Vec<(Entity, u32, Vec<(u8, u16)>)> = Vec::new();
     for player in &players {
         for (at, event) in player.events.iter() {
-            if let PlayerEvent::PickedUp { pickup, taken: bits } = event
+            if let PlayerEvent::PickedUp { pickup, taken: bits, partly } = event
                 && at == tick.0
             {
-                match taken.iter_mut().find(|(e, _)| *e == pickup) {
-                    Some((_, all)) => *all |= bits,
-                    None => taken.push((pickup, bits)),
-                }
+                let index = match taken.iter().position(|(e, ..)| *e == pickup) {
+                    Some(index) => index,
+                    None => {
+                        taken.push((pickup, 0, Vec::new()));
+                        taken.len() - 1
+                    }
+                };
+                taken[index].1 |= bits;
+                taken[index].2.extend(partly.into_iter().flatten());
             }
         }
     }
-    for (entity, bits) in taken {
+    for (entity, bits, partly) in taken {
         let Ok(mut pickup) = pickups.get_mut(entity) else { continue };
+        // Boxes of ammo part taken keep what's left in them.
+        for (index, left) in partly {
+            if let Some(Item::Ammo { rounds, .. }) = pickup.items.get_mut(index as usize) {
+                *rounds = left;
+            }
+        }
         let mut i = 0;
         pickup.items.retain(|_| {
             let keep = i >= 32 || bits & (1 << i) == 0;
@@ -355,5 +384,27 @@ pub fn debug_spawn_loot(
                 kind: PickupKind::Crate,
             },
         ));
+    }
+}
+
+/// Authority: a body going away (a wrecked ship, a recycled rock) leaves
+/// what was lying on it adrift, where it was and moving as it was.
+pub fn set_adrift(
+    remove: On<Remove, RigidBody>,
+    tick: Res<SimTick>,
+    bodies: Query<(&Position, &Rotation, Option<&LinearVelocity>, Option<&AngularVelocity>)>,
+    mut pickups: Query<&mut Pickup>,
+) {
+    let Ok((position, rotation, linear, angular)) = bodies.get(remove.entity) else { return };
+    for mut pickup in &mut pickups {
+        if pickup.body != Some(remove.entity) {
+            continue;
+        }
+        let at = position.0 + rotation.0 * pickup.at;
+        let spin = angular.map_or(Vec3::ZERO, |w| w.0).cross(at - position.0);
+        pickup.velocity = linear.map_or(Vec3::ZERO, |v| v.0) + spin;
+        pickup.body = None;
+        pickup.at = at;
+        pickup.since = tick.0;
     }
 }

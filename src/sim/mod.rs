@@ -162,6 +162,7 @@ impl Plugin for SimPlugin {
         app.add_message::<vitals::Damage>()
             .init_resource::<shots::Shots>()
             .init_resource::<asteroids::FieldInterest>()
+            .add_observer(pickups::set_adrift)
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .add_systems(
                 FixedUpdate,
