@@ -157,6 +157,14 @@ fn main() {
                     }
                     None => eprintln!("hl-input: unknown button {name}"),
                 },
+                // Scroll: positive is down (toward you), in wheel steps.
+                ["wheel", steps] => {
+                    use wayland_client::protocol::wl_pointer::{Axis, AxisSource};
+                    let steps: f64 = steps.parse().unwrap_or(0.0);
+                    pointer.axis_source(AxisSource::Wheel);
+                    pointer.axis_discrete(now(), Axis::VerticalScroll, steps * 15.0, steps as i32);
+                    pointer.frame();
+                }
                 ["sleep", ms] => std::thread::sleep(Duration::from_millis(ms.parse().unwrap_or(0))),
                 ["quit"] => return,
                 [] => {}

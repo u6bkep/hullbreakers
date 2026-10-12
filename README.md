@@ -342,12 +342,24 @@ go to the window under the pointer); the client's title is
 `Hullbreakers — HOST:PORT`.
 
 `tools/coop-smoke <dir> [lag ms] [port]` is a live co-op smoke test: a host
-and a client with simulated lag in one harness. The host
-(`HULLBREAKERS_COOP_TOUR=<dir>`, `src/client/coop_tour.rs`) puts the client
-through every scenario's set pieces (the locker, a death and the kit, a
-crate, a fight, the shield console, the derelict's devices, a gate, a tow,
-the gallery's affixed robots); the script presses, fires and reels as the
-client, screenshots its view into `<dir>`, and copies both logs there.
+and a client with simulated lag in one harness, the client starting from a
+seeded profile. The host (`HULLBREAKERS_COOP_TOUR=<dir>`,
+`src/client/coop_tour.rs`) puts the client (and itself, where a step needs
+it) through every scenario's set pieces: the armory (store and take) and
+the workbench (tune, scrap, refit, repaint) by clicking their buttons, a
+scenario switch with kit, damage control (faults forced on, a junction and
+a breaker reset, the board), a death and the kit (the host tries it first:
+it isn't theirs), a crate, a fight, a hull crawler, the shield console and
+the mission wall (the pay and a rank-up on the debrief), the escort (key,
+gangway, the cell carried, set down, carried home), the derelict's
+devices, a gate, a tow, and the gallery's affixed robots. The script
+presses, fires, reels and clicks as the client, screenshots its view (and
+the host's, where it matters) into `<dir>`, and copies both logs and the
+client's profile file there; the host's log has the client's profile and
+damage control's state as the host holds them. `COOP_ONLY=a,b` runs only
+the named steps. `tools/hl wheel <steps>` scrolls under the pointer;
+`swaymsg 'seat * cursor set X Y'` puts the pointer anywhere (for clicking
+menus).
 
 ## Controls
 

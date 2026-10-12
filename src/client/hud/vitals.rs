@@ -48,7 +48,7 @@ pub struct Threats {
 pub fn track_threats(
     mut memory: ResMut<HudMemory>,
     mut threats: Local<Threats>,
-    me: Option<Single<(&Player, Option<&HurtLog>), With<LocalPlayer>>>,
+    me: Option<Single<(Entity, &Player, Option<&HurtLog>), With<LocalPlayer>>>,
     camera: CameraView,
     cases: Query<(Entity, &Pickup, &Transform)>,
 ) {
@@ -60,7 +60,7 @@ pub fn track_threats(
     let Some(me) = me else {
         return;
     };
-    let (player, hurts) = *me;
+    let (me_entity, player, hurts) = *me;
 
     let log_now = player.events.tick();
     threats.deaths.retain(|t| log_now.wrapping_sub(*t) <= LOG_TICKS);
@@ -103,7 +103,9 @@ pub fn track_threats(
     threats.arcs.retain(|(_, at)| now - at < ARC_SECONDS);
     memory.arcs.clone_from(&threats.arcs);
 
-    // Your kit is in the case left on the tick you died, where you fell.
+    // Your kit is the case only you may take: the newest of those, after a
+    // death (a robot's loot from the same blast, or a crewmate's case,
+    // isn't).
     if let Some(death) = memory.died
         && death.carried
         && memory.kit.is_none()
@@ -111,12 +113,9 @@ pub fn track_threats(
     {
         memory.kit = cases
             .iter()
-            .filter_map(|(e, case, t)| {
-                let d = t.translation.distance(death.place);
-                ((case.since.wrapping_sub(death.tick) as i32).abs() <= 2 && d < 8.0).then_some((e, d))
-            })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(e, _)| e);
+            .filter(|(_, case, _)| case.owner_only && case.owner == Some(me_entity))
+            .max_by_key(|(_, case, _)| case.since)
+            .map(|(e, ..)| e);
     }
     memory.last_eye = Some(eye);
 }

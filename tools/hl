@@ -11,6 +11,7 @@
 #   tools/hl down <key> / up <key>   hold / release a key
 #   tools/hl look <dx> <dy> [steps] [ms]   relative mouse motion, optionally spread out
 #   tools/hl click [left|right|mouse4|mouse5] / press <btn> / release <btn>
+#   tools/hl wheel <steps>        scroll (positive: down) under the pointer
 #   tools/hl send '<cmd>'       raw hl-input command (see tools/hl-input)
 #   tools/hl shot <file.png>    screenshot the output
 #   tools/hl wait <seconds>
@@ -105,6 +106,7 @@ down) load; input "key $2 down" ;;
 up) load; input "key $2 up" ;;
 look) load; input "move $2 $3 ${4:-1} ${5:-0}" ;;
 click) load; input "click ${2:-left}" ;;
+wheel) load; input "wheel ${2:-1}" ;;
 press) load; input "button $2 down" ;;
 release) load; input "button $2 up" ;;
 send) load; input "$2" ;;
