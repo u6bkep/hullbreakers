@@ -372,3 +372,51 @@ fn robots_reach_clients() {
     assert_eq!(client, server, "client sees {client} of {server} robots");
     assert!(rate <= 0.5, "robots upset prediction: {rate:.1}/s");
 }
+
+/// A site's devices reach clients: the derelict, where the server has it,
+/// its device state as the server has it, and its doors open in the
+/// client's collider once the server opens them; the mission's objective
+/// follows.
+#[test]
+fn devices_reach_clients() {
+    use hullbreakers::sim::devices::{Devices, DoorsBuilt};
+    use hullbreakers::sim::mission::{Director, Mission, ScenarioKind};
+    use hullbreakers::sim::ship::ShipHull;
+    let (_guard, mut s) = session(100);
+    s.server
+        .world_mut()
+        .resource_mut::<Director>()
+        .start(ScenarioKind::DeadShip);
+    s.step(180);
+    let derelict = |app: &mut App| {
+        let world = app.world_mut();
+        world
+            .query::<(&ShipHull, &Position, &Devices, &DoorsBuilt)>()
+            .iter(world)
+            .find(|(h, ..)| h.0 == "derelict")
+            .map(|(_, p, d, b)| (p.0, d.clone(), b.clone()))
+    };
+    let (server_at, _, _) = derelict(&mut s.server).expect("no derelict on the server");
+    let (client_at, _, doors) = derelict(&mut s.client).expect("no derelict on the client");
+    assert!(server_at.distance(client_at) < 0.01, "server {server_at}, client {client_at}");
+    assert!(doors.0.iter().filter(|&&shut| shut).count() == 3, "{doors:?}");
+    // The server's crew pulls the reactor and turns junction A to the
+    // port door.
+    {
+        let world = s.server.world_mut();
+        let (hull, mut devices) = world.query::<(&ShipHull, &mut Devices)>().iter_mut(world).find(|(h, _)| h.0 == "derelict").unwrap();
+        let design = hull.design();
+        devices.0[design.device("reactor")].set = 1;
+        devices.0[design.device("j1")].set = 1;
+    }
+    s.step(60);
+    let (_, server_devices, _) = derelict(&mut s.server).unwrap();
+    let (_, client_devices, doors) = derelict(&mut s.client).unwrap();
+    assert_eq!(client_devices, server_devices);
+    let design = hullbreakers::sim::design::design("derelict");
+    assert!(!doors.0[design.device("port_door")], "the port door is still shut on the client");
+    assert!(doors.0[design.device("bulkhead")]);
+    let world = s.client.world_mut();
+    let objective = world.query::<&Mission>().single(world).unwrap().objective.clone();
+    assert!(objective.starts_with("Route power"), "{objective}");
+}
