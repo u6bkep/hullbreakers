@@ -106,6 +106,8 @@ impl Plugin for SimSharedPlugin {
             .add_observer(scenarios::recovery::shape_pod)
             // How its devices look here (a client's own presses at once).
             .add_systems(Update, devices::show_devices)
+            // Robots are built from the host's tuning, as it's edited.
+            .add_systems(FixedPreUpdate, bots::retune_robots)
             // A ship's closed doors are part of its collider, wherever it is.
             .add_systems(
                 FixedPostUpdate,
@@ -239,6 +241,7 @@ impl Plugin for SimPlugin {
                     .after(SimSystems::Beams)
                     .before(SimSystems::Players),
             )
+            .add_systems(FixedPostUpdate, bots::quiet_idle_robots.after(SimSystems::Players).before(SimSystems::Mission))
             .configure_sets(
                 FixedPostUpdate,
                 (

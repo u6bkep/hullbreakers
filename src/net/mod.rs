@@ -170,6 +170,8 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_gallery)
             .add_observer(replicate_robot)
             .add_observer(replicate_pickup)
+            // Measured only when profiling (see `client::profile`).
+            .add_systems(PostUpdate, meter_sends.before(LinkSystems::Send).run_if(resource_exists::<SendMeter>))
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players, profiles::receive_profiles))
             .add_systems(
@@ -564,6 +566,32 @@ fn report_rollbacks(time: Res<Time>, metrics: Res<PredictionMetrics>, mut last: 
         ticks as f32 / rollbacks.max(1) as f32
     );
     *last = (0.0, metrics.rollbacks, metrics.rollback_ticks);
+}
+
+/// Authority: what's been sent to each remote client, in payloads (packets)
+/// and bytes (before the transport's own headers), counted as each frame's
+/// sends are handed to the transport. For measuring (see `client::profile`).
+#[derive(Resource, Default, Debug)]
+pub struct SendMeter {
+    pub links: std::collections::HashMap<Entity, (u64, u64)>,
+}
+
+fn meter_sends(mut meter: ResMut<SendMeter>, mut links: Query<(Entity, &mut Link, &RemoteId), With<LinkOf>>) {
+    for (entity, mut link, peer) in &mut links {
+        // The host's own client is in-process: nothing goes over a wire.
+        if peer.0 == HOST_PEER {
+            continue;
+        }
+        // (The queue can only be read by draining it; the payloads are
+        // shared buffers, so putting them back copies nothing.)
+        let queued: Vec<_> = link.send.drain().collect();
+        let entry = meter.links.entry(entity).or_default();
+        for payload in queued {
+            entry.0 += 1;
+            entry.1 += payload.len() as u64;
+            link.send.push(payload);
+        }
+    }
 }
 
 fn on_link(add: On<Add, LinkOf>, mut commands: Commands) {

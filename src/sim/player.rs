@@ -902,7 +902,7 @@ pub fn player_tick(
     // here are): look, toggles, firing the grapple.
     let mut commands: Vec<(Entity, TickInput)> = Vec::new();
     for (entity, mut player, input, previous, telemetry, own) in &mut players {
-        let (Some(input), Some(mut previous), Some(mut telemetry)) = (input, previous, telemetry)
+        let (Some(input), Some(mut previous), Some(_)) = (input, previous, telemetry)
         else {
             continue;
         };
@@ -916,7 +916,6 @@ pub fn player_tick(
         player.events.begin_tick(tick.0);
         let mut cmd = player.input.advance(input);
         player.detach_timer = (player.detach_timer - ctx.dt).max(0.0);
-        telemetry.thrust = 0.0;
         if cmd.toggle_boots {
             player.boots_on = !player.boots_on;
             player.emit(PlayerEvent::BootsToggled(player.boots_on));
@@ -1030,9 +1029,17 @@ pub fn player_tick(
             None => ctx.with_tuning(&tuning),
         };
         let player = &mut *player;
-        match player.mode {
-            Mode::Booted { .. } => booted_tick(&ctx, &mut bodies, player, &cmd),
-            Mode::Eva { .. } => telemetry.thrust = eva_tick(&ctx, &mut bodies, player, &cmd),
+        let thrust = match player.mode {
+            Mode::Booted { .. } => {
+                booted_tick(&ctx, &mut bodies, player, &cmd);
+                0.0
+            }
+            Mode::Eva { .. } => eva_tick(&ctx, &mut bodies, player, &cmd),
+        };
+        // Written only when it changes: it's replicated, and most of the
+        // time (standing, coasting) it's the same.
+        if telemetry.thrust != thrust {
+            telemetry.thrust = thrust;
         }
     }
 }
