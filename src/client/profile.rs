@@ -76,6 +76,7 @@ impl Plugin for ProfilePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
             .insert_resource(Profile::new(self.0.clone()))
+            .init_resource::<crate::net::SendMeter>()
             .add_systems(First, frame_begin)
             .add_systems(
                 RunFixedMainLoop,
@@ -192,6 +193,9 @@ struct Profile {
     gpu_seen: HashMap<String, bevy::platform::time::Instant>,
     counts: BTreeMap<&'static str, Count>,
     next_count_sample: f32,
+    /// What the authority had sent each remote client (packets, bytes) at
+    /// the window's start and end (see `net::SendMeter`).
+    sent: Option<(HashMap<Entity, (u64, u64)>, HashMap<Entity, (u64, u64)>)>,
 }
 
 impl Profile {
@@ -211,6 +215,7 @@ impl Profile {
             gpu_seen: HashMap::new(),
             counts: BTreeMap::new(),
             next_count_sample: 0.0,
+            sent: None,
         }
     }
 
@@ -245,9 +250,11 @@ fn frame_begin(
     local: Query<(), With<LocalPlayer>>,
     window: Query<&Window, With<PrimaryWindow>>,
     adapter: Option<Res<RenderAdapterInfo>>,
+    meter: Option<Res<crate::net::SendMeter>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let elapsed = profile.since.elapsed().as_secs_f32();
+    let sent = || meter.as_ref().map(|m| m.links.clone());
     match profile.phase {
         Phase::Starting => {
             if !local.is_empty() {
@@ -264,6 +271,7 @@ fn frame_begin(
                 profile.since = Instant::now();
                 profile.cpu_at_start = process_cpu_seconds();
                 profile.next_count_sample = 0.0;
+                profile.sent = sent().map(|s| (s, HashMap::new()));
             }
         }
         Phase::Measuring => {
@@ -271,6 +279,9 @@ fn frame_begin(
             if elapsed >= profile.config.seconds {
                 window_marker("end");
                 let cpu = (process_cpu_seconds() - profile.cpu_at_start) / elapsed as f64;
+                if let (Some((_, end)), Some(now)) = (profile.sent.as_mut(), sent()) {
+                    *end = now;
+                }
                 let report = report(&profile, elapsed, cpu, window.single().ok(), adapter.as_deref());
                 let dir = &profile.config.dir;
                 let path = dir.join(format!("{}.json", profile.config.label));
@@ -557,6 +568,21 @@ fn report(profile: &Profile, seconds: f32, cpu_cores: f64, window: Option<&Windo
         .collect();
     let _ = writeln!(out, "{}\n  }},", passes.join(",\n"));
     let _ = writeln!(out, "  \"cpu_cores\": {cpu_cores:.3},");
+    // Sent to each remote client over the window (an authority's).
+    if let Some((start, end)) = &profile.sent {
+        let per_link: Vec<String> = end
+            .iter()
+            .map(|(link, (packets, bytes))| {
+                let (p0, b0) = start.get(link).copied().unwrap_or_default();
+                format!(
+                    "{{\"packets_per_s\": {:.1}, \"kbytes_per_s\": {:.2}}}",
+                    (packets - p0) as f64 / seconds as f64,
+                    (bytes - b0) as f64 / 1000.0 / seconds as f64
+                )
+            })
+            .collect();
+        let _ = writeln!(out, "  \"sent_per_client\": [{}],", per_link.join(", "));
+    }
     for (key, name) in [("gpu_busy_percent", "gpu_busy_percent"), ("gpu_power_watts", "gpu_power_watts")] {
         if let Some(c) = profile.counts.get(key) {
             let _ = writeln!(out, "  \"{name}\": {:.2},", c.sum / c.samples.max(1) as f64);

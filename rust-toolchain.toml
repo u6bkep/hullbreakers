@@ -1,0 +1,4 @@
+# Nightly for cargo's no-embed-metadata, which keeps crate metadata out of
+# the rlibs and roughly halves the build cache (see TheBook, "Build cache").
+[toolchain]
+channel = "nightly-2026-06-06"

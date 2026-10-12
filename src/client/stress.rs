@@ -6,6 +6,12 @@
 //! stands on the roof firing the SMG without a break while turning slowly.
 //! Nobody dies (health is topped up) and nobody runs dry, so the load holds
 //! steady: tracers, sparks, bullets, robot brains and hits all at once.
+//!
+//! `=carrier` (start in the boarding action): the player aboard the carrier,
+//! on its lower deck, firing the same way, with its crew coming at them:
+//! the fight inside, its robots, lights and effects.
+//! `=derelict` (start in the dead ship): the derelict's power routed to its
+//! vault as a crew would have (its rooms lit), the player in its junction.
 
 use bevy::prelude::*;
 
@@ -20,13 +26,17 @@ use crate::sim::vitals::Vitals;
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stress {
     Firefight,
+    Carrier,
+    Derelict,
 }
 
 pub fn stress_from_env() -> Option<Stress> {
     match std::env::var("HULLBREAKERS_STRESS").ok()?.as_str() {
         "firefight" => Some(Stress::Firefight),
+        "carrier" => Some(Stress::Carrier),
+        "derelict" => Some(Stress::Derelict),
         other => {
-            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight)");
+            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight, carrier, derelict)");
             None
         }
     }
@@ -36,11 +46,20 @@ pub struct StressPlugin(pub Stress);
 
 impl Plugin for StressPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(self.0);
         match self.0 {
             Stress::Firefight => {
                 app.init_resource::<Firefight>()
                     .add_systems(Update, (set_up_firefight, sustain_firefight).chain())
                     .add_systems(PreUpdate, hold_fire.after(super::input::read_input));
+            }
+            Stress::Carrier => {
+                app.init_resource::<Firefight>()
+                    .add_systems(Update, (board_carrier, sustain_firefight).chain())
+                    .add_systems(PreUpdate, hold_fire.after(super::input::read_input));
+            }
+            Stress::Derelict => {
+                app.init_resource::<Firefight>().add_systems(Update, light_derelict);
             }
         }
     }
@@ -132,6 +151,80 @@ fn set_up_firefight(
         commands.spawn(new_robot(Robot::Swarmer, Affixes::NONE, mode, home, post, &tuning, 2000 + i as u32));
     }
     info!("stress: firefight set up ({GUNNERS} Gunners, {SWARMERS} Swarmers)");
+}
+
+/// Once the boarding action is under way, puts the armed player on the
+/// carrier's lower deck.
+fn board_carrier(
+    time: Res<Time>,
+    mut state: ResMut<Firefight>,
+    director: Option<Res<Director>>,
+    mission: Option<Single<&Mission>>,
+    ships: Query<(Entity, &crate::sim::ship::ShipHull)>,
+    mut player: Option<Single<&mut Player, With<LocalPlayer>>>,
+) {
+    if state.started || director.is_none() {
+        return;
+    }
+    let (Some(mission), Some(player)) = (mission, player.as_mut()) else { return };
+    if mission.kind != ScenarioKind::Boarding {
+        return;
+    }
+    let Some((carrier, _)) = ships.iter().find(|(_, h)| h.0 == crate::sim::scenarios::boarding::CARRIER) else { return };
+    state.waited += time.delta_secs();
+    if state.waited < 1.0 {
+        return;
+    }
+    state.started = true;
+    player.loadout.restock();
+    player.loadout.current = 0;
+    player.boots_on = true;
+    player.grapple = None;
+    player.reference_body = Some(carrier);
+    player.mode = Mode::Booted {
+        body: carrier,
+        feet: Vec3::new(0.0, 0.01, 12.0),
+        up: Vec3::Y,
+        velocity: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
+        pitch: 0.0,
+    };
+    info!("stress: aboard the carrier");
+}
+
+/// Once in the dead ship, routes its power (its rooms lit) and puts the
+/// player in its junction.
+fn light_derelict(
+    mut state: ResMut<Firefight>,
+    time: Res<Time>,
+    director: Option<Res<Director>>,
+    mut ships: Query<(Entity, &crate::sim::ship::ShipHull, &mut crate::sim::devices::Devices)>,
+    mut player: Option<Single<&mut Player, With<LocalPlayer>>>,
+) {
+    if state.started || director.is_none() {
+        return;
+    }
+    let Some(player) = player.as_mut() else { return };
+    let Some((derelict, hull, mut devices)) = ships.iter_mut().find(|(_, h, _)| h.0 == crate::sim::scenarios::dead_ship::DERELICT) else {
+        return;
+    };
+    state.waited += time.delta_secs();
+    if state.waited < 1.0 {
+        return;
+    }
+    state.started = true;
+    super::debug_shots::power_up(hull, &mut devices);
+    player.boots_on = true;
+    player.reference_body = Some(derelict);
+    player.mode = Mode::Booted {
+        body: derelict,
+        feet: Vec3::new(4.6, 0.01, 1.0),
+        up: Vec3::Y,
+        velocity: Vec3::ZERO,
+        orientation: Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+        pitch: 0.0,
+    };
+    info!("stress: in the lit derelict");
 }
 
 /// Keeps everyone alive and the player's guns loaded, so the load holds.

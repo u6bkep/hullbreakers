@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::SimTick;
-use super::events::PlayerEvent;
+use super::events::{AuthorityLog, PlayerEvent};
 use super::bots::{self, Affixes, BodyTuning, Brain, Condition, Robot, tuning_of};
 use super::pickups::{Pickup, left_where};
 use super::combat::Beams;
@@ -195,8 +195,17 @@ pub fn apply_damage(
     // The crew's suits heal (to their own most: rank plates them); robots
     // and creatures don't.
     for (mut v, robot, player, own, _) in &mut vitals {
-        v.since_hurt += dt;
-        if player && !robot && v.since_hurt > tuning.health_regen_delay {
+        let crew = player && !robot;
+        // The hurt clock runs for everyone, but only the crew's is anyone's
+        // business on the wire (their HUD shows the wait for their suit to
+        // heal): a robot's or a creature's ticks without marking a change,
+        // so it isn't re-sent every tick.
+        if crew {
+            v.since_hurt += dt;
+        } else {
+            v.bypass_change_detection().since_hurt += dt;
+        }
+        if crew && v.since_hurt > tuning.health_regen_delay {
             v.health = (v.health + tuning.health_regen_rate * dt).min(tuning_of(&tuning, own).player_health);
         }
     }
@@ -251,13 +260,13 @@ pub fn settle_deaths(
     tick: Res<SimTick>,
     tuning: Res<Tuning>,
     home: Option<Single<Entity, With<HomeShip>>>,
-    mut players: Query<(Entity, &mut Player, &mut Vitals, &DeckSlot, Option<&BodyTuning>)>,
+    mut players: Query<(Entity, &mut Player, &mut AuthorityLog, &mut Vitals, &DeckSlot, Option<&BodyTuning>)>,
     mut commands: Commands,
 ) {
     let Some(home) = home else {
         return;
     };
-    for (entity, mut player, mut vitals, slot, own) in &mut players {
+    for (entity, mut player, mut told, mut vitals, slot, own) in &mut players {
         if vitals.health > 0.0 {
             continue;
         }
@@ -277,8 +286,8 @@ pub fn settle_deaths(
         if !cargo.is_empty() {
             commands.spawn((Name::new("Dropped cargo"), Pickup::dropped(left_where(&player.mode), tick.0, cargo)));
         }
-        player.events.push(PlayerEvent::Died);
-        player.respawn(*home, slot.0);
+        told.push(tick.0, PlayerEvent::Died);
+        player.respawn(*home, slot.0, &mut told, tick.0);
         *vitals = Vitals::full(tuning_of(&tuning, own));
     }
 }

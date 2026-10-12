@@ -561,6 +561,19 @@ pub fn add_affix_tuning(add: On<Add, Affixes>, robots: Query<(&Robot, Option<&Af
     fit_body(add.entity, &robots, &base, commands);
 }
 
+/// Every peer: when the host's tuning changes (the F1 panel), every robot
+/// is refitted from it, as players' rank tuning is (see
+/// `progression::tune_to_rank`).
+pub fn retune_robots(base: Res<Tuning>, robots: Query<(Entity, &Robot, Option<&Affixes>)>, mut commands: Commands) {
+    if !base.is_changed() || base.is_added() {
+        return;
+    }
+    for (entity, kind, affixes) in &robots {
+        let tuning = body_tuning(*kind, affixes.copied().unwrap_or_default(), &base);
+        commands.entity(entity).insert((capsule(&tuning), BodyTuning(tuning)));
+    }
+}
+
 fn fit_body(entity: Entity, robots: &Query<(&Robot, Option<&Affixes>)>, base: &Tuning, mut commands: Commands) {
     let Ok((kind, affixes)) = robots.get(entity) else { return };
     let tuning = body_tuning(*kind, affixes.copied().unwrap_or_default(), base);

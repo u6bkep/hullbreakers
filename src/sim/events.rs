@@ -6,6 +6,11 @@
 //! predicted, replicated, or local, can see what happened to it. Presentation
 //! (sound, HUD, camera effects) reads the log with its own cursor; the
 //! simulation never knows who is listening.
+//!
+//! What only the authority decides (a death, the respawn after it, being
+//! blown off a ship) isn't predicted, so it isn't in the predicted log: it
+//! goes in the player's [`AuthorityLog`], which is replicated as-is and read
+//! by count, so each entry is presented once however late it arrives.
 
 use std::collections::VecDeque;
 
@@ -30,7 +35,8 @@ pub enum Detach {
     RippedOff(f32),
     /// The rope out-pulled the boots (N).
     Yanked(f32),
-    /// The ship underfoot came apart.
+    /// Blown off the deck: the ship underfoot came apart, or a blast or a
+    /// shot beat the boots. Authority only: see [`AuthorityLog`].
     Blasted,
 }
 
@@ -73,11 +79,13 @@ pub enum PlayerEvent {
         body: Entity,
         action: ControlAction,
     },
-    /// Put back aboard at the start of a scenario.
+    /// Put back aboard (after a death, or at the start of a scenario).
+    /// Authority only: see [`AuthorityLog`].
     Respawned,
     /// Shoved by a laser beam.
     BeamHit,
-    /// Ran out of health (a respawn follows).
+    /// Ran out of health (a respawn follows). Authority only: see
+    /// [`AuthorityLog`].
     Died,
     /// Took from a pickup: the items whose bits are set in `taken` (by
     /// their index in it), and some of up to two boxes of ammo (their
@@ -210,6 +218,53 @@ impl MapEntities for EventLog {
     }
 }
 
+impl MapEntities for AuthorityLog {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        for (_, event) in &mut self.recent {
+            event.map_entities(mapper);
+        }
+    }
+}
+
+/// What the authority alone decides happens to a player, newest last, each
+/// stamped with the (authority's) tick: [`PlayerEvent::Died`],
+/// [`PlayerEvent::Respawned`], [`Detach::Blasted`], and a rope snapped by a
+/// ship coming apart. A client can't predict these, so in the predicted
+/// [`EventLog`] it would learn of them only by a correction: late (past what
+/// presentation will show) or not at all (a respawn on the spot you stood
+/// on corrects nothing). The authority writes this one; it's replicated, not
+/// predicted, and a reader keeps its own count to see new entries.
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[component(map_entities)]
+pub struct AuthorityLog {
+    /// Entries written so far.
+    pub count: u32,
+    recent: VecDeque<(u32, PlayerEvent)>,
+}
+
+/// How many entries an [`AuthorityLog`] keeps.
+const AUTHORITY_LOG: usize = 16;
+
+impl AuthorityLog {
+    pub fn push(&mut self, tick: u32, event: PlayerEvent) {
+        self.count = self.count.wrapping_add(1);
+        self.recent.push_back((tick, event));
+        while self.recent.len() > AUTHORITY_LOG {
+            self.recent.pop_front();
+        }
+    }
+
+    /// Entries since a reader last saw `count` of them, oldest first.
+    pub fn since(&self, count: u32) -> impl Iterator<Item = (u32, PlayerEvent)> + '_ {
+        let new = (self.count.wrapping_sub(count) as usize).min(self.recent.len());
+        self.recent.iter().skip(self.recent.len() - new).copied()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (u32, PlayerEvent)> + '_ {
+        self.recent.iter().copied()
+    }
+}
+
 /// The recent events of one player, oldest first, each stamped with the tick
 /// it happened on.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -230,6 +285,14 @@ impl EventLog {
     /// The tick being (or last) recorded.
     pub fn tick(&self) -> u32 {
         self.tick
+    }
+
+    /// A copy holding only the entries of the last `ticks` ticks.
+    pub fn since(&self, ticks: u32) -> EventLog {
+        EventLog {
+            tick: self.tick,
+            entries: self.entries.iter().filter(|(t, _)| self.tick.wrapping_sub(*t) < ticks).copied().collect(),
+        }
     }
 
     pub fn push(&mut self, event: PlayerEvent) {
@@ -268,6 +331,22 @@ mod tests {
                 (11, PlayerEvent::GrappleReleased)
             ]
         );
+    }
+
+    #[test]
+    fn authority_entries_are_read_once_however_many_arrive() {
+        let mut log = AuthorityLog::default();
+        log.push(5, PlayerEvent::Died);
+        log.push(5, PlayerEvent::Respawned);
+        let seen = log.count;
+        assert_eq!(log.since(0).count(), 2);
+        assert_eq!(log.since(seen).count(), 0);
+        for t in 0..40 {
+            log.push(t, PlayerEvent::RopeSnapped);
+        }
+        // A reader that fell far behind sees what's kept.
+        assert_eq!(log.since(seen).count(), AUTHORITY_LOG);
+        assert_eq!(log.since(log.count - 1).collect::<Vec<_>>(), vec![(39, PlayerEvent::RopeSnapped)]);
     }
 
     #[test]

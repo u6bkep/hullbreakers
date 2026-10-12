@@ -15,6 +15,8 @@ use bevy::prelude::*;
 use super::{BodyTuning, Robot, tuning_of};
 use crate::sim::Layer;
 use crate::sim::bodies::Bodies;
+use crate::sim::SimTick;
+use crate::sim::events::AuthorityLog;
 use crate::sim::player::Player;
 use crate::sim::tuning::Tuning;
 use crate::sim::vitals::{Damage, Vitals};
@@ -63,11 +65,12 @@ pub fn falloff(d: f32, radius: f32) -> f32 {
 /// Authority, after deaths are settled: this tick's blasts hurt and shove
 /// what's near them.
 pub fn detonate(
+    tick: Res<SimTick>,
     base: Res<Tuning>,
     spatial: SpatialQuery,
     mut blasts: MessageReader<Detonation>,
     mut bodies: Bodies,
-    mut players: Query<(Entity, &mut Player, Option<&BodyTuning>, Has<Robot>), With<Vitals>>,
+    mut players: Query<(Entity, &mut Player, &mut AuthorityLog, Option<&BodyTuning>, Has<Robot>), With<Vitals>>,
     mut damage: MessageWriter<Damage>,
 ) {
     for blast in blasts.read() {
@@ -80,7 +83,7 @@ pub fn detonate(
                 .cast_ray(blast.at, dir, d, true, &SpatialQueryFilter::from_mask(Layer::World))
                 .is_some_and(|hit| hit.distance < d - 0.3)
         };
-        for (entity, mut player, own, robot) in &mut players {
+        for (entity, mut player, mut told, own, robot) in &mut players {
             if entity == blast.robot {
                 continue;
             }
@@ -104,7 +107,7 @@ pub fn detonate(
                 steady: false,
             });
             let out = (center - blast.at).normalize_or(Vec3::Y);
-            player.shove(out * blast.impulse * k / tuning.player_mass, frame.as_ref(), tuning);
+            player.shove(out * blast.impulse * k / tuning.player_mass, frame.as_ref(), tuning, &mut told, tick.0);
         }
         // Loose bodies in reach are pushed from where they're nearest it.
         let reach = Collider::sphere(blast.radius);

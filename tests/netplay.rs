@@ -460,7 +460,9 @@ fn a_held_laser_is_cheap_on_the_wire() {
     eprintln!("laser on the wire: standing {idle:.0} B/s, beam held {beam:.0} B/s");
     // Measured 2026-10-12 (before the fauna came): 6.3 kB/s standing; a beam
     // as a `Fired` entry a tick added 65.5 kB/s, as held state 0.8. With the
-    // fauna in the world: 45.2 kB/s standing, the beam adding 5.4.
+    // fauna in the world: 45.2 kB/s standing, the beam adding 5.4; with idle
+    // robots and creatures no longer re-sent every tick (docs/perf.md):
+    // 14.4 standing, the beam adding nothing measurable.
     assert!(beam - idle < 10_000.0, "a beam costs {beam:.0} B/s against {idle:.0} standing");
 }
 
@@ -488,6 +490,71 @@ fn robots_reach_clients() {
     assert!(server > 0, "no robots on the server");
     assert_eq!(client, server, "client sees {client} of {server} robots");
     assert!(rate <= 0.5, "robots upset prediction: {rate:.1}/s");
+}
+
+/// A robot reaches a client as what's drawn of it (`net::robots`), not its
+/// whole player: the client's `Player` for it is built from that, standing
+/// where the server has it, with the events it had; and the boarding action
+/// (the carrier's crew all moving and aiming) is cheap on the wire.
+#[test]
+fn robots_reach_clients_as_what_is_drawn_of_them() {
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::events::PlayerEvent;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    let (_guard, mut s) = session(0);
+    s.step(240);
+    // Where each still limpet's feet are on its rock (they lurk; one
+    // lunging is drawn where it was an interpolation delay ago).
+    let feet = |app: &mut App| -> Vec<Vec3> {
+        let world = app.world_mut();
+        world
+            .query::<(&Robot, &Player)>()
+            .iter(world)
+            .filter_map(|(k, p)| match (*k, p.mode) {
+                (Robot::Limpet, Mode::Booted { feet, velocity, .. }) if velocity.length() < 0.01 => Some(feet),
+                _ => None,
+            })
+            .collect()
+    };
+    let (truth, seen) = (feet(&mut s.server), feet(&mut s.client));
+    for at in &truth {
+        let off = seen.iter().map(|q| q.distance(*at)).fold(f32::MAX, f32::min);
+        assert!(off < 0.005, "a still limpet is drawn {off} m from where the server has it");
+    }
+    // Something a robot does reaches the client in its log.
+    let world = s.server.world_mut();
+    let mut limpets = world.query_filtered::<&mut Player, With<Robot>>();
+    limpets.iter_mut(world).next().unwrap().events.push(PlayerEvent::Respawned);
+    s.step(30);
+    let world = s.client.world_mut();
+    let heard = world
+        .query_filtered::<&Player, With<Robot>>()
+        .iter(world)
+        .any(|p| p.events.iter().any(|(_, e)| matches!(e, PlayerEvent::Respawned)));
+    assert!(heard, "a robot's event never reached the client");
+    // The boarding action.
+    s.server.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
+    s.step(240);
+    // Its robots (some with affixes that change their size) are hit where
+    // they are on a client: their capsules there are the server's.
+    let sizes = |app: &mut App| -> Vec<(i32, i32)> {
+        let world = app.world_mut();
+        let mut v: Vec<(i32, i32)> = world
+            .query_filtered::<&Collider, (With<Robot>, With<Player>)>()
+            .iter(world)
+            .filter_map(|c| c.shape().as_capsule().map(|k| ((k.radius * 1000.0) as i32, (k.half_height() * 1000.0) as i32)))
+            .collect();
+        v.sort();
+        v
+    };
+    let (truth, seen) = (sizes(&mut s.server), sizes(&mut s.client));
+    assert!(!truth.is_empty());
+    assert_eq!(seen, truth, "robots' capsules on the client differ from the server's");
+    let rate = s.received_rate(180);
+    eprintln!("robots on the wire: boarding, standing aboard our ship, {rate:.0} B/s");
+    // Measured 2026-10-12: 37.8 kB/s with robots sent as whole players,
+    // 12.9 as their views.
+    assert!(rate < 20_000.0, "boarding costs {rate:.0} B/s");
 }
 
 /// The field's fauna reach clients: grazers as bodies posed from their
@@ -755,27 +822,101 @@ fn a_mispredicted_press_goes_back() {
     assert_eq!(late, (0, Some(0)), "the shown state didn't go back to the authority's");
 }
 
-/// A death is the authority's alone. One where the respawn puts you back
-/// where you stood, with nothing on you, changes nothing else a client
-/// predicts; it must still reach the client's log (its HUD and camera show
-/// it from there).
-#[test]
-fn a_death_where_you_stand_reaches_the_client() {
-    use hullbreakers::sim::events::PlayerEvent;
+/// What the client's presentation was handed (see
+/// [`hullbreakers::client::events`]), in order.
+#[derive(Resource, Default)]
+struct Shown(Vec<hullbreakers::sim::events::PlayerEvent>);
+
+impl Session {
+    /// Runs the client's event presentation, collecting what it presents
+    /// into [`Shown`].
+    fn present(&mut self) {
+        use hullbreakers::client::events::{EventCursor, Presented, present_events};
+        let collect = |mut presented: MessageReader<Presented>, mut shown: ResMut<Shown>| shown.0.extend(presented.read().map(|p| p.0));
+        self.client
+            .init_resource::<EventCursor>()
+            .init_resource::<Shown>()
+            .add_message::<Presented>()
+            .add_systems(Update, (present_events, collect).chain());
+    }
+
+    fn shown(&self, event: hullbreakers::sim::events::PlayerEvent) -> usize {
+        self.client.world().resource::<Shown>().0.iter().filter(|&&e| e == event).count()
+    }
+
+    fn server_crew(&mut self) -> Entity {
+        let world = self.server.world_mut();
+        world
+            .query_filtered::<Entity, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>()
+            .single(world)
+            .unwrap()
+    }
+}
+
+/// A death, and the respawn after it, are the authority's alone. Where the
+/// respawn puts you back where you stood, with nothing on you, nothing a
+/// client predicts differs, so no correction carries them: they reach the
+/// client in its player's authority log, and are presented once each
+/// (however long the round trip: at 250 ms they arrive further back than a
+/// corrected event would be shown).
+fn a_death_where_you_stand_is_presented(lag_ms: u64) {
+    use hullbreakers::sim::events::{AuthorityLog, PlayerEvent};
     use hullbreakers::sim::vitals::Vitals;
-    let (_guard, mut s) = session(100);
+    let (_guard, mut s) = session(lag_ms);
+    s.present();
     s.step(60);
-    let world = s.server.world_mut();
-    let mut vitals = world.query_filtered::<&mut Vitals, (With<Player>, Without<hullbreakers::sim::bots::Robot>)>().single_mut(world).unwrap();
+    let crew = s.server_crew();
+    let before = s.server_player().mode;
+    let mut vitals = s.server.world_mut().get_mut::<Vitals>(crew).unwrap();
     vitals.health = 0.0;
     vitals.since_hurt = 0.0;
-    let mut seen = false;
-    for _ in 0..60 {
-        s.step(1);
-        seen |= s.local_player().unwrap().events.iter().any(|(_, e)| e == PlayerEvent::Died);
-    }
-    assert!(s.server_player().events.iter().any(|(_, e)| e == PlayerEvent::Died), "the server never killed them");
-    assert!(seen, "the client never heard it died");
+    s.step(120);
+    let told = s.server.world().get::<AuthorityLog>(crew).unwrap();
+    let said: Vec<_> = told.iter().map(|(_, e)| e).collect();
+    assert_eq!(said, vec![PlayerEvent::Died, PlayerEvent::Respawned], "the server's log");
+    // Nothing a rollback would notice (it stood on its spawn).
+    let after = s.server_player().mode;
+    assert!(after.body() == before.body() && after.world_kinematics(&Default::default(), None).0.distance(before.world_kinematics(&Default::default(), None).0) < 0.01, "the respawn moved it: {before:?} to {after:?}");
+    assert_eq!(s.shown(PlayerEvent::Died), 1, "the client was told of its death {} times", s.shown(PlayerEvent::Died));
+    assert_eq!(s.shown(PlayerEvent::Respawned), 1, "the client was told of its respawn {} times", s.shown(PlayerEvent::Respawned));
+}
+
+#[test]
+fn a_death_where_you_stand_is_presented_at_100_ms() {
+    a_death_where_you_stand_is_presented(100);
+}
+
+#[test]
+fn a_death_where_you_stand_is_presented_at_250_ms() {
+    a_death_where_you_stand_is_presented(250);
+}
+
+/// A blast that knocks you off the deck is the authority's to decide: at
+/// 250 ms the client learns of it a quarter second after the tick it
+/// happened on, past what presentation shows of a corrected event, and must
+/// still present it, once. And it must still correct the client's
+/// prediction (which had it standing): the correction is older than
+/// lightyear's default rollback limit at that lag (see
+/// `MAX_ROLLBACK_TICKS`).
+#[test]
+fn a_blast_at_250_ms_is_presented() {
+    use hullbreakers::sim::events::{Detach, PlayerEvent};
+    let (_guard, mut s) = session(250);
+    s.present();
+    s.step(60);
+    assert!(matches!(s.server_player().mode, Mode::Booted { .. }));
+    let (_, _, rotation) = s.server_ship();
+    let crew = s.server_crew();
+    let mass = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().player_mass;
+    // Straight up off the deck at 12 m/s: past any boots' grip.
+    s.server.world_mut().resource_mut::<hullbreakers::sim::shots::Shoves>().0.push((crew, rotation * Vec3::Y * 12.0 * mass));
+    s.step(40);
+    assert!(matches!(s.server_player().mode, Mode::Eva { .. }), "the boots held");
+    let mine = s.local_player().unwrap().mode;
+    assert!(matches!(mine, Mode::Eva { .. }), "the client still stands: {mine:?} (server: {:?})", s.server_player().mode);
+    s.step(80);
+    let blasted = PlayerEvent::Detached(Detach::Blasted);
+    assert_eq!(s.shown(blasted), 1, "the client was told of the blast {} times", s.shown(blasted));
 }
 
 // ---------------------------------------------------------------------------
@@ -890,8 +1031,8 @@ fn measure_kick(impulse: f32, what: &str) {
     float_clear(&mut s);
     let quiet = watch_corrections(&mut s, 60);
     let mass = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().player_mass;
-    let tuning = s.server.world().resource::<hullbreakers::sim::tuning::Tuning>().clone();
-    s.server_player().shove(Vec3::X * impulse / mass, None, &tuning);
+    let crew = s.server_crew();
+    s.server.world_mut().resource_mut::<hullbreakers::sim::shots::Shoves>().0.push((crew, Vec3::X * impulse));
     let mut views = Views::default();
     let (rollbacks, worst, total) = watch_corrections_drawn(&mut s, 120, &mut views);
     eprintln!(
@@ -978,4 +1119,177 @@ fn measure_rope(robot_mass_scale: f32, what: &str) {
 #[ignore]
 fn measure_rope_yank() {
     measure_rope(1.0, "rope yank (winched 12 m to 4 m at 15 m/s)");
+}
+
+
+/// A measuring tool, not a check (`cargo test --test netplay
+/// replicated_changes -- --ignored --nocapture`): what a client receives
+/// standing still in the field and in the boarding action, and how often
+/// each replicated component is re-marked changed on the server over two
+/// seconds (each mark sends it again), split between robots and the rest.
+/// See `docs/perf.md`.
+#[test]
+#[ignore]
+fn replicated_changes() {
+    use hullbreakers::sim::bots::{Condition, Robot};
+    use hullbreakers::sim::combat::Combatant;
+    use hullbreakers::sim::devices::Devices;
+    use hullbreakers::sim::fauna::Grazer;
+    use hullbreakers::sim::mission::{Director, Mission, ScenarioKind};
+    use hullbreakers::sim::motion::Motion;
+    use hullbreakers::sim::pickups::Pickup;
+    use hullbreakers::sim::player::PlayerTelemetry;
+    use hullbreakers::sim::vitals::{HitLog, HurtLog, Vitals};
+    use std::collections::HashMap;
+    for scenario in [None, Some(ScenarioKind::Boarding)] {
+        let (_guard, mut s) = session(0);
+        if let Some(k) = scenario {
+            s.server.world_mut().resource_mut::<Director>().start(k);
+        }
+        s.step(240);
+        let mut last: HashMap<(Entity, &'static str), u32> = HashMap::new();
+        let mut counts: HashMap<&'static str, (usize, usize)> = HashMap::new();
+        let frames = 120;
+        for _ in 0..frames {
+            s.step(1);
+            let world = s.server.world_mut();
+            macro_rules! track {
+                ($t:ty, $name:literal) => {{
+                    let mut q = world.query::<(Entity, Ref<$t>, Option<&Robot>)>();
+                    for (e, c, robot) in q.iter(world) {
+                        let tick = c.last_changed().get();
+                        let entry = counts.entry($name).or_default();
+                        if last.insert((e, $name), tick).is_some_and(|t| t != tick) {
+                            if robot.is_some() { entry.1 += 1 } else { entry.0 += 1 }
+                        }
+                    }
+                }};
+            }
+            track!(Name, "Name");
+            track!(Devices, "Devices");
+            track!(Grazer, "Grazer");
+            track!(Condition, "Condition");
+            track!(Pickup, "Pickup");
+            track!(Combatant, "Combatant");
+            track!(Vitals, "Vitals");
+            track!(HitLog, "HitLog");
+            track!(HurtLog, "HurtLog");
+            track!(Mission, "Mission");
+            track!(Motion, "Motion");
+            track!(PlayerTelemetry, "PlayerTelemetry");
+            track!(Player, "Player");
+            track!(hullbreakers::net::robots::RobotView, "RobotView");
+            track!(hullbreakers::net::robots::RobotLog, "RobotLog");
+        }
+        let rate = s.received_rate(180);
+        let mut v: Vec<_> = counts.into_iter().collect();
+        v.sort();
+        eprintln!("PROBE {scenario:?}: {rate:.0} B/s; changes in {frames} frames (non-robot, robot): {v:?}");
+    }
+}
+
+/// A measuring tool, not a check (`cargo test --test netplay
+/// robot_smoothness -- --ignored --nocapture`): how smoothly robots move on
+/// a client at 100 ms, against how they move on the server, in the
+/// boarding action. Per robot that's moving: frames it stands still (a
+/// stutter), and the change in its step from one frame to the next (a
+/// jolt), in millimetres. See docs/perf.md (it's noisy: repeat it).
+#[test]
+#[ignore]
+fn robot_smoothness() {
+    use hullbreakers::sim::bots::Robot;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    use std::collections::HashMap;
+    let (_guard, mut s) = session(100);
+    s.server.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
+    s.step(300);
+    let at = |p: &Player| match p.mode {
+        Mode::Booted { body, feet, .. } => (Some(body), feet),
+        Mode::Eva { position, .. } => (None, position),
+    };
+    let sample = |app: &mut App| -> HashMap<Entity, (Option<Entity>, Vec3)> {
+        let world = app.world_mut();
+        world.query_filtered::<(Entity, &Player), With<Robot>>().iter(world).map(|(e, p)| (e, at(p))).collect()
+    };
+    let mut paths: [HashMap<Entity, Vec<(Option<Entity>, Vec3)>>; 2] = Default::default();
+    for _ in 0..300 {
+        s.step(1);
+        for (i, app) in [&mut s.server, &mut s.client].into_iter().enumerate() {
+            for (e, a) in sample(app) {
+                paths[i].entry(e).or_default().push(a);
+            }
+        }
+    }
+    for (name, paths) in ["server", "client"].iter().zip(&paths) {
+        let (mut moving, mut stalls, mut frames, mut jolt, mut jolts) = (0, 0, 0, 0.0f32, Vec::new());
+        let mut rough = 0.0f32;
+        for path in paths.values() {
+            let steps: Vec<Option<Vec3>> = path.windows(2).map(|w| (w[0].0 == w[1].0).then(|| w[1].1 - w[0].1)).collect();
+            let travelled: f32 = steps.iter().flatten().map(|d| d.length()).sum();
+            if travelled < 0.5 {
+                continue;
+            }
+            moving += 1;
+            let mut worst = 0.0f32;
+            for w in steps.windows(2) {
+                if let (Some(a), Some(b)) = (w[0], w[1]) {
+                    frames += 1;
+                    // Standing still between two steps of motion.
+                    if b.length() < 1e-4 && a.length() > 1e-3 {
+                        stalls += 1;
+                    }
+                    worst = worst.max((b - a).length());
+                    rough += (b - a).length();
+                }
+            }
+            jolt = jolt.max(worst);
+            jolts.push(worst * 1000.0);
+        }
+        jolts.sort_by(f32::total_cmp);
+        let median = jolts.get(jolts.len() / 2).copied().unwrap_or(0.0);
+        eprintln!(
+            "SMOOTH {name}: {moving} robots moving, {stalls} stalls in {frames} frames; mean jolt {:.1} mm, worst {:.1} mm, median robot's worst {median:.1} mm",
+            rough * 1000.0 / frames.max(1) as f32,
+            jolt * 1000.0
+        );
+    }
+}
+
+/// A robot's shots reach a client as it fires them (its tracers and sounds
+/// are drawn from them), each one there, at 100 ms.
+#[test]
+fn a_robots_shots_reach_a_client() {
+    use hullbreakers::sim::bots::{Robot, SpawnRobots};
+    use hullbreakers::sim::events::PlayerEvent;
+    use std::collections::{HashMap, HashSet};
+    let (_guard, mut s) = session(100);
+    s.step(120);
+    // A gunner on our bridge, facing aft at the crew.
+    s.server.world_mut().write_message(SpawnRobots(Robot::Gunner));
+    let shots = |app: &mut App, seen: &mut HashMap<&'static str, HashSet<(u32, u32)>>, side: &'static str| {
+        let world = app.world_mut();
+        for p in world.query_filtered::<&Player, With<Robot>>().iter(world) {
+            for (tick, e) in p.events.iter() {
+                if let PlayerEvent::Fired { origin, .. } = e {
+                    // Where from, to the centimetre, and when: the same shot
+                    // on either side.
+                    let key = ((origin.x * 100.0).round() as i32 as u32 ^ (origin.z * 100.0).round() as i32 as u32, tick);
+                    seen.entry(side).or_default().insert(key);
+                }
+            }
+        }
+    };
+    let mut seen = HashMap::new();
+    for _ in 0..480 {
+        s.step(1);
+        shots(&mut s.server, &mut seen, "server");
+        shots(&mut s.client, &mut seen, "client");
+    }
+    let (server, client) = (seen.remove("server").unwrap_or_default(), seen.remove("client").unwrap_or_default());
+    // The last few may still be on their way.
+    let newest = server.iter().map(|k| k.1).max().unwrap_or(0);
+    let missed = server.iter().filter(|k| newest.wrapping_sub(k.1) > 30 && !client.contains(k)).count();
+    eprintln!("robot shots: server {}, client {}, missed {missed}", server.len(), client.len());
+    assert!(server.len() > 3, "the gunner hardly fired: {}", server.len());
+    assert_eq!(missed, 0, "the client missed {missed} of {} shots", server.len());
 }

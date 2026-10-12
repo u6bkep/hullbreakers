@@ -140,6 +140,26 @@ it.
   `a_death_where_you_stand_reaches_the_client`). Cost: an hour. Pattern to
   watch: any other authority-only event that changes nothing predicted
   would be lost the same way.
+  (Replaced the same day: authority-only events (`Died`, `Respawned`,
+  `Detached(Blasted)`, a ship's break-up snapping a rope) moved out of the
+  predicted `EventLog` into a replicated, unpredicted `AuthorityLog`, read
+  by count, so nothing depends on a rollback to deliver an event;
+  `died_unpredicted` is gone. Tests `a_death_where_you_stand_is_presented_*`
+  and `a_blast_at_250_ms_is_presented`. Cost: two hours.)
+
+## lightyear
+
+- 2026-10-12. At 250 ms of round trip an authority's shove (a blast off
+  the deck) never corrected the client: it kept standing while the server
+  had it floating, for seconds or for good. lightyear's
+  `RollbackPolicy::max_rollback_ticks` defaults to 20, and a confirmed
+  state is the client's lead plus the trip back old when it arrives (~22
+  ticks at 250 ms); older rollbacks are refused with a `warn!` that
+  headless tests don't show, so it read as "no divergence" (only jitter
+  occasionally let one through). Raised to 60 (`MAX_ROLLBACK_TICKS` in
+  `src/net/mod.rs`). Cost: an hour, found by a test asserting the
+  client's mode, not just its events. Watch: deeper rollbacks re-simulate
+  more ticks each (CPU at high lag).
 
 ## Bevy rendering
 
@@ -393,3 +413,19 @@ it.
   (what `ControlledBy::owner` holds). An entity without the filter
   component has the scoped components hidden from every client, which is
   what the host's own player wants. Cost: an hour.
+
+## Build cache (cargo, rustc)
+
+- 2026-10-12. Several agents building in their own worktrees filled the
+  disk twice in one day. Every dependency built with full debug info made
+  each test binary 2.4 GB, and stale test binaries pile up in
+  `target/debug/deps` (cargo never removes an old hash). Measures taken:
+  line tables only for dependencies (8a88503); `split-debuginfo =
+  "unpacked"` for our own code, so debug info stays in the object files
+  instead of being copied into every linked binary (1.16 GB → 0.56 GB per
+  binary); and cargo's `no-embed-metadata`, which is nightly-only, so the
+  repo now pins a nightly in `rust-toolchain.toml`. A full `target/debug`
+  is about 20 GB, down from 38 GB. Cost: a nightly toolchain, two full
+  rebuilds, and a prune script run by hand (old binaries per test target,
+  keep the newest). Stale binaries still accumulate; a `cargo sweep` habit
+  or a tool of our own would close that.

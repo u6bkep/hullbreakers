@@ -33,7 +33,7 @@ use crate::sim::input::PlayerInput;
 use crate::sim::devices::Devices;
 use crate::sim::mission::{Debris, Mission};
 use crate::sim::scenarios::gallery::GalleryAnchor;
-use crate::sim::events::PlayerEvent;
+use crate::sim::events::AuthorityLog;
 use crate::sim::player::{DeckSlot, Mode, Player, PlayerTelemetry, PreviousMode, new_player};
 use crate::sim::ship::{Drift, HomeShip, ShipHull, Site};
 use crate::sim::tuning::Tuning;
@@ -43,6 +43,7 @@ use crate::sim::{PlayerSimPlugin, SimPlugin, SimSharedPlugin, SimSystems, SimTic
 
 mod extrapolate;
 mod profiles;
+pub mod robots;
 
 pub use profiles::ProfileRequests;
 
@@ -53,6 +54,13 @@ const PROTOCOL_ID: u64 = 0x5ace_9a3e;
 const PRIVATE_KEY: [u8; 32] = [0; 32];
 /// How often the server sends world state.
 const SEND_INTERVAL: Duration = Duration::from_millis(50);
+/// How far back (ticks) a client will re-simulate to take a correction. A
+/// confirmed state is the client's lead over the authority plus the trip
+/// back old when it arrives: about 22 ticks at 250 ms. lightyear's default
+/// (20) quietly refuses anything older, so past ~220 ms of round trip a
+/// client was never corrected at all (an authority's shove left it standing
+/// on the deck). A second covers a round trip of about 650 ms.
+const MAX_ROLLBACK_TICKS: u16 = 60;
 /// The in-process client of a listen-server host.
 const HOST_PEER: PeerId = PeerId::Local(0);
 
@@ -170,11 +178,13 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_gallery)
             .add_observer(replicate_robot)
             .add_observer(replicate_pickup)
+            // Measured only when profiling (see `client::profile`).
+            .add_systems(PostUpdate, meter_sends.after(lightyear::transport::plugin::TransportSystems::Send).before(LinkSystems::Send).run_if(resource_exists::<SendMeter>))
             .add_systems(Startup, spawn_host_tuning)
             .add_systems(Update, (publish_tuning, spawn_players, profiles::receive_profiles))
             .add_systems(
                 FixedPostUpdate,
-                extrapolate::track_motion.after(SimSystems::Players),
+                (extrapolate::track_motion, robots::publish_robots).after(SimSystems::Players),
             );
         } else {
             // Bodies here are posed from their motion, not simulated: Avian
@@ -212,6 +222,7 @@ impl Plugin for NetPlugin {
                 ),
             )
             .add_systems(Update, report_rollbacks)
+            .add_systems(Update, robots::present_robots.in_set(lightyear::prelude::InterpolationSystems::Interpolate))
             .add_systems(
                 PostUpdate,
                 (
@@ -229,7 +240,11 @@ impl Plugin for NetPlugin {
                 .init_resource::<ProfileRequests>()
                 .add_systems(Update, profiles::send_profile(mode.is_authority()))
                 .add_systems(Last, profiles::save_profile)
-                .insert_resource(PredictionManager::default())
+                .insert_resource({
+                    let mut prediction = PredictionManager::default();
+                    prediction.rollback_policy.max_rollback_ticks = MAX_ROLLBACK_TICKS;
+                    prediction
+                })
                 // A client can't simulate its player before its clock (and
                 // so the bodies around it) is in step with the authority.
                 .add_systems(
@@ -292,6 +307,14 @@ impl Plugin for ProtocolPlugin {
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
         app.component::<Robot>().replicate_once();
+        // A robot reaches a remote client as what's drawn of it, not its
+        // whole player (see `robots`).
+        app.component::<robots::RobotView>()
+            .replicate()
+            .add_interpolation_with(robots::interpolate_view);
+        app.component::<robots::RobotLog>()
+            .replicate()
+            .add_interpolation_with(robots::snap);
         app.component::<Affixes>().replicate_once();
         app.component::<Condition>().replicate();
         app.component::<Wrecked>().replicate_once();
@@ -302,6 +325,10 @@ impl Plugin for ProtocolPlugin {
         app.component::<Vitals>().replicate();
         app.component::<HitLog>().replicate();
         app.component::<HurtLog>().replicate();
+        // What only the authority decides happens to a player: never
+        // predicted, so never rolled back, and read by count (see
+        // `client::events`).
+        app.component::<AuthorityLog>().replicate();
         app.component::<Mission>().replicate();
         app.component::<Motion>().replicate();
         app.component::<HostTuning>().replicate();
@@ -311,9 +338,10 @@ impl Plugin for ProtocolPlugin {
             .replicate()
             .predict()
             .with_rollback_condition(|_, _| false);
-        // A client predicts its own player and interpolates the others.
+        // A client predicts its own player and interpolates the others'.
+        // (Robots' go as their `RobotView`.)
         app.component::<Player>()
-            .replicate()
+            .replicate_filtered::<Without<Robot>>()
             .predict()
             .with_rollback_condition(player_diverged)
             .add_interpolation_with(interpolate_player);
@@ -323,13 +351,8 @@ impl Plugin for ProtocolPlugin {
 /// Whether a predicted player state has strayed from the authority's state
 /// for the same tick far enough to re-simulate. Tolerances sit above the
 /// noise of extrapolated body poses (1 cm) so agreement isn't re-simulated.
-/// Whether the authority's log has a death the prediction's doesn't.
-fn died_unpredicted(confirmed: &Player, predicted: &Player) -> bool {
-    let deaths = |p: &Player| p.events.iter().filter(|(_, e)| *e == PlayerEvent::Died).map(|(t, _)| t).collect::<Vec<u32>>();
-    let predicted = deaths(predicted);
-    deaths(confirmed).iter().any(|t| !predicted.contains(t))
-}
-
+/// Events don't count: what a client can't predict comes in the player's
+/// [`AuthorityLog`], not by a correction.
 fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
     // A body this client hasn't received yet: nothing to predict against,
     // so nothing a rollback could fix.
@@ -399,12 +422,7 @@ fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
         || confirmed.input != predicted.input
         // What's carried is discrete: a pickup the authority settled
         // otherwise (someone else got there first) must be corrected.
-        || confirmed.loadout.inventory != predicted.loadout.inventory
-        // A death only the authority decides. Respawned where they already
-        // stood, with nothing on them, nothing else differs, and without a
-        // rollback the death would never reach this client's log (no
-        // SUIT FAILURE, no fade).
-        || died_unpredicted(confirmed, predicted);
+        || confirmed.loadout.inventory != predicted.loadout.inventory;
     if diverged {
         debug!(
             "diverged: modes {modes} grapple {grapples} input {}\n  confirmed {:?}\n  predicted {:?}",
@@ -420,8 +438,10 @@ fn player_diverged(confirmed: &Player, predicted: &Player) -> bool {
 /// (and one body) positions and orientations blend; across a change of mode
 /// or body the state switches at the halfway point. Everything else (flags,
 /// grapple, the event log) comes from the nearer state.
-fn interpolate_player(start: Player, end: Player, t: f32) -> Player {
-    let mode = match (start.mode, end.mode) {
+/// A player's (or robot's) mode, between two states: blended within a
+/// mode on one body, else the nearer end.
+pub(crate) fn interpolate_mode(start: Mode, end: Mode, t: f32) -> Mode {
+    match (start, end) {
         (
             Mode::Eva {
                 position: p0,
@@ -466,9 +486,13 @@ fn interpolate_player(start: Player, end: Player, t: f32) -> Player {
             orientation: o0.slerp(o1, t),
             pitch: a0 + (a1 - a0) * t,
         },
-        _ if t < 0.5 => start.mode,
-        _ => end.mode,
-    };
+        _ if t < 0.5 => start,
+        _ => end,
+    }
+}
+
+fn interpolate_player(start: Player, end: Player, t: f32) -> Player {
+    let mode = interpolate_mode(start.mode, end.mode, t);
     let mut player = if t < 0.5 { start } else { end };
     player.mode = mode;
     player
@@ -570,6 +594,32 @@ fn report_rollbacks(time: Res<Time>, metrics: Res<PredictionMetrics>, mut last: 
     *last = (0.0, metrics.rollbacks, metrics.rollback_ticks);
 }
 
+/// Authority: what's been sent to each remote client, in payloads (packets)
+/// and bytes (before the transport's own headers), counted as each frame's
+/// sends are handed to the transport. For measuring (see `client::profile`).
+#[derive(Resource, Default, Debug)]
+pub struct SendMeter {
+    pub links: std::collections::HashMap<Entity, (u64, u64)>,
+}
+
+fn meter_sends(mut meter: ResMut<SendMeter>, mut links: Query<(Entity, &mut Link, &RemoteId), With<LinkOf>>) {
+    for (entity, mut link, peer) in &mut links {
+        // The host's own client is in-process: nothing goes over a wire.
+        if peer.0 == HOST_PEER {
+            continue;
+        }
+        // (The queue can only be read by draining it; the payloads are
+        // shared buffers, so putting them back copies nothing.)
+        let queued: Vec<_> = link.send.drain().collect();
+        let entry = meter.links.entry(entity).or_default();
+        for payload in queued {
+            entry.0 += 1;
+            entry.1 += payload.len() as u64;
+            link.send.push(payload);
+        }
+    }
+}
+
 fn on_link(add: On<Add, LinkOf>, mut commands: Commands) {
     commands.entity(add.entity).insert(ReplicationSender);
 }
@@ -652,8 +702,8 @@ fn replicate_gallery(add: On<Add, GalleryAnchor>, mut commands: Commands) {
         .insert(Replicate::to_clients(NetworkTarget::All));
 }
 
-/// Robots reach clients like other people's players: interpolated, never
-/// predicted. (The host shares the authority's world.)
+/// Robots reach clients interpolated, never predicted, as what's drawn of
+/// them (see [`robots`]). (The host shares the authority's world.)
 fn replicate_robot(add: On<Add, Robot>, mut commands: Commands) {
     commands.entity(add.entity).insert((
         Replicate::to_clients(NetworkTarget::All),

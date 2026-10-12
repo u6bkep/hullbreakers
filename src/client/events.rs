@@ -6,6 +6,12 @@
 //! Re-simulated ticks rewrite the log rather than appending to it, so nothing
 //! is presented twice.
 //!
+//! Beside it, what only the authority decides (a death, a respawn, being
+//! blown off a ship) comes in the player's [`AuthorityLog`]: never predicted,
+//! never rewritten, so each entry is presented once by count, however late it
+//! arrives (at 250 ms that's further back than [`EventCursor`] would show a
+//! correction).
+//!
 //! [`EventLog`]: crate::sim::events::EventLog
 
 use std::collections::VecDeque;
@@ -13,7 +19,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 
 use super::LocalPlayer;
-use crate::sim::events::{EventLog, LOG_TICKS, PlayerEvent};
+use crate::sim::events::{AuthorityLog, EventLog, LOG_TICKS, PlayerEvent};
 use crate::sim::player::Player;
 
 /// A player event, delivered to presentation once.
@@ -33,6 +39,8 @@ pub struct Presented(pub PlayerEvent);
 #[derive(Resource, Default)]
 pub struct EventCursor {
     presented: VecDeque<(u32, PlayerEvent)>,
+    /// Whose [`AuthorityLog`] has been read, and how many of its entries.
+    told: Option<(Entity, u32)>,
     pub last_text: String,
 }
 
@@ -63,14 +71,30 @@ impl EventCursor {
         }
         new
     }
+
+    /// The entries in `who`'s authority log not yet presented, marking them
+    /// presented. What was there before it was first read (another
+    /// player's, or before this cursor was) isn't news.
+    pub fn take_told(&mut self, who: Entity, log: &AuthorityLog) -> Vec<PlayerEvent> {
+        let seen = match self.told {
+            Some((was, seen)) if was == who => seen,
+            _ => log.count,
+        };
+        self.told = Some((who, log.count));
+        log.since(seen).map(|(_, event)| event).collect()
+    }
 }
 
 pub fn present_events(
-    player: Single<&Player, With<LocalPlayer>>,
+    player: Single<(Entity, &Player, &AuthorityLog), With<LocalPlayer>>,
     mut cursor: ResMut<EventCursor>,
     mut presented: MessageWriter<Presented>,
 ) {
-    for event in cursor.take_new(&player.events) {
+    let (me, player, told) = *player;
+    let mut new = cursor.take_new(&player.events);
+    new.extend(cursor.take_told(me, told));
+    for event in new {
+        debug!("presented {event:?}");
         if let Some(text) = event.caption() {
             cursor.last_text = text;
         }
@@ -99,6 +123,21 @@ mod tests {
         assert_eq!(cursor.take_new(&log_with(&[(100, jumped)], 101)).len(), 1);
         // A correction moves the same event a tick later.
         assert!(cursor.take_new(&log_with(&[(101, jumped)], 104)).is_empty());
+    }
+
+    #[test]
+    fn an_authority_event_is_presented_once_however_late() {
+        let mut cursor = EventCursor::default();
+        let me = Entity::from_raw_u32(7).unwrap();
+        let mut log = AuthorityLog::default();
+        log.push(10, PlayerEvent::Died);
+        // What was there when first read is history.
+        assert!(cursor.take_told(me, &log).is_empty());
+        // Arriving a second after it happened, it's still presented, once.
+        log.push(20, PlayerEvent::Died);
+        log.push(20, PlayerEvent::Respawned);
+        assert_eq!(cursor.take_told(me, &log), vec![PlayerEvent::Died, PlayerEvent::Respawned]);
+        assert!(cursor.take_told(me, &log).is_empty());
     }
 
     #[test]
