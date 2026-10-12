@@ -111,11 +111,10 @@ fn hand_view(player: &Player, tuning: &Tuning, hand: Hand) -> HandView {
             view.detail = format!("{} {}", weapon.rarity.name(), weapon.kind_name().to_lowercase());
             view.rarity = Some(weapon.rarity);
             view.reload = loadout.reload_progress(hand);
-            let state = loadout.hands[hand as usize];
             if stats.heat > 0.0 {
-                // A laser: heat, not rounds.
-                view.heat = Some(state.heat);
-                if state.overheated {
+                // A laser: heat, not rounds (the gun's own).
+                view.heat = Some(weapon.heat_fraction());
+                if weapon.overheated {
                     view.tags.push(HandTag::Overheated);
                 }
                 if loadout.zoom > 1.0 {

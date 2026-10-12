@@ -91,7 +91,7 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   forward), with every robot model's affix parts showing at once. To the
   left, a table of live robots: a row per kind, the plain one and then one
   with each affix it can have; they don't fight back. To the right, every
-  weapon part; behind, a dozen rolled guns. An area's labels show only
+  weapon part; behind, rolled guns (a row per frame, and one of the families). An area's labels show only
   while you face it.
 
 You start with the base kit (your suit and its grapple) and whatever your
@@ -154,7 +154,7 @@ A gun looks like what it rolled: it's drawn from its frame's receiver with
 each of its parts on (a long barrel is long, a drum is a drum, a quick mag
 is two taped together, a compensator is ported, a scope has a big objective
 bell), in its maker's paint, in your hands, your crewmates' and on pickups.
-The model gallery has a wall of every part and two rows of rolled guns.
+The model gallery has a wall of every part and rows of rolled guns: one per frame, and one of the families.
 
 The frames have their own jobs. The **SMG** sprays; the **rifle** reaches
 (and with a scope zooms x2.5). The **shotgun** fires eight pellets a shell,
@@ -173,7 +173,8 @@ card says so. SMGs and rifles also come in **families** besides bullets:
   with each jump. Hulls and decks stop a jump; it finds no weak spots and
   pushes nothing.
 - **Laser**: a red beam, hitting every tick it's held, out to 400 m, with no
-  cone and no ammo: it **heats** instead (the card's bar), about four seconds
+  cone and no ammo: it **heats** instead (the card's bar; the heat is the
+  gun's, so a hot laser stays hot in your other hand or pack), about four seconds
   of beam to overheat, then it won't fire until it's cooled to a third.
 Plasma and arc guns use **cells**, shotguns **shells**: two more ammo kinds
 (the locker fills them; robots drop them). Each frame and family sounds and

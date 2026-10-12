@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Preview an assembled gun: a frame's receiver with a part on each socket, rendered.
+
+    tools/assets/compose shotgun                                standard parts, iron sight
+    tools/assets/compose sniper barrel=long sight=scope muzzle=booster
+    tools/assets/compose rifle emitter=plasma --views right,q3
+    tools/assets/compose smg sight=none --out /tmp/guns
+
+Hangs the part .glbs on the receiver's sockets as the game does (src/client/guns.rs): a
+barrel, mag, stock and sight on the receiver; a muzzle device, or a family's emitter, on
+the barrel's SOCKET_muzzle. `slot=none` leaves a slot empty. Prints the assembled gun's
+bounds in Bevy axes (its length is what to check against a frame's target) and renders
+orthographic views (right, left, top, q3, rq3; default all) to
+<out>/<frame>[_<slot>-<variant>...]_<view>.png (default out: target/compose).
+The part previews show each part alone; this is the one place to judge fit and length
+before the game. Env: HB_BLENDER (default: blender on PATH, else /usr/bin/blender).
+"""
+import os
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+WEAPONS = os.path.join(ROOT, "assets", "weapons")
+SLOTS = ("barrel", "mag", "stock", "sight", "muzzle", "emitter")
+DEFAULTS = {"barrel": "standard", "mag": "standard", "stock": "standard", "sight": "iron"}
+
+
+def main(argv):
+    args = argv[1:]
+    if not args or any(a in ("-h", "--help") for a in args):
+        print(__doc__.strip())
+        return 0 if args else 1
+    out, views, rest = os.path.join(ROOT, "target", "compose"), None, []
+    i = 0
+    while i < len(args):
+        if args[i] in ("--out", "--views"):
+            if i + 1 >= len(args):
+                raise SystemExit(f"compose: {args[i]} needs a value")
+            if args[i] == "--out":
+                out = args[i + 1]
+            else:
+                views = args[i + 1]
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    frame, picks = rest[0], dict(DEFAULTS)
+    for kv in rest[1:]:
+        slot, _, variant = kv.partition("=")
+        if slot not in SLOTS or not variant:
+            raise SystemExit(f"compose: {kv!r}: want slot=variant, slot one of {', '.join(SLOTS)}")
+        picks[slot] = variant
+    receiver = os.path.join(WEAPONS, f"{frame}_receiver", f"{frame}_receiver.glb")
+    if not os.path.isfile(receiver):
+        raise SystemExit(f"compose: no receiver for {frame!r} ({receiver})")
+    parts = []
+    for slot, variant in picks.items():
+        if variant == "none":
+            continue
+        name = f"{frame}_{slot}_{variant}"
+        path = os.path.join(WEAPONS, "parts", name, f"{name}.glb")
+        if not os.path.isfile(path):
+            raise SystemExit(f"compose: no part {name} ({path}); build it with tools/assets/build")
+        parts.append(f"{slot}={path}")
+    os.makedirs(out, exist_ok=True)
+    tag = "".join(f"_{s}-{v}" for s, v in picks.items() if DEFAULTS.get(s) != v)
+    prefix = os.path.join(out, frame + tag)
+    blender = os.environ.get("HB_BLENDER") or shutil.which("blender") or "/usr/bin/blender"
+    cmd = [blender, "-b", "--factory-startup", "--python-exit-code", "1",
+           "--python", os.path.join(HERE, "compose_scene.py"), "--",
+           prefix + (f":{views}" if views else ""), receiver, *parts]
+    run = subprocess.run(cmd, capture_output=True, text=True)
+    for line in run.stdout.splitlines() + run.stderr.splitlines():
+        if line.startswith("COMPOSE") or "Error" in line or "Traceback" in line:
+            print(line)
+    if run.returncode != 0:
+        print(run.stderr[-2000:], file=sys.stderr)
+    return run.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

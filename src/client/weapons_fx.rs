@@ -43,7 +43,7 @@ pub struct Spark {
     grow: f32,
 }
 
-/// A beam or an arc's bolt: there for a moment.
+/// An arc's bolt: there for a moment.
 #[derive(Component)]
 pub struct Zap {
     age: f32,
@@ -73,8 +73,6 @@ const STREAK_SECONDS: f32 = 0.04;
 const SPARK_SECONDS: f32 = 0.15;
 /// Where a tracer drawn from the hand crosses the line of fire (m).
 const CONVERGE: f32 = 40.0;
-/// A tick of beam lasts this long on screen (the next tick's replaces it).
-const BEAM_SECONDS: f32 = 0.05;
 const ARC_SECONDS: f32 = 0.12;
 
 pub fn setup_weapon_fx(
@@ -176,17 +174,9 @@ pub fn spawn_tracers(
                 }
             };
             match kind {
-                ShotKind::Laser { range } => {
-                    let (end, _) = trace(range);
-                    commands.spawn((
-                        Zap { age: 0.0, life: BEAM_SECONDS },
-                        Mesh3d(assets.tracer.clone()),
-                        MeshMaterial3d(assets.laser.clone()),
-                        streak(start, end, 0.03),
-                        bevy::light::NotShadowCaster,
-                    ));
-                    spark(&mut commands, &assets, end, &assets.laser, SPARK_SECONDS * 0.6, 0.6);
-                }
+                // A beam is held state, not a shot in the log: see
+                // `draw_beams`.
+                ShotKind::Laser { .. } => {}
                 ShotKind::Arc { range, chain } => {
                     let (end, struck) = trace(range);
                     jagged(&mut commands, &assets, &mut rng, start, end);
@@ -257,6 +247,75 @@ pub fn spawn_tracers(
         }
     }
     drawn.retain(|e, _| players.contains(*e));
+}
+
+/// A beam on screen: its streak and the glow where it lands.
+#[derive(Component)]
+pub struct BeamFx;
+
+/// Draws every laser beam that's on, from the hand that holds it to what
+/// it meets, from each player's beam state (predicted for us, replicated for
+/// everyone else); a beam that's gone is taken down.
+pub fn draw_beams(
+    mut commands: Commands,
+    assets: Res<WeaponFxAssets>,
+    spatial: SpatialQuery,
+    players: Query<(Entity, &Player, Has<LocalPlayer>)>,
+    camera: Option<Single<&Transform, With<PlayerCamera>>>,
+    mut drawn: Local<HashMap<(Entity, usize), (Entity, Entity)>>,
+    mut transforms: Query<&mut Transform, (With<BeamFx>, Without<PlayerCamera>)>,
+) {
+    let mut on = Vec::new();
+    for (entity, player, local) in &players {
+        for (i, state) in player.loadout.hands.iter().enumerate() {
+            let Some(beam) = state.beam else { continue };
+            let Ok(dir) = Dir3::new(beam.dir) else { continue };
+            let (right, up) = match (local, camera.as_deref()) {
+                (true, Some(cam)) => (*cam.right(), *cam.up()),
+                _ => {
+                    let right = dir.cross(Vec3::Y).try_normalize().unwrap_or(dir.any_orthonormal_vector());
+                    (right, right.cross(*dir))
+                }
+            };
+            let side = if i == Hand::Main as usize { 1.0 } else { -1.0 };
+            let start = beam.origin + *dir * 0.6 + right * side * 0.22 - up * 0.2;
+            let filter = SpatialQueryFilter::default().with_excluded_entities([entity]);
+            let end = spatial
+                .cast_ray(beam.origin, dir, beam.range, true, &filter)
+                .map_or(beam.origin + *dir * beam.range, |hit| beam.origin + *dir * hit.distance);
+            let key = (entity, i);
+            on.push(key);
+            let (line, glow) = *drawn.entry(key).or_insert_with(|| {
+                let line = commands
+                    .spawn((BeamFx, Mesh3d(assets.tracer.clone()), MeshMaterial3d(assets.laser.clone()), Transform::default(), bevy::light::NotShadowCaster))
+                    .id();
+                let glow = commands
+                    .spawn((BeamFx, Mesh3d(assets.spark.clone()), MeshMaterial3d(assets.laser.clone()), Transform::default(), bevy::light::NotShadowCaster))
+                    .id();
+                (line, glow)
+            });
+            let flicker = 1.0 + 0.25 * rand::random::<f32>();
+            let line_pose = streak(start, end, 0.03 * flicker);
+            let glow_pose = Transform::from_translation(end).with_scale(Vec3::splat(0.8 * flicker));
+            for (e, pose) in [(line, line_pose), (glow, glow_pose)] {
+                match transforms.get_mut(e) {
+                    Ok(mut t) => *t = pose,
+                    // Just spawned: placed when it's there.
+                    Err(_) => {
+                        commands.entity(e).insert(pose);
+                    }
+                }
+            }
+        }
+    }
+    drawn.retain(|key, (line, glow)| {
+        let keep = on.contains(key);
+        if !keep {
+            commands.entity(*line).despawn();
+            commands.entity(*glow).despawn();
+        }
+        keep
+    });
 }
 
 /// A flash where something landed.

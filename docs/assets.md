@@ -117,6 +117,14 @@ one, add it to the table, run `python3 -I assets/weapons/parts/make_parts.py`, a
 build. Parts are kind `weapon_part`. Their paint roles are what a maker's paint job
 recolours (`paint_primary`, `paint_secondary`); the rest stays metal and polymer.
 
+A part's preview shows it alone. To see a gun put together (fit, overall length), use
+`tools/assets/compose <frame> [slot=variant ...]`: it hangs the built part `.glb`s on the
+receiver's sockets as `guns.rs` does (a `muzzle=` or `emitter=` on the barrel's
+`SOCKET_muzzle`; `slot=none` leaves one off), prints the assembled bounds in Bevy axes and
+renders orthographic views to `target/compose/` (`--views right,q3`, `--out DIR`). E.g.
+`tools/assets/compose sniper barrel=long sight=scope emitter=laser`. Rough lengths with
+standard parts: SMG ~0.64 m, rifle ~0.80, shotgun ~0.77, sniper ~1.1 with a scope.
+
 ## Ships: built on a collision layout
 
 A ship's collision is the boxes of its design (`assets/ships/<ship>/`, see

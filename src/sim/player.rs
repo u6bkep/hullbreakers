@@ -28,7 +28,7 @@ use super::combat::{Beams, beam_shove};
 use super::bots::{BodyTuning, Robot, tuning_of};
 use super::pickups::{Pickup, PickupPoint};
 use super::ship::ControlAction;
-use super::weapons::{Loadout, ShotKind, ShotOut};
+use super::weapons::{Beam, Hand, Loadout, ShotKind, ShotOut};
 use super::rope::{RopeEnd, solve_rope};
 use super::ship::Control;
 use super::tuning::Tuning;
@@ -229,6 +229,7 @@ impl Player {
         for hand in &mut self.loadout.hands {
             hand.reloading = None;
             hand.reload_queued = false;
+            hand.beam = None;
         }
         self.emit(PlayerEvent::Respawned);
     }
@@ -959,6 +960,7 @@ pub fn player_tick(
             }
         }
         super::pickups::handle_inventory(player, &cmd);
+        let beams_before = player.loadout.hands.map(|h| h.beam.is_some());
         let hands = player.loadout.tick(&cmd, ctx.dt);
         if hands.grapple_trigger {
             if player.grapple.take().is_none() {
@@ -972,6 +974,14 @@ pub fn player_tick(
         cmd.pay_out = hands.grapple_held && (cmd.pay_out || hands.pay_out);
         for shot in &hands.shots {
             fire_shot(&ctx, &bodies, player, shot);
+        }
+        // A beam's start and end are what the log keeps of it.
+        for hand in Hand::BOTH {
+            match (beams_before[hand as usize], player.loadout.hands[hand as usize].beam) {
+                (false, Some(beam)) => player.emit(PlayerEvent::BeamStarted { hand, gun: beam.gun }),
+                (true, None) => player.emit(PlayerEvent::BeamStopped { hand }),
+                _ => {}
+            }
         }
         if cmd.set_reference {
             // Only bodies serve as reference frames; the aim sees through players.
@@ -1169,6 +1179,17 @@ fn fire_shot(ctx: &TickContext, bodies: &Bodies, player: &mut Player, shot: &Sho
     let (eye, view) = player.mode.world_view(ctx.tuning, frame.as_ref());
     let (_, own_velocity) = player.mode.world_kinematics(ctx.tuning, frame.as_ref());
     let dir = (view * Vec3::new(shot.deviation.x, shot.deviation.y, -1.0)).normalize();
+    // A laser's tick of beam is held state, not a shot in the log.
+    if let ShotKind::Laser { range } = shot.kind {
+        player.loadout.hands[shot.hand as usize].beam = Some(Beam {
+            gun: shot.gun,
+            damage: shot.damage,
+            range,
+            origin: eye,
+            dir,
+        });
+        return;
+    }
     player.emit(PlayerEvent::Fired {
         hand: shot.hand,
         gun: shot.gun,

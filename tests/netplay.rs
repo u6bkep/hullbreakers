@@ -37,9 +37,32 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// Bytes the client has received from the server, as its link has them
+/// (counted before the transport reads them).
+#[derive(Resource, Default)]
+struct Received(usize);
+
+fn count_received(mut links: Query<&mut Link>, mut received: ResMut<Received>) {
+    for mut link in &mut links {
+        let mut packets = Vec::new();
+        while let Some(p) = link.recv.pop() {
+            received.0 += p.len();
+            packets.push(p);
+        }
+        for p in packets {
+            link.recv.push_raw(p);
+        }
+    }
+}
+
 fn peer(mode: NetMode, lag: Option<SimulatedLag>) -> App {
     let mut app = App::new();
     add_headless_plugins(&mut app, FRAME);
+    app.init_resource::<Received>();
+    app.add_systems(
+        PreUpdate,
+        count_received.after(LinkSystems::Receive).before(lightyear::transport::plugin::TransportSystems::Receive),
+    );
     app.add_plugins(NetPlugin { mode, lag });
     app.insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
     app.finish();
@@ -90,6 +113,13 @@ impl Session {
 
     fn input(&mut self) -> Mut<'_, LocalInput> {
         self.client.world_mut().resource_mut::<LocalInput>()
+    }
+
+    /// Bytes per second the client receives over `frames` frames.
+    fn received_rate(&mut self, frames: usize) -> f32 {
+        let before = self.client.world().resource::<Received>().0;
+        self.step(frames);
+        (self.client.world().resource::<Received>().0 - before) as f32 / (frames as f32 * FRAME.as_secs_f32())
     }
 
     fn rollbacks(&self) -> u32 {
@@ -401,6 +431,35 @@ fn new_guns_are_predicted() {
     assert_eq!(zoom, 5.0, "the sniper didn't zoom");
     assert!(fired > 0, "never fired");
     assert!(laser.max(sniper).max(shotgun) <= 0.5, "mispredicted");
+}
+
+/// A held laser costs the link little more than standing still: the beam
+/// is state that starts and stops, not a shot in the event log every tick.
+#[test]
+fn a_held_laser_is_cheap_on_the_wire() {
+    use hullbreakers::sim::items::{Family, Weapon};
+    use hullbreakers::sim::weapons::Slot;
+    let (_guard, mut s) = session(0);
+    s.step(60);
+    for world in [s.server.world_mut(), s.client.world_mut()] {
+        for mut p in world.query::<&mut Player>().iter_mut(world) {
+            p.loadout.restock();
+            p.loadout.inventory.weapons[0] = Some(Weapon::issue(hullbreakers::sim::weapons::GunKind::Smg).with_family(Family::Laser));
+            p.loadout.stances[0].off = Slot::Empty;
+        }
+    }
+    s.input().0.stance = 0;
+    s.input().0.presses.stance.press();
+    s.step(120);
+    let idle = s.received_rate(180);
+    s.input().0.main.held = true;
+    // Three seconds of beam: under the overheat.
+    let beam = s.received_rate(180);
+    s.input().0.main.held = false;
+    eprintln!("laser on the wire: standing {idle:.0} B/s, beam held {beam:.0} B/s");
+    // Measured 2026-10-12: 6.3 kB/s standing; 71.8 kB/s with a beam as a
+    // `Fired` entry a tick, 7.1 kB/s as held state.
+    assert!(beam < idle * 1.3, "a beam costs {beam:.0} B/s against {idle:.0} standing");
 }
 
 /// The carrier's robots reach a client as interpolated players with their

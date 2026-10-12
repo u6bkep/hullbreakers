@@ -139,6 +139,7 @@ impl Plugin for ClientPlugin {
                 (
                     render::draw_gizmos,
                     sfx::play_continuous_sounds,
+                    sfx::beam_hum,
                     events::present_events,
                     sfx::play_remote_sounds,
                     (
@@ -156,6 +157,7 @@ impl Plugin for ClientPlugin {
                         weapons_fx::spawn_tracers,
                         weapons_fx::fly_tracers,
                         weapons_fx::fade_sparks,
+                        weapons_fx::draw_beams,
                     )
                         .chain(),
                 )

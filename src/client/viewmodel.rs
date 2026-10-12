@@ -88,14 +88,41 @@ const MAIN_GRIP: Vec3 = Vec3::new(0.23, -0.27, -0.52);
 /// A braced rifle sits nearer the middle and closer, its stock toward the
 /// shoulder.
 const BRACED_GRIP: Vec3 = Vec3::new(0.13, -0.25, -0.42);
+/// What the off hand holds a two-handed gun by.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Foregrip {
+    /// A grip standing down from the handguard (rifle, sniper): held as
+    /// the main hand holds its pistol grip.
+    Vertical,
+    /// A pump slide along the barrel (shotgun): the hand under it, fingers
+    /// round it, the forearm dropping away below.
+    Pump,
+}
+
+impl Foregrip {
+    /// The glove's turn on the foregrip, in the gun's frame. The arm model
+    /// is a fist round a vertical grip with the forearm running back; a
+    /// pump's axis runs along the gun, so the fist is tipped forward onto it
+    /// (the forearm then drops back and down, as a hand under a pump does).
+    fn turn(self) -> Quat {
+        match self {
+            Foregrip::Vertical => Quat::IDENTITY,
+            Foregrip::Pump => Quat::from_rotation_x(PUMP_TIP),
+        }
+    }
+}
+
+/// How far a pump's glove is tipped forward from a vertical grip's (rad).
+const PUMP_TIP: f32 = 0.8;
+
 /// A two-handed frame's foregrip from its grip (its receiver's
-/// `SOCKET_foregrip`, through the parts it hangs on); `None` for a frame
-/// held in one hand.
-fn foregrip(frame: GunKind) -> Option<Vec3> {
+/// `SOCKET_foregrip`, through the parts it hangs on) and what kind it is;
+/// `None` for a frame held in one hand.
+fn foregrip(frame: GunKind) -> Option<(Vec3, Foregrip)> {
     match frame {
-        GunKind::Rifle => Some(Vec3::new(0.0, 0.02, -0.298)),
-        GunKind::Shotgun => Some(Vec3::new(0.0, 0.056, -0.295)),
-        GunKind::Sniper => Some(Vec3::new(0.0, 0.03, -0.4)),
+        GunKind::Rifle => Some((Vec3::new(0.0, 0.02, -0.298), Foregrip::Vertical)),
+        GunKind::Shotgun => Some((Vec3::new(0.0, 0.056, -0.295), Foregrip::Pump)),
+        GunKind::Sniper => Some((Vec3::new(0.0, 0.03, -0.4), Foregrip::Vertical)),
         _ => None,
     }
 }
@@ -246,8 +273,8 @@ pub fn pose_view_hands(
         };
         let pose = if let Held::Brace(frame) = item {
             // On the foregrip of the gun in the other hand.
-            let at = foregrip(frame).unwrap_or_default();
-            Transform::from_translation(main_pose.transform_point(at)).with_rotation(main_pose.rotation)
+            let (at, kind) = foregrip(frame).unwrap_or((Vec3::ZERO, Foregrip::Vertical));
+            Transform::from_translation(main_pose.transform_point(at)).with_rotation(main_pose.rotation * kind.turn())
         } else {
             let rest = if braced { BRACED_GRIP } else { MAIN_GRIP };
             let grip = Vec3::new(rest.x * side, rest.y, rest.z);

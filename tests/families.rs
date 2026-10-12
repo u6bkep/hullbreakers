@@ -8,6 +8,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use hullbreakers::sim::SimPlugin;
+use hullbreakers::sim::events::PlayerEvent;
 use hullbreakers::sim::input::PlayerInput;
 use hullbreakers::sim::items::{Family, Weapon};
 use hullbreakers::sim::player::{Mode, Player, new_player};
@@ -201,8 +202,14 @@ fn a_laser_burns_while_held_heats_and_pushes_nothing() {
     let per_tick = Weapon::issue(GunKind::Smg).with_family(Family::Laser).stats().damage;
     assert!(hurt > per_tick * 25.0, "only {hurt} from 30 ticks of {per_tick}");
     assert_eq!(velocity(&app, them), Vec3::ZERO);
-    let hand = app.world().get::<Player>(me).unwrap().loadout.hands[0];
-    assert!(hand.heat > 0.05 && !hand.overheated, "{hand:?}");
+    let gun = app.world().get::<Player>(me).unwrap().loadout.inventory.weapons[0].unwrap();
+    assert!(gun.heat_fraction() > 0.05 && !gun.overheated, "{gun:?}");
+    // The log keeps the burst's start and end, not a shot a tick.
+    let log: Vec<PlayerEvent> = app.world().get::<Player>(me).unwrap().events.iter().map(|(_, e)| e).collect();
+    let count = |f: fn(&PlayerEvent) -> bool| log.iter().filter(|e| f(e)).count();
+    assert_eq!(count(|e| matches!(e, PlayerEvent::BeamStarted { .. })), 1);
+    assert_eq!(count(|e| matches!(e, PlayerEvent::BeamStopped { .. })), 1);
+    assert_eq!(count(|e| matches!(e, PlayerEvent::Fired { .. })), 0);
     // Five more seconds held: it overheats and stops a while to cool.
     let before = app.world().get::<Player>(me).unwrap().loadout.hands[0].fired;
     fire(&mut app, me, 300, 0);

@@ -555,9 +555,11 @@ pub fn think(
         .iter()
         .filter(|(_, p, team, _)| {
             crew(*team)
-                && p.events
+                && (p.events
                     .iter()
                     .any(|(at, e)| matches!(e, PlayerEvent::Fired { .. }) && tick.0.wrapping_sub(at) <= 1)
+                    // A laser beam is gunfire too, while it's on.
+                    || p.loadout.hands.iter().any(|h| h.beam.is_some()))
         })
         .filter_map(|(e, ..)| Some((e, where_is(e)?)))
         .collect();
