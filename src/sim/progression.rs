@@ -22,6 +22,7 @@ use super::bots::{BodyTuning, Robot};
 use super::tuning::Tuning;
 use super::mission::{CrewTally, Director, Mission, Phase, ScenarioKind};
 use super::scenarios;
+use super::pickups::Pickup;
 use super::player::Player;
 use super::ship::HomeShip;
 use super::weapons::GunKind;
@@ -86,12 +87,98 @@ impl ProfileFile {
         }
     }
 
-    /// The file for a player with `profile`, carrying `carried`.
+    /// The file for a player with `profile`, carrying `carried` (less any
+    /// mission cargo).
     pub fn of(profile: &Profile, carried: &Inventory) -> ProfileFile {
+        let mut carried = *carried;
+        carried.strip_cargo();
         ProfileFile {
             version: Self::VERSION,
             profile: profile.settled(),
-            carried: *carried,
+            carried,
+        }
+    }
+
+    /// The same but for what's in mags and pools (which change with every
+    /// shot).
+    fn same_gear(&self, other: &ProfileFile) -> bool {
+        let gear = |f: &ProfileFile| {
+            let mut f = f.clone();
+            f.carried.ammo = [0; AmmoKind::COUNT];
+            f.carried.all_weapons_mut().for_each(|w| w.mag = 0);
+            f
+        };
+        gear(self) == gear(other)
+    }
+}
+
+/// The host's snapshot of a player's profile as it's to be saved: their
+/// profile and what they carry, at one tick (so a gun is never both carried
+/// and out in the world, or neither). Replicated; the player's own machine
+/// saves it (see `net::profiles`).
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedProfile {
+    pub file: ProfileFile,
+    /// The tick it was taken.
+    pub at: u32,
+}
+
+/// Seconds between snapshots while only ammo changes; a change of gear (or
+/// a mission's end) is snapshotted at once.
+const SNAPSHOT_SECONDS: f32 = 5.0;
+
+/// Authority, at the end of each tick: every profile's snapshot, kept up.
+pub fn snapshot_profiles(
+    tick: Res<super::SimTick>,
+    players: Query<(Entity, &Player, &Profile, Option<&SavedProfile>)>,
+    mut commands: Commands,
+) {
+    for (entity, player, profile, saved) in &players {
+        let file = ProfileFile::of(profile, &player.loadout.inventory);
+        let due = match saved {
+            None => true,
+            Some(saved) if saved.file == file => false,
+            Some(saved) => {
+                !saved.file.same_gear(&file)
+                    || tick.0.wrapping_sub(saved.at) as f32 >= SNAPSHOT_SECONDS * super::TICK_HZ as f32
+            }
+        };
+        if due {
+            commands.entity(entity).insert(SavedProfile { file, at: tick.0 });
+        }
+    }
+}
+
+/// Authority: a player leaving (their profile going with them) takes their
+/// guns out of the world: their last save has them back in the stash (see
+/// [`Profile::settled`]), so a crewmate (or they, back as someone new) can't
+/// have them twice. What's left of their cases is anyone's.
+pub fn leave_with_gear(remove: On<Remove, Profile>, mut pickups: Query<(Entity, &mut Pickup)>, mut commands: Commands) {
+    for (entity, mut pickup) in &mut pickups {
+        if pickup.owner != Some(remove.entity) {
+            continue;
+        }
+        if RECOVER_UNCLAIMED {
+            pickup.items.retain(|i| !matches!(i, Item::Weapon(w) if w.rarity != Rarity::Standard));
+        }
+        pickup.owner = None;
+        pickup.owner_only = false;
+        if pickup.items.is_empty() {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Authority: when the world is about to change, mission cargo is left in
+/// it (a data core brought home has done its job).
+pub fn leave_cargo(director: Res<Director>, mut players: Query<&mut Player, Without<Robot>>) {
+    if director.switching().is_none() {
+        return;
+    }
+    for mut player in &mut players {
+        let before = player.loadout.held();
+        if player.loadout.inventory.strip_cargo() {
+            player.loadout.hands_changed(before);
         }
     }
 }
@@ -110,7 +197,7 @@ pub enum ProfileWire {
 pub enum ProfileOp {
     /// The armory: a gun from the stash into the inventory (the first free
     /// place, as a pickup would go).
-    Take(u16),
+    Take(Weapon),
     /// The armory: a standard-issue gun of a frame, free.
     TakeIssue(GunKind),
     /// The armory: the gun at this place in the inventory into the stash
@@ -129,11 +216,13 @@ pub enum ProfileOp {
     Scrap(Holding),
 }
 
-/// A gun a player has: carried, or in their stash.
+/// A gun a player has: carried (where), or in their stash (which: by what
+/// it is, not where, so a click on a stash that has just changed can't act
+/// on the gun beside it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Holding {
     Carried(Place),
-    Stash(u16),
+    Stash(Weapon),
 }
 
 impl Holding {
@@ -144,7 +233,7 @@ impl Holding {
                 Some(Item::Weapon(w)) => Some(w),
                 _ => None,
             },
-            Holding::Stash(i) => profile.stash.get(i as usize).copied(),
+            Holding::Stash(w) => profile.stash.contains(&w).then_some(w),
         }
     }
 }
@@ -223,6 +312,9 @@ fn sanitized(mut file: ProfileFile) -> ProfileFile {
         }
     }
     inv.all_weapons_mut().for_each(fix);
+    inv.strip_cargo();
+    file.profile.salvage = file.profile.salvage.min(u32::MAX / 2);
+    file.profile.xp = file.profile.xp.min(u32::MAX / 2);
     for kind in AmmoKind::ALL {
         let pool = inv.ammo_mut(kind);
         *pool = (*pool).min(kind.cap());
@@ -287,9 +379,9 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
     let before = player.loadout.held();
     let inv = &mut player.loadout.inventory;
     let done = match op {
-        ProfileOp::Take(i) => match profile.stash.get(i as usize) {
-            Some(&w) if inv.take(Item::Weapon(w)) => {
-                profile.stash.remove(i as usize);
+        ProfileOp::Take(w) => match profile.stash.iter().position(|s| *s == w) {
+            Some(i) if inv.take(Item::Weapon(w)) => {
+                profile.stash.remove(i);
                 true
             }
             _ => false,
@@ -321,7 +413,13 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
                 Some(_) => return false,
                 None => 0,
             };
-            if w.refit.parts[slot] == fit || !profile.spend(REFIT_COST) {
+            // Nothing to do if that part is what it has already.
+            let now = w.build().parts.slots()[slot];
+            let same = match variant {
+                Some(v) => options.get(v as usize) == Some(&now),
+                None => w.refit.parts[slot] == 0,
+            };
+            if same || !profile.spend(REFIT_COST) {
                 return false;
             }
             w.refit.parts[slot] = fit;
@@ -345,11 +443,13 @@ pub fn apply(op: ProfileOp, player: &mut Player, profile: &mut Profile) -> bool 
                     Holding::Carried(place) => {
                         inv.remove(place);
                     }
-                    Holding::Stash(i) => {
-                        profile.stash.remove(i as usize);
+                    Holding::Stash(w) => {
+                        if let Some(i) = profile.stash.iter().position(|s| *s == w) {
+                            profile.stash.remove(i);
+                        }
                     }
                 }
-                profile.salvage += scrap_value(&w);
+                profile.salvage = profile.salvage.saturating_add(scrap_value(&w));
                 if w.rarity != Rarity::Standard {
                     for part in w.build().parts.slots() {
                         let (slot, variant) = part.place();
@@ -379,9 +479,14 @@ fn workbench(h: Holding, inv: &mut Inventory, profile: &mut Profile, change: imp
     match h {
         Holding::Carried(place) => {
             inv.remove(place);
-            inv.put_back(place, Item::Weapon(w));
+            if !inv.put_back(place, Item::Weapon(w)) {
+                profile.stash.push(w);
+            }
         }
-        Holding::Stash(i) => profile.stash[i as usize] = w,
+        Holding::Stash(old) => match profile.stash.iter().position(|s| *s == old) {
+            Some(i) => profile.stash[i] = w,
+            None => return false,
+        },
     }
     true
 }
@@ -689,8 +794,8 @@ pub fn settle_missions(
         let name = name.map_or("?".to_string(), |n| n.to_string());
         if let Some(mut r) = reward(mission.kind, mission.phase, seconds, credits, all_home, name) {
             let before = rank(profile.xp);
-            profile.salvage += r.salvage;
-            profile.xp += r.xp;
+            profile.salvage = profile.salvage.saturating_add(r.salvage);
+            profile.xp = profile.xp.saturating_add(r.xp);
             profile.missions += 1;
             r.rank = rank(profile.xp);
             r.new_rank = LADDER

@@ -85,6 +85,9 @@ game)
         # default (99-pipewire-default.conf) would win over any override.
         printf 'pcm.!default { type null }\nctl.!default { type hw card 0 }\n' >"$STATE/asound.conf"
         export ALSA_CONFIG_PATH="$STATE/asound.conf"
+        # And off the user's own profile: each instance keeps one in the
+        # harness's state (unless the caller names one).
+        export HULLBREAKERS_SAVE="${HULLBREAKERS_SAVE:-$STATE/profile-$((n + 1)).ron}"
         cd "$ROOT"
         exec "${HL_EXE:-./target/debug/${HL_BIN:-hullbreakers}}" "$@" >"$log" 2>&1
     ) &

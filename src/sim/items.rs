@@ -1199,6 +1199,20 @@ impl Inventory {
         }
     }
 
+    /// Takes out all cargo (mission items belong to the mission: they
+    /// don't leave its world or go in a saved profile). Whether there was
+    /// any.
+    pub fn strip_cargo(&mut self) -> bool {
+        let mut any = self.carrying.take().is_some();
+        for slot in &mut self.pack {
+            if matches!(slot, Some(Item::Cargo(_))) {
+                *slot = None;
+                any = true;
+            }
+        }
+        any
+    }
+
     /// Puts `item` at an empty `place` it fits. Whether it did.
     pub fn put_back(&mut self, place: Place, item: Item) -> bool {
         let ok = self.get(place).is_none() && self.fits(place, &item);

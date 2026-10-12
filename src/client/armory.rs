@@ -47,8 +47,8 @@ pub fn stash_grid(ui: &mut egui::Ui, profile: &Profile, chosen: &mut Option<Hold
                 if profile.stash.is_empty() {
                     ui.label(egui::RichText::new("Empty. What you find is yours: store it here.").small().color(DIM));
                 }
-                for (i, w) in profile.stash.iter().enumerate() {
-                    let here = Holding::Stash(i as u16);
+                for w in &profile.stash {
+                    let here = Holding::Stash(*w);
                     let r = cell(ui, CELL, "STASH", Some(Item::Weapon(*w)), *chosen == Some(here), false);
                     if r.clicked() {
                         *chosen = if *chosen == Some(here) { None } else { Some(here) };
@@ -158,9 +158,9 @@ pub fn armory_tab(
                         ui.label(egui::RichText::new("The stash is full: scrap something at the workbench.").small().color(DIM));
                     }
                 }
-                Holding::Stash(i) => {
+                Holding::Stash(w) => {
                     if ui.button("Take").clicked() {
-                        ask(ProfileOp::Take(i));
+                        ask(ProfileOp::Take(w));
                         *chosen = None;
                     }
                 }

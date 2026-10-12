@@ -13,7 +13,7 @@ use lightyear::prelude::*;
 use super::LocalPlayer;
 use crate::client::save::ProfileStore;
 use crate::sim::player::Player;
-use crate::sim::progression::{Profile, ProfileFile, ProfileOp, ProfileOrders, ProfileWire};
+use crate::sim::progression::{Profile, ProfileOp, ProfileOrders, ProfileWire, SavedProfile};
 
 /// The channel profiles travel on: reliable and in order (an upload before
 /// what's asked of it).
@@ -28,16 +28,13 @@ pub fn register(app: &mut App) {
     app.register_message::<ProfileWire>()
         .add_direction(NetworkDirection::ClientToServer);
     app.component::<Profile>().replicate();
+    app.component::<SavedProfile>().replicate();
 }
 
 /// What this machine's armory and workbench ask of its profile, to go to
 /// the authority.
 #[derive(Resource, Default)]
 pub struct ProfileRequests(pub Vec<ProfileOp>);
-
-/// Seconds between saves while things change (a gun fired changes what's
-/// carried); a mission's end saves at once.
-const SAVE_EVERY: f32 = 3.0;
 
 /// A playing machine: its profile and requests go to the authority, by the
 /// network or (a host) straight to its own simulation.
@@ -95,28 +92,12 @@ pub fn receive_profiles(
     }
 }
 
-/// A playing machine: keeps `profile.ron` as the authority has it (with
-/// what this player carries), every few seconds while it changes, at once
-/// when a mission ends, and on quitting.
-pub fn save_profile(
-    time: Res<Time>,
-    store: Option<ResMut<ProfileStore>>,
-    local: Query<(&Player, &Profile), With<LocalPlayer>>,
-    mut exit: MessageReader<AppExit>,
-) {
-    let Some(mut store) = store else { return };
-    store.since_save += time.delta_secs();
-    let Ok((player, profile)) = local.single() else { return };
-    // Not before what's carried has settled from the upload: the profile
-    // and the player's own state may arrive a little apart.
-    store.held_for += time.delta_secs();
-    if store.held_for < 1.0 {
-        return;
-    }
-    let file = ProfileFile::of(profile, &player.loadout.inventory);
-    let quitting = exit.read().count() > 0;
-    let mission_over = file.profile.missions != store.file.profile.missions;
-    if quitting || mission_over || store.since_save >= SAVE_EVERY {
-        store.save(file);
+/// A playing machine: keeps `profile.ron` as the host's latest snapshot of
+/// this player's (see [`SavedProfile`]: their profile and what they carry,
+/// taken at one tick, as the host has it, never this machine's prediction).
+pub fn save_profile(store: Option<ResMut<ProfileStore>>, local: Query<&SavedProfile, With<LocalPlayer>>) {
+    let (Some(mut store), Ok(saved)) = (store, local.single()) else { return };
+    if saved.file != store.file {
+        store.save(saved.file.clone());
     }
 }

@@ -195,7 +195,7 @@ fn the_armory_moves_guns_between_the_stash_and_your_hands() {
     stand_looking_at(&mut app, me, DECK, DECK + Vec3::new(0.0, 0.0, -2.0));
     // The rifle to the stash, the SMG from it.
     ask(&mut app, me, ProfileOp::Store(Place::Weapon(0)));
-    ask(&mut app, me, ProfileOp::Take(0));
+    ask(&mut app, me, ProfileOp::Take(smg));
     let (p, pr) = (player(&app, me), profile(&app, me));
     assert_eq!(p.loadout.inventory.weapons[0], Some(smg));
     assert_eq!(pr.stash, vec![rare()]);
@@ -212,7 +212,7 @@ fn the_armory_moves_guns_between_the_stash_and_your_hands() {
         orientation: Quat::IDENTITY,
         pitch: 0.0,
     };
-    ask(&mut app, me, ProfileOp::Take(0));
+    ask(&mut app, me, ProfileOp::Take(rare()));
     assert_eq!(profile(&app, me).stash, vec![rare()], "the armory worked from space");
 }
 
@@ -247,7 +247,7 @@ fn the_workbench_tunes_refits_repaints_and_scraps() {
     ask(&mut app, me, ProfileOp::Refit(held, 1, Some(drum_v)));
     assert_eq!(profile(&app, me).salvage, salvage, "fitted a part not unlocked");
     app.world_mut().get_mut::<Profile>(me).unwrap().stash.push(drum);
-    ask(&mut app, me, ProfileOp::Scrap(Holding::Stash(0)));
+    ask(&mut app, me, ProfileOp::Scrap(Holding::Stash(drum)));
     let p = profile(&app, me);
     assert!(p.stash.is_empty());
     assert_eq!(p.salvage, salvage + scrap_value(&drum));
@@ -297,6 +297,71 @@ fn rank_opens_slots_plates_the_suit_and_strengthens_the_jetpack() {
     kill(&mut app, me);
     assert_eq!(app.world().get::<Vitals>(me).unwrap().health, base.player_health + 50.0);
     assert_eq!(player(&app, me).loadout.inventory.weapon_slots(), 4);
+}
+
+#[test]
+fn mission_cargo_stays_in_the_mission() {
+    use hullbreakers::sim::items::CargoKind;
+    let mut app = app();
+    let me = armed(&mut app);
+    {
+        let mut p = app.world_mut().get_mut::<Player>(me).unwrap();
+        p.loadout.inventory.take(Item::Cargo(CargoKind::DataCore));
+        p.loadout.inventory.take(Item::Cargo(CargoKind::PowerCell));
+    }
+    ticks(&mut app, 2);
+    let saved = app.world().get::<hullbreakers::sim::progression::SavedProfile>(me).unwrap().file.clone();
+    assert!(saved.carried.carrying.is_none() && !saved.carried.pack.iter().flatten().any(|i| matches!(i, Item::Cargo(_))), "cargo in the save");
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Field);
+    ticks(&mut app, 3);
+    let inv = player(&app, me).loadout.inventory;
+    assert!(inv.carrying.is_none() && !inv.pack.iter().flatten().any(|i| matches!(i, Item::Cargo(_))));
+    assert_eq!(inv.weapons[0], Some(rare()), "the gun went with the cargo");
+}
+
+#[test]
+fn the_save_never_has_a_gun_twice_or_not_at_all() {
+    use hullbreakers::sim::progression::SavedProfile;
+    let mut app = app();
+    let me = armed(&mut app);
+    app.world_mut().get_mut::<Player>(me).unwrap().loadout.current = 0;
+    stand_looking_at(&mut app, me, DECK, DECK + Vec3::new(0.0, 0.0, -2.0));
+    let count = |f: &hullbreakers::sim::progression::ProfileFile| {
+        let carried = f.carried.weapons.iter().flatten().filter(|w| **w == rare()).count();
+        carried + f.profile.stash.iter().filter(|w| **w == rare()).count() + f.profile.out.iter().filter(|w| **w == rare()).count()
+    };
+    for step in 0..3 {
+        match step {
+            1 => app.world_mut().get_mut::<PlayerInput>(me).unwrap().presses.drop.press(),
+            2 => {
+                let (_, dropped) = pickups(&mut app).pop().expect("nothing dropped");
+                stand_looking_at(&mut app, me, DECK + Vec3::Z * 0.5, dropped.at);
+                app.world_mut().get_mut::<PlayerInput>(me).unwrap().presses.interact.press();
+            }
+            _ => {}
+        }
+        for _ in 0..4 {
+            ticks(&mut app, 1);
+            let saved = app.world().get::<SavedProfile>(me).unwrap().file.clone();
+            assert_eq!(count(&saved), 1, "step {step}: {saved:#?}");
+        }
+    }
+}
+
+#[test]
+fn someone_leaving_takes_their_guns_out_of_the_world() {
+    let mut app = app();
+    let me = armed(&mut app);
+    let ship = home(&mut app);
+    let other = app.world_mut().spawn((new_player(ship, 1), Vitals::full(&Tuning::default()))).id();
+    app.world_mut().get_mut::<Player>(me).unwrap().loadout.current = 0;
+    stand_looking_at(&mut app, me, DECK, DECK + Vec3::new(0.0, 0.0, -2.0));
+    app.world_mut().get_mut::<PlayerInput>(me).unwrap().presses.drop.press();
+    ticks(&mut app, 2);
+    assert_eq!(pickups(&mut app).len(), 1);
+    app.world_mut().entity_mut(me).despawn();
+    ticks(&mut app, 2);
+    assert!(pickups(&mut app).is_empty(), "their gun's still lying there for {other:?} to take");
 }
 
 #[test]

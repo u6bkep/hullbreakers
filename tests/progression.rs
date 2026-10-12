@@ -188,7 +188,7 @@ fn a_clients_armory_works_through_the_host() {
     let mut crew = Crew::start(vec![store_with(&pa, &a), store_with(&pb, &b)]);
     let gun = b.carried.weapons[0].unwrap();
     crew.clients[1].world_mut().resource_mut::<ProfileRequests>().0.push(ProfileOp::Store(Place::Weapon(0)));
-    crew.clients[0].world_mut().resource_mut::<ProfileRequests>().0.push(ProfileOp::Take(0));
+    crew.clients[0].world_mut().resource_mut::<ProfileRequests>().0.push(ProfileOp::Take(a.profile.stash[0]));
     crew.step(60);
     let (player_b, profile_b) = crew.local(1).unwrap();
     assert_eq!(profile_b.unwrap().stash, vec![gun], "B's gun isn't in B's stash");

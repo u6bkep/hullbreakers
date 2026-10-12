@@ -175,6 +175,7 @@ impl Plugin for SimPlugin {
             .init_resource::<asteroids::FieldInterest>()
             .add_observer(pickups::set_adrift)
             .add_observer(pickups::note_owned)
+            .add_observer(progression::leave_with_gear)
             .init_resource::<progression::ProfileOrders>()
             .insert_resource(mission::Director::with_asteroids(self.asteroids))
             .init_resource::<mission::CrewTally>()
@@ -249,7 +250,14 @@ impl Plugin for SimPlugin {
                     (mission::handle_presses, devices::run_devices, mission::tally_crew, progression::apply_profile_orders, progression::open_slots)
                         .chain()
                         .in_set(mission::MissionSystems::React),
-                    (mission::return_when_decided, progression::settle_missions, mission::switch_scenario, mission::arrivals)
+                    (
+                        mission::return_when_decided,
+                        progression::settle_missions,
+                        progression::leave_cargo,
+                        mission::switch_scenario,
+                        mission::arrivals,
+                        progression::snapshot_profiles,
+                    )
                         .chain()
                         .in_set(mission::MissionSystems::Switch),
                 ),
