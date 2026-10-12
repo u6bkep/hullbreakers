@@ -59,6 +59,9 @@ pub struct Scenario {
     /// How long after it's decided (with that phase) the crew goes back to
     /// the field, if it doesn't wait for them to choose.
     pub return_after: fn(Phase, &Tuning) -> Option<f32>,
+    /// Whether getting home is part of it: the debrief then says who made it
+    /// home and who was left drifting.
+    pub homecoming: bool,
 }
 
 /// The scenario of a kind.

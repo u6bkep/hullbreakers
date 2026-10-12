@@ -17,6 +17,10 @@
 //! | `Door` | (not pressable) | open; a `latch` door stays open once opened |
 //! | `Lamp`, `Board`, `Lights`, `Conduit`, `Gate` | (not pressable) | lit |
 //!
+//! A press works whether or not the device has power: a lever thrown, a
+//! junction turned or a key turned while dead takes effect when the power
+//! comes (a key only while its time lasts).
+//!
 //! The authority keeps the state of a ship's devices in its [`Devices`]
 //! (replicated): it applies presses (the players' `Pressed` events, through
 //! the usual interact path), then evaluates every device in dependency
@@ -341,6 +345,16 @@ pub fn wire(devices: &mut [Device], conds: Vec<(Cond, Vec<(String, Cond)>)>) -> 
             *r = rows;
         }
     }
+    for d in devices.iter() {
+        let settings = match d.kind {
+            DeviceKind::Lever | DeviceKind::Pull => 2,
+            DeviceKind::Junction { ways } => ways,
+            _ => 1,
+        };
+        if d.start >= settings {
+            return Err(format!("device {:?} can't start at {} (it has {settings} settings)", d.id, d.start));
+        }
+    }
     // Kahn's algorithm, lowest index first so the order is stable.
     let n = devices.len();
     let deps: Vec<Vec<u16>> = devices
@@ -646,6 +660,7 @@ mod tests {
         assert!(err("(id: \"a\", kind: Lamp, power: Port(\"b\", 0)), (id: \"b\", kind: Lamp)").contains("isn't a junction"));
         assert!(err("(id: \"a\", kind: Lamp, power: Port(\"j\", 2)), (id: \"j\", kind: Junction(ways: 2))").contains("2 ways"));
         assert!(err("(id: \"a\", kind: Lamp), (id: \"a\", kind: Lamp)").contains("share an id"));
+        assert!(err("(id: \"j\", kind: Junction(ways: 2), start: 2)").contains("can't start at 2"));
     }
 
     #[test]

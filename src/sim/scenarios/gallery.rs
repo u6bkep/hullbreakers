@@ -18,6 +18,7 @@ pub static SCENARIO: Scenario = Scenario {
     arrive: Some(to_gallery),
     systems: |_| {},
     return_after: stay,
+    homecoming: false,
 };
 
 /// Where the model gallery starts: a row behind our ship's stern, centred

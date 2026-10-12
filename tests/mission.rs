@@ -658,6 +658,28 @@ fn the_dead_ship_can_be_won() {
     assert!(debrief.lines.iter().any(|l| l.starts_with("Reactor restarted by Player 1")), "{:?}", debrief.lines);
 }
 
+/// A pull pulled before its power comes counts when the power does: the
+/// core's clamp, pulled at a shut vault (by reaching through, here),
+/// releases the core as the vault opens.
+#[test]
+fn the_core_released_early_counts_when_the_vault_opens() {
+    let mut app = app();
+    start(&mut app, ScenarioKind::DeadShip);
+    let derelict = ship_of(&mut app, "derelict").unwrap();
+    {
+        let hull = design("derelict");
+        let mut devices = app.world_mut().get_mut::<Devices>(derelict).unwrap();
+        devices.0[hull.device("core_clamp")].set = 1;
+    }
+    for device in ["reactor", "j1", "j1", "j2", "j2", "j3", "key_b", "key_a"] {
+        press_device(&mut app, derelict, device);
+    }
+    ticks(&mut app, 1);
+    let m = mission(&mut app);
+    assert!(m.report.iter().any(|l| l.starts_with("Data core released by ?")), "{:?}", m.report);
+    assert!(m.status[0].starts_with("Overload in 1:1"), "{:?}", m.status);
+}
+
 #[test]
 fn the_dead_ship_is_lost_if_the_crew_is_still_out_when_it_goes() {
     use hullbreakers::sim::scenarios::dead_ship::OVERLOAD_SECONDS;
@@ -720,6 +742,8 @@ fn the_grapple_run_is_won_through_every_gate_in_order() {
     let debrief = m.debrief.expect("no debrief");
     assert!(debrief.crew[0].vacuum_seconds > 0.0);
     assert!(debrief.crew[0].credits[0].starts_with("ran the course in"));
+    // Finishing out past the bow isn't being left drifting.
+    assert!(!debrief.lines.iter().any(|l| l.contains("drifting")), "{:?}", debrief.lines);
     // A second run: the board remembers the first.
     start(&mut app, ScenarioKind::GrappleRun);
     ticks(&mut app, 30);

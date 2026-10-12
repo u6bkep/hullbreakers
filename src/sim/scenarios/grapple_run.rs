@@ -16,7 +16,7 @@ use crate::sim::bodies::Bodies;
 use crate::sim::bots::{BodyTuning, Robot, tuning_of};
 use crate::sim::design::{ShipDesign, design};
 use crate::sim::devices::DeviceKind;
-use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, clock};
+use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, clock, countdown};
 use crate::sim::player::Player;
 use crate::sim::ship;
 use crate::sim::tuning::Tuning;
@@ -33,6 +33,7 @@ pub static SCENARIO: Scenario = Scenario {
         super::judge(app, ScenarioKind::GrappleRun, run_course);
     },
     return_after: after_banner,
+    homecoming: false,
 };
 
 /// The course's design.
@@ -256,8 +257,7 @@ fn run_course(
         .collect();
     let objective = match mission.phase {
         Phase::Underway => {
-            let left = (TIME_LIMIT - mission.elapsed(tick.0)).max(0.0);
-            format!("Fly the gates in order — {}:{:02} left", left as u32 / 60, left as u32 % 60)
+            format!("Fly the gates in order — {} left", countdown(TIME_LIMIT - mission.elapsed(tick.0)))
         }
         Phase::Won => "Course clear!".into(),
         Phase::Lost => "Out of time".into(),

@@ -21,7 +21,7 @@ use crate::sim::bodies::Bodies;
 use crate::sim::bots::Robot;
 use crate::sim::design::ShipDesign;
 use crate::sim::devices::{DeviceKind, Devices};
-use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, break_up, clock, presses};
+use crate::sim::mission::{CrewTally, Marker, MarkerKind, Mission, Phase, ScenarioKind, Staged, break_up, clock, countdown, presses};
 use crate::sim::player::Player;
 use crate::sim::ship::{self, ControlAction, HomeShip, ShipHull};
 use crate::sim::tuning::Tuning;
@@ -35,6 +35,7 @@ pub static SCENARIO: Scenario = Scenario {
     arrive: None,
     systems: |app| super::judge(app, ScenarioKind::DeadShip, salvage),
     return_after: after_banner,
+    homecoming: true,
 };
 
 /// The derelict's design.
@@ -60,6 +61,8 @@ fn build(stage: &mut Stage) -> Entity {
             reactor: false,
             vault: false,
             turns: BTreeMap::new(),
+            reactor_by: None,
+            clamp_by: None,
         },
     ));
     home
@@ -76,6 +79,9 @@ struct Salvage {
     vault: bool,
     /// Junction turns, by who.
     turns: BTreeMap<Entity, u32>,
+    /// Who pulled the reactor's restart, and the core's clamp.
+    reactor_by: Option<Entity>,
+    clamp_by: Option<Entity>,
 }
 
 /// Where the salvage stands, from the derelict's devices.
@@ -134,21 +140,31 @@ fn salvage(
                 continue;
             }
             match design.devices[i as usize].id.as_str() {
-                "reactor" if live("reactor") && !salvage.reactor => {
-                    salvage.reactor = true;
-                    tally.credit(who, "restarted the reactor");
-                    mission.report.push(format!("Reactor restarted by {} at {}.", name(who), since(tick.0)));
-                }
+                // The pulls count once they're live, which may be later
+                // (pulled before their power came): remember who.
+                "reactor" => _ = salvage.reactor_by.get_or_insert(who),
+                "core_clamp" => _ = salvage.clamp_by.get_or_insert(who),
                 "j1" | "j2" | "j3" => *salvage.turns.entry(who).or_default() += 1,
                 "key_a" if live("key_a") => tally.credit(who, "turned key A"),
                 "key_b" if live("key_b") => tally.credit(who, "turned key B"),
-                "core_clamp" if live("core_clamp") && salvage.released.is_none() => {
-                    salvage.released = Some(tick.0);
-                    tally.credit(who, "released the data core");
-                    mission.report.push(format!("Data core released by {} at {}.", name(who), since(tick.0)));
-                }
                 _ => {}
             }
+        }
+        if live("reactor") && !salvage.reactor {
+            salvage.reactor = true;
+            let by = salvage.reactor_by.map_or("?".to_string(), name);
+            if let Some(who) = salvage.reactor_by {
+                tally.credit(who, "restarted the reactor");
+            }
+            mission.report.push(format!("Reactor restarted by {by} at {}.", since(tick.0)));
+        }
+        if live("core_clamp") && salvage.released.is_none() {
+            salvage.released = Some(tick.0);
+            let by = salvage.clamp_by.map_or("?".to_string(), name);
+            if let Some(who) = salvage.clamp_by {
+                tally.credit(who, "released the data core");
+            }
+            mission.report.push(format!("Data core released by {by} at {}.", since(tick.0)));
         }
         if live("vault") && !salvage.vault {
             salvage.vault = true;
@@ -157,7 +173,7 @@ fn salvage(
     }
 
     let step = match ships.get(derelict) {
-        Ok((_, d)) if salvage.released.is_some() || d.live(design, "core_clamp") => Step::Escape,
+        Ok(_) if salvage.released.is_some() => Step::Escape,
         Ok((_, d)) if d.live(design, "vault") => Step::Release,
         Ok((_, d)) if d.live(design, "vault_bus") => Step::Keys,
         Ok((_, d)) if d.live(design, "reactor") => Step::Route,
@@ -245,7 +261,8 @@ fn salvage(
     let status = match salvage.released {
         Some(released) if mission.phase == Phase::Underway => {
             let left = (OVERLOAD_SECONDS - tick.0.wrapping_sub(released) as f32 / TICK_HZ as f32).max(0.0);
-            vec![format!("Overload in {}", clock(left)), format!("Aboard: {aboard} of {}", crew.len())]
+            // Whole seconds, so the mission is sent once a second.
+            vec![format!("Overload in {}", countdown(left)), format!("Aboard: {aboard} of {}", crew.len())]
         }
         _ => Vec::new(),
     };

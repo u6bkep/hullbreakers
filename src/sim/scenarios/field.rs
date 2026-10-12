@@ -16,6 +16,7 @@ pub static SCENARIO: Scenario = Scenario {
     arrive: None,
     systems: |_| {},
     return_after: stay,
+    homecoming: false,
 };
 
 fn build(stage: &mut Stage) -> Entity {

@@ -88,7 +88,7 @@ pub enum Phase {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CrewCard {
     pub name: String,
-    /// Standing on the crew's ship when it was over.
+    /// Standing on the crew's ship when the crew left the scenario.
     pub aboard: bool,
     /// Time spent in EVA.
     pub vacuum_seconds: f32,
@@ -528,11 +528,13 @@ fn debrief(
     let mut lines = mission.report.clone();
     let names = |aboard: bool| cards.iter().filter(|c| c.aboard == aboard).map(|c| c.name.as_str()).collect::<Vec<_>>();
     let (home, adrift) = (names(true), names(false));
-    if !home.is_empty() {
-        lines.push(format!("Made it home: {}", home.join(", ")));
-    }
-    if !adrift.is_empty() {
-        lines.push(format!("Left drifting: {}. Send a postcard.", adrift.join(", ")));
+    if scenarios::scenario(mission.kind).homecoming {
+        if !home.is_empty() {
+            lines.push(format!("Made it home: {}", home.join(", ")));
+        }
+        if !adrift.is_empty() {
+            lines.push(format!("Left drifting: {}. Send a postcard.", adrift.join(", ")));
+        }
     }
     let mut awards = Vec::new();
     let best = |key: &dyn Fn(&CrewCard) -> f32| {
@@ -566,8 +568,25 @@ fn debrief(
 
 /// A time as minutes and seconds.
 pub fn clock(seconds: f32) -> String {
-    let s = seconds.max(0.0);
-    format!("{}:{:04.1}", (s / 60.0) as u32, s % 60.0)
+    // Rounded to tenths first, so 59.96 s is 1:00.0, not 0:60.0.
+    let tenths = (seconds.max(0.0) * 10.0).round() as u32;
+    format!("{}:{:02}.{}", tenths / 600, tenths % 600 / 10, tenths % 10)
+}
+
+#[cfg(test)]
+#[test]
+fn clocks_round_before_they_carry() {
+    assert_eq!(clock(59.96), "1:00.0");
+    assert_eq!(clock(72.34), "1:12.3");
+    assert_eq!(countdown(59.2), "1:00");
+    assert_eq!(countdown(0.0), "0:00");
+}
+
+/// A countdown in whole seconds, rounded up (so it reads 0:00 only at the
+/// end).
+pub fn countdown(seconds: f32) -> String {
+    let s = seconds.max(0.0).ceil() as u32;
+    format!("{}:{:02}", s / 60, s % 60)
 }
 
 /// Authority: at the end of a tick that asked for one, replaces the world

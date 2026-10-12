@@ -28,6 +28,7 @@ pub static SCENARIO: Scenario = Scenario {
     systems: |app| super::judge(app, ScenarioKind::Boarding, (drop_shields, settle_battle, show).chain()),
     // Won, the crew picks what's next; lost, they drift a while first.
     return_after: |phase, tuning| (phase == Phase::Lost).then_some(tuning.wreck_return_seconds),
+    homecoming: true,
 };
 
 /// The enemy ship in a boarding action.
