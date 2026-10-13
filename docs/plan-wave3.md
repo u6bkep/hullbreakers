@@ -103,3 +103,22 @@ waiting.
 Wave 4 (after these merge): weapon part models (the art for `WeaponLook`),
 new weapon archetypes and families (shotgun, sniper with zoom, plasma, arc),
 and mission items wired into the scenarios.
+
+## Status at the end of the day (2026-10-12)
+
+Waves 3 and 4 are merged into `main` (316 tests). Beyond the plan above,
+the day added persistent progression ([plan-progression.md](plan-progression.md)),
+the shotgun, sniper and the plasma, arc and laser families
+([plan-weapons.md](plan-weapons.md)), the hull crawler, field fauna,
+damage control and the escort, device press prediction, the
+`AuthorityLog`, smoother corrections ([proposal-remote-forces.md](proposal-remote-forces.md),
+option A), slim robot replication and a perf audit ([perf.md](perf.md)).
+Solo playtest notes: [playtest-solo.md](playtest-solo.md). Co-op is checked
+with `tools/coop-smoke`.
+
+Waiting on the user:
+- Remote forces: option C for blasts or keep A; B1 (predict ropes others
+  hold) next; B2 when wrangling returns?
+- Look calls in perf.md: rock hull coarseness, which shadow casters to drop.
+- Unrecovered gear returns to the stash (`RECOVER_UNCLAIMED`): keep?
+- A human solo playtest of boarding (the scripts couldn't win the fight).
