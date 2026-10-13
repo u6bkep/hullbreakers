@@ -124,12 +124,13 @@ pub fn compose_crew(design: &ShipDesign, threat: Threat, seed: u64) -> Vec<Posti
 /// at `frame`, at `tick`, which also seeds the roll): walkers standing on its
 /// decks, flyers holding station about it, turrets on its hull.
 pub fn crew_ship(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, frame: &BodyFrame, tick: u32, threat: Threat) {
-    man_posts(commands, tuning, ship, design, frame, compose_crew(design, threat, tick as u64));
+    man_posts(commands, tuning, ship, design, frame, compose_crew(design, threat, tick as u64), None);
 }
 
 /// Puts `crew` (composed by [`compose_crew`], perhaps thinned) at their
-/// posts aboard `ship`, as [`crew_ship`] does.
-pub fn man_posts(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, frame: &BodyFrame, crew: Vec<Posting>) {
+/// posts aboard `ship`, as [`crew_ship`] does; its walkers on `leash` (m)
+/// if given (see [`super::Leash`]): guards, not hunters.
+pub fn man_posts(commands: &mut Commands, tuning: &Tuning, ship: Entity, design: &ShipDesign, frame: &BodyFrame, crew: Vec<Posting>, leash: Option<f32>) {
     for (i, posting) in crew.into_iter().enumerate() {
         let post = posting.post;
         let (mode, home_post) = match posting.robot.gait() {
@@ -163,9 +164,21 @@ pub fn man_posts(commands: &mut Commands, tuning: &Tuning, ship: Entity, design:
         if !posting.affixes.is_empty() || posting.robot != post.robot {
             info!("{}: {} at {}", design.id, posting.affixes.describe(posting.robot), post.at);
         }
-        commands.spawn(new_robot(posting.robot, posting.affixes, mode, ship, home_post, tuning, i as u32));
+        let mut robot = commands.spawn(new_robot(posting.robot, posting.affixes, mode, ship, home_post, tuning, i as u32));
+        // Guards keep to their posts (crawlers and flyers hunt).
+        if let Some(leash) = leash
+            && posting.robot.gait() == Gait::Walker
+        {
+            robot.insert(super::Leash(leash));
+        }
     }
 }
+
+/// How far the carrier's guards go from their posts on word of boarders
+/// (m): see [`super::Leash`]. Along the carrier, about half the way to the
+/// next post: a fight at one draws the next a little way, not the whole
+/// crew. (A freighter's crew hunts boarders through its ship: no leash.)
+pub const POST_LEASH: f32 = 12.0;
 
 /// Standing on `ship` at `feet` (its frame), on a surface facing `up`,
 /// turned as `facing` turns −Z (about +Y; tipped over onto `up`).

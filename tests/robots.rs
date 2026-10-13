@@ -809,3 +809,74 @@ fn robots_follow_the_hosts_tuning_edits() {
     ticks(&mut app, 2);
     assert!((speed(&app) - (before + 5.0)).abs() < 1e-4, "the robot kept {} after the host's edit", speed(&app));
 }
+
+/// A call from the ramp head (the corridor guard sees a boarder come up)
+/// reaches a bridge guard, which is told but holds within its leash; the
+/// same call pulls an unleashed one off its post, out into the corridor
+/// until it has the boarder in sight (and joins the fight from there: the
+/// solo playtest's three at once).
+#[test]
+fn a_call_from_the_ramp_does_not_pull_a_bridge_guard_past_its_leash() {
+    use hullbreakers::sim::bots::{Brain, Leash, POST_LEASH};
+    let upper = hullbreakers::sim::design::design("carrier").marker("upper_deck").y;
+    let mut furthest = [0.0f32; 2];
+    for (run, leashed) in [true, false].into_iter().enumerate() {
+        let mut app = app();
+        let carrier = carrier(&mut app);
+        let me = crew(&mut app);
+        // At the top of the ramp, at the aft end of the upper corridor,
+        // standing still (no gunfire), in sight of the corridor's guard.
+        app.world_mut().get_mut::<Player>(me).unwrap().mode = booted(carrier, Vec3::new(0.0, upper + 0.01, 6.0), 0.0);
+        let corridor = Vec3::new(0.0, upper, -10.0);
+        let bridge = Vec3::new(-2.5, upper, -25.0);
+        let spotter = spawn_on(&mut app, carrier, corridor + Vec3::Y * 0.01, corridor, 0);
+        let guard = spawn_on(&mut app, carrier, bridge + Vec3::Y * 0.01, bridge, 1);
+        if leashed {
+            for robot in [spotter, guard] {
+                app.world_mut().entity_mut(robot).insert(Leash(POST_LEASH));
+            }
+        }
+        let mut told = false;
+        for _ in 0..60 * 12 {
+            ticks(&mut app, 1);
+            let at = feet(&app, guard);
+            furthest[run] = furthest[run].max(Vec2::new(at.x - bridge.x, at.z - bridge.z).length());
+            told |= app.world().get::<Brain>(guard).unwrap().target == Some(me);
+        }
+        assert!(told, "the bridge guard was never told");
+    }
+    eprintln!("bridge guard went {:.1} m from its post leashed, {:.1} m unleashed", furthest[0], furthest[1]);
+    assert!(furthest[0] < POST_LEASH + 1.0, "leashed, it went {:.1} m from its post", furthest[0]);
+    assert!(furthest[1] > 3.0, "unleashed, it only went {:.1} m: the call didn't pull it", furthest[1]);
+}
+
+/// A leader's call is a rally: from within its rally radius, it pulls a
+/// leashed guard off its post to the fight.
+#[test]
+fn a_leaders_call_from_close_by_pulls_a_leashed_guard() {
+    use hullbreakers::sim::bots::{Affix, Leash, POST_LEASH};
+    let upper = hullbreakers::sim::design::design("carrier").marker("upper_deck").y;
+    let mut app = app();
+    let carrier = carrier(&mut app);
+    let me = crew(&mut app);
+    app.world_mut().get_mut::<Player>(me).unwrap().mode = booted(carrier, Vec3::new(0.0, upper + 0.01, 6.0), 0.0);
+    // The leader in the corridor, 15 m from the bridge guard.
+    let corridor = Vec3::new(0.0, upper, -10.0);
+    let bridge = Vec3::new(-2.5, upper, -25.0);
+    let tuning = Tuning::default();
+    let leader = app
+        .world_mut()
+        .spawn(new_robot(Robot::Gunner, Affixes::of(&[Affix::Leader]), booted(carrier, corridor + Vec3::Y * 0.01, 0.0), carrier, corridor, &tuning, 0))
+        .id();
+    let guard = spawn_on(&mut app, carrier, bridge + Vec3::Y * 0.01, bridge, 1);
+    for robot in [leader, guard] {
+        app.world_mut().entity_mut(robot).insert(Leash(POST_LEASH));
+    }
+    let mut furthest = 0.0f32;
+    for _ in 0..60 * 12 {
+        ticks(&mut app, 1);
+        let at = feet(&app, guard);
+        furthest = furthest.max(Vec2::new(at.x - bridge.x, at.z - bridge.z).length());
+    }
+    assert!(furthest > 3.0, "the leader's call didn't pull it off its post ({furthest:.1} m)");
+}

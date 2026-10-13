@@ -80,6 +80,16 @@ can't tell whether a human wins here. The time budget does fit:
   pilot that shoots, like the grapple run's pilots.
 - **For the enemies agent:** consider leashing the bridge guards to their
   posts, so a lone boarder meets the crew in turn rather than all at once.
+  (Done 2026-10-12: the carrier's guards are on 12 m leashes, `bots::Leash`;
+  a leader's call pulls them only from within its rally. In
+  `boarding_solo::alone_at_the_ramp_head_the_guards_come_a_post_at_a_time`
+  one guard at a time shoots at a boarder at the ramp head, against all
+  three before. A run by real inputs from the hangar,
+  `HULLBREAKERS_STRESS=aboard`, reached the upper corridor's door in 3 s
+  each time, and met the corridor's guard alone; the bridge's held the
+  bridge. The input bot couldn't finish: on mag boots it climbed door
+  frames and fought the wall. So whether it's winnable is still for a
+  human.)
 
 ### Recovery
 
