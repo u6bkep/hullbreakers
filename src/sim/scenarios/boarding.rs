@@ -150,7 +150,9 @@ fn build(stage: &mut Stage) -> Entity {
     if stage.robots {
         let design = ShipHull::new(CARRIER).design();
         let crew = carrier_crew(design, stage.players, tick);
-        bots::man_posts(commands, tuning, carrier, design, &weave.frame(tick, Vec3::ZERO), crew);
+        // Guards on leashes: a boarder meets them post by post on the way to
+        // the bridge, not all at once (see `bots::Leash`).
+        bots::man_posts(commands, tuning, carrier, design, &weave.frame(tick, Vec3::ZERO), crew, Some(bots::POST_LEASH));
     }
     crate::sim::pickups::stock_ship(commands, carrier, ShipHull::new(CARRIER).design(), tick);
     home

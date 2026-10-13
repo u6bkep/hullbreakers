@@ -180,3 +180,63 @@ fn the_carrier_is_crewed_for_the_boarders() {
     };
     assert_eq!(sorted(carrier_crew(carrier, 4, 7)), sorted(compose_crew(carrier, Threat(3), 7)), "four players face the full crew");
 }
+
+/// Alone at the top of the carrier's ramp and shooting, a boarder meets its
+/// guards a post at a time: the corridor's comes, the bridge's hold the
+/// bridge (on their leashes: see `bots::Leash`). Before, all three walked
+/// out to the ramp head together. Counts the guards shooting at the
+/// boarder at once, and the closest each comes.
+#[test]
+fn alone_at_the_ramp_head_the_guards_come_a_post_at_a_time() {
+    use hullbreakers::sim::events::PlayerEvent;
+    let mut app = app();
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Boarding);
+    ticks(&mut app, 2);
+    let carrier = ship(&mut app, "carrier");
+    let upper = hullbreakers::sim::design::design("carrier").marker("upper_deck").y;
+    let e = me(&mut app);
+    let head = Vec3::new(0.0, upper + 0.01, 6.0);
+    {
+        let mut p = app.world_mut().get_mut::<Player>(e).unwrap();
+        p.mode = Mode::Booted {
+            body: carrier,
+            feet: head,
+            up: Vec3::Y,
+            velocity: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        };
+        p.loadout.restock();
+        p.loadout.current = 0;
+    }
+    // Firing up the corridor, the whole time: heard all over the deck.
+    input(&mut app).main.held = true;
+    let mut closest: std::collections::HashMap<Entity, f32> = Default::default();
+    let mut most_at_once = 0;
+    for _ in 0..20 * 60 {
+        app.world_mut().get_mut::<Vitals>(e).unwrap().health = 1000.0;
+        ticks(&mut app, 1);
+        let world = app.world_mut();
+        let tick = world.resource::<hullbreakers::sim::SimTick>().0;
+        let mut shooting = 0;
+        for (r, kind, p) in world.query::<(Entity, &Robot, &Player)>().iter(world) {
+            let Mode::Booted { body, feet, .. } = p.mode else { continue };
+            if body != carrier || *kind != Robot::Gunner {
+                continue;
+            }
+            let d = Vec2::new(feet.x - head.x, feet.z - head.z).length();
+            let c = closest.entry(r).or_insert(f32::MAX);
+            *c = c.min(d);
+            if p.events.iter().any(|(at, ev)| matches!(ev, PlayerEvent::Fired { .. }) && tick.wrapping_sub(at) < 60) {
+                shooting += 1;
+            }
+        }
+        most_at_once = most_at_once.max(shooting);
+    }
+    let mut c: Vec<f32> = closest.values().copied().collect();
+    c.sort_by(f32::total_cmp);
+    eprintln!("ramp head, alone: {} guards; closest each came {c:.1?} m; at most {most_at_once} shooting at once", c.len());
+    assert_eq!(c.len(), 3, "the solo crew is three walkers");
+    assert!(c.iter().filter(|d| **d < 15.0).count() <= 1, "more than one guard came to the ramp head: {c:.1?}");
+    assert!(most_at_once <= 2, "{most_at_once} guards shooting at once");
+}

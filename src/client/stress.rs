@@ -12,6 +12,10 @@
 //! the fight inside, its robots, lights and effects.
 //! `=derelict` (start in the dead ship): the derelict's power routed to its
 //! vault as a crew would have (its rooms lit), the player in its junction.
+//! `=aboard` (start in the boarding action, for playtesting the fight
+//! inside): the player armed in the carrier's hangar, as if just in through
+//! its door, and nothing else done: they and the crew can die, the player
+//! drives.
 
 use bevy::prelude::*;
 
@@ -28,6 +32,7 @@ pub enum Stress {
     Firefight,
     Carrier,
     Derelict,
+    Aboard,
 }
 
 pub fn stress_from_env() -> Option<Stress> {
@@ -35,8 +40,9 @@ pub fn stress_from_env() -> Option<Stress> {
         "firefight" => Some(Stress::Firefight),
         "carrier" => Some(Stress::Carrier),
         "derelict" => Some(Stress::Derelict),
+        "aboard" => Some(Stress::Aboard),
         other => {
-            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight, carrier, derelict)");
+            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight, carrier, derelict, aboard)");
             None
         }
     }
@@ -60,6 +66,9 @@ impl Plugin for StressPlugin {
             }
             Stress::Derelict => {
                 app.init_resource::<Firefight>().add_systems(Update, light_derelict);
+            }
+            Stress::Aboard => {
+                app.init_resource::<Firefight>().add_systems(Update, board_carrier);
             }
         }
     }
@@ -156,6 +165,7 @@ fn set_up_firefight(
 /// Once the boarding action is under way, puts the armed player on the
 /// carrier's lower deck.
 fn board_carrier(
+    stress: Res<Stress>,
     time: Res<Time>,
     mut state: ResMut<Firefight>,
     director: Option<Res<Director>>,
@@ -183,7 +193,9 @@ fn board_carrier(
     player.reference_body = Some(carrier);
     player.mode = Mode::Booted {
         body: carrier,
-        feet: Vec3::new(0.0, 0.01, 12.0),
+        // In the hangar, just in through the door (a playtest), or the
+        // lower deck (the fight inside, for profiling).
+        feet: if *stress == Stress::Aboard { Vec3::new(0.0, 0.01, 26.0) } else { Vec3::new(0.0, 0.01, 12.0) },
         up: Vec3::Y,
         velocity: Vec3::ZERO,
         orientation: Quat::IDENTITY,

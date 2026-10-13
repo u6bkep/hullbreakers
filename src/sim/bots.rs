@@ -34,7 +34,7 @@ pub use affixes::{Affix, Affixes, Condition, absorb, robot_upkeep};
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Wrecked;
 pub use blast::{Detonation, blast_of, detonate};
-pub use crew::{Posting, Threat, compose_crew, crew_ship, man_posts, mount, spawn_zoo, zoo_cell};
+pub use crew::{POST_LEASH, Posting, Threat, compose_crew, crew_ship, man_posts, mount, spawn_zoo, zoo_cell};
 
 use avian3d::prelude::*;
 use bevy::ecs::entity::MapEntities;
@@ -401,6 +401,10 @@ pub struct Brain {
     /// since it last saw, heard, or was hit by it.
     lead: Option<Vec3>,
     since_lead: f32,
+    /// Whether it knows that itself (saw them, or was hit by them), rather
+    /// than by word (a call, gunfire it heard): a robot on a [`Leash`]
+    /// follows word only as far as its leash.
+    lead_firsthand: bool,
     /// Seconds since it last saw its target.
     since_seen: f32,
     /// Seconds spent looking about where the lead ran out.
@@ -456,6 +460,7 @@ impl Brain {
             visible: false,
             lead: None,
             since_lead: 0.0,
+            lead_firsthand: false,
             since_seen: f32::INFINITY,
             searching: 0.0,
             rethink: 0.0,
@@ -475,13 +480,24 @@ impl Brain {
         }
     }
 
-    /// It has word of `target` at `at` (in its home's frame): a sighting,
-    /// a sound, a hit, a call from another robot.
-    fn hear_of(&mut self, target: Entity, at: Vec3) {
+    /// It knows of `target` at `at` (in its home's frame): firsthand (a
+    /// sighting, a hit) or by word (a call from another robot, gunfire).
+    fn hear_of(&mut self, target: Entity, at: Vec3, firsthand: bool) {
         self.target = Some(target);
         self.lead = Some(at);
         self.since_lead = 0.0;
         self.searching = 0.0;
+        self.lead_firsthand = firsthand;
+    }
+
+    /// Where it's going on word of someone at `lead`: there, or, on a
+    /// leash and told of someone beyond it, nowhere past its post (it holds
+    /// it, on the alert). Seen for itself, it goes after them.
+    fn heading_for(&self, lead: Vec3, leash: Option<&Leash>) -> Vec3 {
+        match leash {
+            Some(l) if !self.lead_firsthand && lead.distance(self.post) > l.0 => self.post,
+            _ => lead,
+        }
     }
 
     fn forget(&mut self) {
@@ -503,6 +519,15 @@ impl MapEntities for Brain {
         self.home = mapper.get_mapped(self.home);
     }
 }
+
+/// A guard's leash (m): told of the crew (a call, gunfire) further than this
+/// from its post, it holds the post rather than go to them; it closes in on
+/// them once it sees them itself (or they come within this of its post), or
+/// at a leader's call from within its rally. So a ship's crew posted along
+/// the way meet boarders post by post, not all at once. See
+/// `crew::man_posts`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Leash(pub f32);
 
 /// A new robot of `kind` with `affixes`, in `mode`, guarding `home` from
 /// `post` (in home's frame), where it returns with nothing to fight.
@@ -624,6 +649,7 @@ pub fn think(
     mut grids: ResMut<NavGrids>,
     mut damage: MessageReader<Damage>,
     mut robots: Query<RobotQuery>,
+    leashes: Query<&Leash>,
     rocks: Query<(Entity, &super::asteroids::Asteroid)>,
 ) {
     let dt = time.delta_secs();
@@ -649,9 +675,9 @@ pub fn think(
         .filter_map(|(e, ..)| Some((e, where_is(e)?)))
         .collect();
     let hits: Vec<(Entity, Entity)> = damage.read().filter_map(|d| Some((d.target, d.source?))).collect();
-    // Robots that caught sight of someone just now: where, who, and how far
-    // their call carries.
-    let mut sightings: Vec<(Vec3, Entity, f32)> = Vec::new();
+    // Robots that caught sight of someone just now: where, who, how far
+    // their call carries, and whether a leader made it.
+    let mut sightings: Vec<(Vec3, Entity, f32, bool)> = Vec::new();
     // What a limpet knows of the world (built only if there's one).
     let limpets = robots.iter().any(|(_, kind, ..)| *kind == Robot::Limpet);
     let prey: Vec<limpet::Prey> = everyone
@@ -733,7 +759,7 @@ pub fn think(
             brain.visible = seen.is_some();
             if let Some((t, at)) = seen {
                 if !was_visible || brain.target != Some(t) {
-                    sightings.push((position, t, mind.calls));
+                    sightings.push((position, t, mind.calls, affixes.has(Affix::Leader)));
                 }
                 brain.target = Some(t);
                 brain.since_seen = 0.0;
@@ -756,7 +782,7 @@ pub fn think(
             && brain.since_seen < GLIMPSE
         {
             // In sight, or only just out of it: it saw where they went.
-            brain.hear_of(t, to_home(at));
+            brain.hear_of(t, to_home(at), true);
         } else if !brain.visible {
             // Out of sight: shot at, or gunfire within earshot, tells it
             // where someone is.
@@ -772,7 +798,8 @@ pub fn think(
             if let Some(source) = hit_by.or_else(|| fresh.then(heard).flatten())
                 && let Some(at) = where_is(source)
             {
-                brain.hear_of(source, to_home(at));
+                // Shot, it knows for itself; gunfire is only word.
+                brain.hear_of(source, to_home(at), hit_by.is_some());
                 brain.rethink = 0.0;
             }
         }
@@ -852,9 +879,10 @@ pub fn think(
         let (near, far) = mind.range;
         // Where it's going, in its home's frame: after the target, to where
         // it was last known, or back to its post.
+        let leash = leashes.get(entity).ok();
         let goal = match (aiming, brain.lead) {
             (Some(_), _) if distance.is_some_and(|d| d <= far) => None,
-            (_, Some(lead)) => Some(lead),
+            (_, Some(lead)) => Some(brain.heading_for(lead, leash)),
             (None, None) => Some(brain.post),
             (Some((at, _)), None) => Some(to_home(at)),
         };
@@ -887,7 +915,7 @@ pub fn think(
             let ship_up = home.as_ref().map_or(Vec3::Y, |h| h.rotation * Vec3::Y);
             let (goal, under_ceiling) = match aiming {
                 Some((at, _)) => perch(&spatial, at, ship_up),
-                None => (to_world(brain.lead.unwrap_or(brain.post)), false),
+                None => (to_world(brain.lead.map_or(brain.post, |l| brain.heading_for(l, leash))), false),
             };
             let entry = hulls.get(brain.home).ok().and_then(|h| h.0.design().markers.get("entry").copied()).map(to_world);
             let dir = crawl(&mut brain.crawling, &spatial, entity, &f, feet, up, position, goal, under_ceiling, entry, dt);
@@ -1035,16 +1063,19 @@ pub fn think(
             }
         };
     }
-    // A robot that catches sight of someone tells the others near it.
-    for (from, target, reach) in sightings {
+    // A robot that catches sight of someone tells the others near it. A
+    // leader's call carries further, but it's a rally (it pulls a robot off
+    // its leash) only for those within its rally.
+    for (from, target, reach, leader) in sightings {
         let Some(at) = where_is(target) else { continue };
         for (entity, _, _, _, mut brain, _) in &mut robots {
             if brain.dormant || brain.visible || brain.lead.is_some() && brain.since_lead < 1.0 {
                 continue;
             }
-            if where_is(entity).is_some_and(|p| p.distance(from) < reach) {
+            let Some(d) = where_is(entity).map(|p| p.distance(from)) else { continue };
+            if d < reach {
                 let local = bodies.frame(brain.home).map_or(at, |f| f.point_to_local(at));
-                brain.hear_of(target, local);
+                brain.hear_of(target, local, leader && d < affixes::RALLY_RADIUS);
             }
         }
     }
