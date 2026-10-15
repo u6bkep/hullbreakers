@@ -580,22 +580,28 @@ fn the_mission_wall_starts_the_grapple_run_and_the_dead_ship() {
     let places = rock_places(ROCKS);
     for i in rings(course_design) {
         let ring = COURSE_AT + course_design.devices[i].at;
-        for &(at, r) in &places {
+        for p in &places {
+            let (at, r) = (p.at, p.radius);
             assert!(ring.distance(at) > r * 2.0 + 20.0, "a rock at {at} (r {r}) crowds ring {i} at {ring}");
         }
     }
-    assert_eq!(anchors().len(), rings(course_design).len() - 1);
-    assert_eq!(&places[..anchors().len()], &anchors()[..]);
+    let anchors = anchors();
+    assert_eq!(anchors.len(), rings(course_design).len() - 1);
+    // The anchors come first, and only they are fixed.
+    let first: Vec<(Vec3, f32)> = places[..anchors.len()].iter().map(|p| (p.at, p.radius)).collect();
+    assert_eq!(first, anchors);
+    assert!(places[..anchors.len()].iter().all(|p| p.fixed));
+    assert!(places[anchors.len()..].iter().all(|p| !p.fixed));
     assert_eq!(mission(&mut app).markers.len(), 1, "a marker on the next ring");
     start(&mut app, ScenarioKind::DeadShip);
     assert!(ship_of(&mut app, COURSE).is_none(), "the course outlived its scenario");
     assert!(ship_of(&mut app, "derelict").is_some());
 }
 
-/// The race's rocks are fixed: flying into one at speed bounces you off
+/// The race's anchors are fixed: flying into one at speed bounces you off
 /// (or lands you) and leaves it at rest, with no velocity to pass on.
 #[test]
-fn the_race_rocks_take_no_knocks() {
+fn the_race_anchors_take_no_knocks() {
     use hullbreakers::sim::asteroids::Asteroid;
     let mut app = app();
     start(&mut app, ScenarioKind::GrappleRun);
@@ -626,6 +632,46 @@ fn the_race_rocks_take_no_knocks() {
     assert_eq!(world.get::<LinearVelocity>(rock).unwrap().0, Vec3::ZERO, "the rock was knocked");
     assert_eq!(world.get::<AngularVelocity>(rock).unwrap().0, Vec3::ZERO, "the rock was spun");
     assert_eq!(world.get::<Position>(rock).unwrap().0, at);
+}
+
+/// The rest of the race's field sits still (asleep, once it's settled)
+/// until something knocks it: flying into a small handhold at speed sets it
+/// adrift, and from then on it never sleeps again.
+#[test]
+fn the_race_handholds_take_knocks() {
+    use hullbreakers::sim::asteroids::Asteroid;
+    let mut app = app();
+    start(&mut app, ScenarioKind::GrappleRun);
+    // Long enough for the field to fall asleep.
+    ticks(&mut app, 120);
+    let (rock, at, radius) = {
+        let world = app.world_mut();
+        world
+            .query::<(Entity, &Asteroid, &Position)>()
+            .iter(world)
+            .filter(|(_, a, _)| !a.fixed)
+            .min_by(|a, b| a.1.radius.total_cmp(&b.1.radius))
+            .map(|(e, a, p)| (e, p.0, a.radius))
+            .unwrap()
+    };
+    let asleep = app.world().get::<Sleeping>(rock).is_some();
+    let from = at + Vec3::X * (radius * 2.5 + 1.0);
+    set_player(&mut app, |p| {
+        p.mode = Mode::Eva {
+            position: from,
+            velocity: Vec3::NEG_X * 10.0,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        };
+    });
+    ticks(&mut app, 60);
+    let world = app.world();
+    let velocity = world.get::<LinearVelocity>(rock).unwrap().0;
+    let drift = world.get::<Position>(rock).unwrap().0 - at;
+    eprintln!("the handhold (r {radius:.1}, asleep before: {asleep}): moving at {velocity:.3}, drifted {drift:.3}");
+    assert!(asleep, "the field never fell asleep");
+    assert!(velocity.length() > 0.01 && drift.length() > 0.0, "the handhold wasn't knocked");
+    assert!(world.get::<Sleeping>(rock).is_none() && world.get::<SleepingDisabled>(rock).is_some(), "a knocked rock sleeps again");
 }
 
 /// A door is a wall until it's opened: walking at the port door stops at

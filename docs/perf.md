@@ -156,7 +156,9 @@ for two players it's not yet worth it.
 
 ## Big fields (the race, 2026-10-14)
 
-The grapple run's field is static rocks (`asteroids::spawn_fixed_rocks`),
+The grapple run's field is a `RockField` grown from a seed on every peer
+(its anchors static, the rest dynamic and asleep until knocked; it was all
+static and sent rock by rock when the first numbers below were taken),
 sized by `HULLBREAKERS_RACE_ROCKS` (default 6000), measured with
 `tools/stress race` (the player flown round the line at 40 m/s) and
 `coop-race`. Load 15-20.
@@ -211,12 +213,23 @@ nothing cleared, re-sent to clients as drift (`Asteroid::fixed`).
 | 16000 | 1.5 s | yes |
 | 32000 | 3 s, then timed out | no |
 
-So about 16000 rocks is the most a co-op field can be as things stand
-(over a real link, slower: a rock is about 160 B on the wire, so 6000 are a
-second at the pace). Past that, a static field shouldn't be replicated at
-all: every peer can grow it from its seed, as the gallery does its models.
-That needs ropes and boots on a rock to name it in a way both ends agree on
-without replicating it (a `BodyId`, or its index in the field).
+So about 16000 rocks was the most a co-op field could be while it was sent
+(over a real link, slower: a rock is about 160 B on the wire, so 6000 were a
+second at the pace).
+
+**Grown, not sent** (2026-10-14, later). The field reaches a client as its
+`RockField` (a layout, a seed, a count: a few bytes on the course's site)
+and the client grows the same rocks itself. Each rock carries a Replicon
+`Signature` from the field and its index, so when the authority does
+replicate one (the first time a player stands on it, ropes it or rides it,
+or it's knocked adrift: `net::replicate_touched_rocks`) it maps onto the
+client's own copy, and a player's reference to it resolves to the rock the
+client's prediction already chose. Measured in the netplay rig: the race's
+start costs a client 10 kB (was about 960 kB), a rope to a grown anchor
+rolls nothing back, and a knocked rock drifts on the client's copy. What a
+joining client waits on now is its own CPU (the hulls, about 0.2 ms each
+across its cores, then the meshes), which a loading screen can cover (not
+done).
 
 ## Bigger work (not done; numbers above)
 

@@ -453,6 +453,36 @@ it.
   component has the scoped components hidden from every client, which is
   what the host's own player wants. Cost: an hour.
 
+- 2026-10-14. To grow a field of rocks on every peer instead of sending it,
+  a client's references to a rock (a rope's target, the body under its
+  boots) have to map to the client's own copy. Replicon's client entity map
+  (`ServerEntityMap`) can't be written from outside (`insert` is
+  `pub(crate)`), but its `Signature` component can: `Signature::from_hash(h)`
+  on both ends, and the server sends `(entity, hash)` with an entity's first
+  replication to each client (late joiners included, since it goes until the
+  client has the entity), which the client applies before the entity's
+  components, mapping the server entity onto whichever local entity
+  registered the hash. Lightyear 0.30 wraps this as `PreSpawned`, which we
+  don't use: it adds prediction bookkeeping (and despawns an unmatched
+  entity after 50 ticks). The raw component is in `bevy_replicon::prelude`.
+  Replicon also holds a component mutation back until the update message
+  its tick depends on has arrived, so a player's new reference to a rock
+  can't be applied before the rock's mapping. Cost: an afternoon of reading
+  to find it, none of it friction. Watch: the hash must be unique across
+  every signed entity on a client, so a field laid again (the race run
+  twice) salts its rocks with the tick it was laid.
+
+## Avian (sleeping)
+
+- 2026-10-14. By its code, not tried: a body spawned with `Sleeping` on it is
+  woken by its own first step, since `wake_on_changed` treats any change to
+  `Position`, `Rotation` or a velocity since the last physics tick as the
+  user's, and a spawn is one. A field meant to sleep is spawned awake and
+  left to fall asleep (`TimeToSleep`), which the rock-scaling benchmark's
+  "Dynamic, asleep" column already measured. Watch: whatever reads "awake"
+  as "disturbed" has to use the body's velocity instead
+  (`net::replicate_touched_rocks`).
+
 ## Our build script (build.rs)
 
 - 2026-10-14. A release build of the game had no ship designs at all, and

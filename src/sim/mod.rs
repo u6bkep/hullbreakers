@@ -111,7 +111,8 @@ impl Plugin for SimSharedPlugin {
             .add_observer(ship::build_hull)
             // Before the physics step, and (on the authority) after the
             // field's new rocks and before their fauna.
-            .add_systems(FixedUpdate, asteroids::shape_asteroids)
+            .add_systems(FixedUpdate, (asteroids::grow_fields, asteroids::shape_asteroids).chain())
+            .add_observer(asteroids::clear_field)
             .add_observer(fauna::shape_grazer)
             .add_observer(mission::shape_debris)
             .init_resource::<bodies::VanishedBodies>()
@@ -250,7 +251,7 @@ impl Plugin for SimPlugin {
             .add_systems(FixedFirst, advance_tick)
             .add_systems(
                 FixedUpdate,
-                (ship::drive_ship, update_pins).in_set(SimSystems::Drive),
+                (ship::drive_ship, update_pins, asteroids::keep_knocked_adrift).in_set(SimSystems::Drive),
             )
             .add_systems(
                 FixedPostUpdate,

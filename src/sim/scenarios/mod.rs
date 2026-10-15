@@ -69,6 +69,15 @@ pub struct Scenario {
     pub homecoming: bool,
 }
 
+impl super::asteroids::FieldLayout {
+    /// Where a field of `count` rocks in this layout has them.
+    pub fn places(self, count: usize) -> Vec<super::asteroids::RockPlace> {
+        match self {
+            Self::GrappleRun => grapple_run::rock_places(count),
+        }
+    }
+}
+
 /// The scenario of a kind.
 pub fn scenario(kind: ScenarioKind) -> &'static Scenario {
     match kind {

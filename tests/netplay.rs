@@ -724,7 +724,7 @@ fn markers_find_their_bodies_on_clients() {
         .world_mut()
         .resource_mut::<Director>()
         .start(ScenarioKind::GrappleRun);
-    // (The race's 6000 rocks reach the client first.)
+    // (The client grows the race's field first.)
     let mut mission = None;
     for _ in 0..40 {
         s.step(30);
@@ -1355,4 +1355,111 @@ fn race_field_reaches_a_client() {
         let (host, client) = (count(&mut s.server), count(&mut s.client));
         assert_eq!(client, host, "the client's field changed");
     }
+}
+
+/// Starts the race on the server and waits until the client has grown its
+/// field, then a second more.
+fn race(s: &mut Session) {
+    use hullbreakers::sim::asteroids::Grown;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    s.server.world_mut().resource_mut::<Director>().start(ScenarioKind::GrappleRun);
+    for _ in 0..40 {
+        s.step(30);
+        let world = s.client.world_mut();
+        if world.query_filtered::<(), With<Grown>>().iter(world).next().is_some() {
+            s.step(60);
+            return;
+        }
+    }
+    panic!("the client never grew the field");
+}
+
+/// A race's field reaches a client as its seed: the client grows the rocks
+/// itself, and none of them is sent (before, 6000 rocks at about 160 B
+/// each, a second's worth at the pace).
+#[test]
+fn a_grown_field_is_not_sent() {
+    use hullbreakers::sim::asteroids::Grown;
+    use hullbreakers::sim::scenarios::grapple_run::rock_count;
+    let (_guard, mut s) = session(100);
+    let before = s.client.world().resource::<Received>().0;
+    race(&mut s);
+    let received = s.client.world().resource::<Received>().0 - before;
+    let world = s.client.world_mut();
+    let grown = world.query_filtered::<(), With<Grown>>().iter(world).count();
+    let sent = world.query_filtered::<(), (With<Asteroid>, With<Replicated>)>().iter(world).count();
+    eprintln!("the race's start: {received} B to the client, {grown} rocks grown, {sent} sent");
+    assert_eq!(grown, rock_count());
+    assert_eq!(sent, 0, "rocks reached the client by replication");
+    assert!(received < 100_000, "the race's start cost the client {received} B");
+}
+
+/// A rope on a grown rock: the client predicts it on its own copy of the
+/// rock, and the authority's answer names the same rock (mapped onto it by
+/// its signature), so nothing rolls back and the rock stays one rock.
+#[test]
+fn grappling_a_grown_rock_is_predicted() {
+    use hullbreakers::sim::asteroids::Grown;
+    use hullbreakers::sim::scenarios::grapple_run::{COURSE_AT, anchors, rock_count};
+    let (_guard, mut s) = session(100);
+    race(&mut s);
+    // 15 m off the first anchor's reach, facing it.
+    let (at, radius) = anchors()[0];
+    let dir = (COURSE_AT - at).normalize();
+    s.teleport(at + dir * (radius * 2.0 + 15.0), Vec3::ZERO, -dir);
+    s.step(90);
+    let rollbacks = s.rollbacks();
+    s.input().0.presses.main.press();
+    s.step(90);
+    let player = s.local_player().unwrap();
+    let grapple = player.grapple.expect("the grapple missed the anchor");
+    let world = s.client.world_mut();
+    let rocks = world.query_filtered::<(), With<Asteroid>>().iter(world).count();
+    let grown = world.get::<Grown>(grapple.target).expect("hooked something not grown");
+    assert_eq!(grown.index, 0, "hooked the wrong rock");
+    assert!(world.get::<Replicated>(grapple.target).is_some(), "the authority's rock didn't map onto the client's");
+    assert_eq!(rocks, rock_count(), "the client has a second copy of a rock");
+    let server_target = s.server_player().grapple.expect("the authority's rope isn't on").target;
+    let world = s.server.world_mut();
+    assert_eq!(world.get::<Grown>(server_target).unwrap().index, 0);
+    assert!(world.get::<Replicate>(server_target).is_some(), "the authority isn't replicating the hooked rock");
+    let rolled_back = s.rollbacks() - rollbacks;
+    eprintln!("grapple on a grown anchor: {rolled_back} rollbacks");
+    assert_eq!(rolled_back, 0);
+}
+
+/// A grown rock knocked adrift reaches the client as its motion, on the
+/// client's own copy of it.
+#[test]
+fn a_knocked_rock_reaches_the_client() {
+    use hullbreakers::sim::asteroids::Grown;
+    use hullbreakers::sim::motion::Motion;
+    use hullbreakers::sim::scenarios::grapple_run::rock_count;
+    let (_guard, mut s) = session(100);
+    race(&mut s);
+    // The first rock that isn't fixed (a handhold), given a shove.
+    let world = s.server.world_mut();
+    let (rock, index) = world
+        .query::<(Entity, &Grown, &Asteroid)>()
+        .iter(world)
+        .filter(|(_, _, a)| !a.fixed)
+        .min_by_key(|(_, g, _)| g.index)
+        .map(|(e, g, _)| (e, g.index))
+        .unwrap();
+    let before = world.get::<Position>(rock).unwrap().0;
+    world.get_mut::<LinearVelocity>(rock).unwrap().0 = Vec3::new(2.0, 0.0, 0.0);
+    s.step(120);
+    let world = s.server.world_mut();
+    let moved = world.get::<Position>(rock).unwrap().0;
+    assert!((moved - before).length() > 3.0, "the rock didn't drift on the server ({:.2} m)", (moved - before).length());
+    let world = s.client.world_mut();
+    let rocks = world.query_filtered::<(), With<Asteroid>>().iter(world).count();
+    let (client_rock, _) = world.query::<(Entity, &Grown)>().iter(world).find(|(_, g)| g.index == index).expect("the client lacks the rock");
+    assert!(world.get::<Motion>(client_rock).is_some(), "the knocked rock's motion didn't reach the client");
+    // Its physics state follows its motion (the rig has no presentation,
+    // so nothing draws it).
+    let posed = world.get::<Position>(client_rock).unwrap().0;
+    eprintln!("knocked rock: server {moved:.2}, client {posed:.2}, started {before:.2}");
+    assert!((posed - moved).length() < 1.0, "the client has the rock {:.2} m from the server", (posed - moved).length());
+    assert_eq!(rocks, rock_count(), "the client has a second copy of a rock");
 }

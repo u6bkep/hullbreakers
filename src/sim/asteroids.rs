@@ -2,6 +2,7 @@
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
+use bevy_replicon::prelude::Signature;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SimMaterial;
 use super::bodies::{BodyInertia, PreviousVelocity, dynamic_mass};
+use super::mission::Director;
 use super::tuning::Tuning;
 
 pub const FIELD_LENGTH: f32 = 800.0;
@@ -28,11 +30,134 @@ pub const FIELD_DIRECTION: Vec3 = Vec3::Z;
 pub struct Asteroid {
     pub radius: f32,
     pub seed: u64,
-    /// Fixed in place (a static body; see [`spawn_fixed_rocks`]): nothing
-    /// can move it, so it has no mass to push against. Replicated with the
-    /// rock, since a client makes every rock it's sent static (it doesn't
+    /// Fixed in place (a static body; a race's anchors): nothing can move
+    /// it, so it has no mass to push against. Replicated with the rock,
+    /// since a client makes every rock it's sent static (it doesn't
     /// simulate them) and can't tell otherwise.
     pub fixed: bool,
+}
+
+/// A field of rocks laid out from a seed, grown wherever this component
+/// appears (on the body it belongs to: a race's course). A field of
+/// thousands reaches a client as these few bytes rather than a rock at a
+/// time (about 160 B each on the wire: 6000 took a joining client a second,
+/// 32,000 timed it out; docs/perf.md). Every peer grows the same rocks in
+/// the same order ([`grow_fields`]): the authority as bodies, a client as
+/// shapes to stand on. Each is signed (replicon's [`Signature`]) from the
+/// field and its index, so when the authority does replicate one (once
+/// something happens to it: a rope, a boot, a knock; see `net`) it lands on
+/// the client's own copy. Until then nothing of it is sent.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RockField {
+    pub layout: FieldLayout,
+    pub seed: u64,
+    pub count: u32,
+    /// The tick it was laid, in its rocks' signatures: a field laid after
+    /// another with the same layout and seed (the race run again) must not
+    /// sign its rocks the same, in case a client still has the old one.
+    pub laid: u32,
+}
+
+/// How a [`RockField`]'s rocks are placed (see `scenarios`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FieldLayout {
+    GrappleRun,
+}
+
+/// Where one of a field's rocks goes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RockPlace {
+    pub at: Vec3,
+    pub radius: f32,
+    /// Immovable (an anchor rocks are swung round); the rest of a field is
+    /// at rest but can be knocked adrift.
+    pub fixed: bool,
+}
+
+/// A rock grown from a [`RockField`]: which, and its index in its places.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Grown {
+    pub field: Entity,
+    pub index: u32,
+}
+
+/// A grown rock's signature: the same on every peer, different from every
+/// other rock's (of this field or one laid before it).
+fn rock_signature(field: &RockField, index: u32) -> u64 {
+    // splitmix64's finalizer.
+    fn mix(mut x: u64) -> u64 {
+        x ^= x >> 30;
+        x = x.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        x ^= x >> 27;
+        x = x.wrapping_mul(0x94d0_49bb_1331_11eb);
+        x ^ (x >> 31)
+    }
+    mix(mix(field.seed ^ ((field.laid as u64) << 32) ^ field.layout as u64) ^ index as u64)
+}
+
+/// Grows every new [`RockField`]'s rocks. On the authority (which has the
+/// [`Director`]) a rock that isn't fixed is a dynamic body: born awake,
+/// since a body spawned asleep is woken by its own first step, it falls
+/// asleep on its own, and sleeps until something knocks it (Avian wakes it
+/// on contact and on a change to its velocity). A client's are all static:
+/// it doesn't simulate rocks, and one that moves reaches it by its motion.
+/// Before the physics step, so the rocks have their shapes by then.
+pub fn grow_fields(fields: Query<(Entity, &RockField), Added<RockField>>, director: Option<Res<Director>>, mut commands: Commands) {
+    for (entity, field) in &fields {
+        let places = field.layout.places(field.count as usize);
+        info!("growing a field of {} rocks ({:?})", places.len(), field.layout);
+        let rng = &mut ChaCha8Rng::seed_from_u64(field.seed);
+        for (index, place) in places.iter().enumerate() {
+            let rotation = Quat::from_scaled_axis(random_unit(rng) * rng.random_range(0.0..3.14));
+            let body = if director.is_some() && !place.fixed { RigidBody::Dynamic } else { RigidBody::Static };
+            commands.spawn((
+                Name::new(format!("Rock {index}")),
+                Asteroid {
+                    radius: place.radius,
+                    seed: rng.random(),
+                    fixed: place.fixed,
+                },
+                Grown {
+                    field: entity,
+                    index: index as u32,
+                },
+                Signature::from_hash(rock_signature(field, index as u32)),
+                body,
+                PreviousVelocity::default(),
+                LinearVelocity::ZERO,
+                AngularVelocity::ZERO,
+                Position(place.at),
+                Rotation(rotation),
+                // A client's physics doesn't write transforms (its bodies
+                // are posed from their motion, and these have none).
+                Transform::from_translation(place.at).with_rotation(rotation),
+            ));
+        }
+    }
+}
+
+/// Authority: a grown rock knocked adrift (a dynamic one that's moving at
+/// all) never sleeps again. A rock adrift in space doesn't stop, and Avian
+/// would stop one drifting slower than its sleep threshold (0.15 m/s).
+pub fn keep_knocked_adrift(
+    rocks: Query<(Entity, &RigidBody, &LinearVelocity, &AngularVelocity), (With<Grown>, Without<SleepingDisabled>)>,
+    mut commands: Commands,
+) {
+    for (rock, body, linear, angular) in &rocks {
+        if body.is_dynamic() && (linear.0 != Vec3::ZERO || angular.0 != Vec3::ZERO) {
+            commands.entity(rock).insert(SleepingDisabled);
+        }
+    }
+}
+
+/// A field's rocks go with it (on a client, that's how it hears the
+/// scenario's over; the authority clears them with the rest of the world).
+pub fn clear_field(despawn: On<Despawn, RockField>, rocks: Query<(Entity, &Grown)>, mut commands: Commands) {
+    for (rock, grown) in &rocks {
+        if grown.field == despawn.entity {
+            commands.entity(rock).try_despawn();
+        }
+    }
 }
 
 /// A rock of the streaming field (not one set about a battle), new to it
@@ -262,21 +387,6 @@ pub fn spawn_rocks(commands: &mut Commands, seed: u64, rocks: &[(Vec3, f32)]) {
     for &(position, radius) in rocks {
         let angular = random_unit(&mut field.rng) * field.rng.random_range(0.0..0.08);
         spawn_rock(commands, &mut field, RigidBody::Dynamic, radius, position, Vec3::ZERO, angular);
-    }
-}
-
-/// Rocks fixed in place at the given places (centre, radius), shaped and
-/// turned from `seed`: static bodies, which cost the physics nothing a
-/// tick, so a field of thousands is affordable (a race course's: see
-/// docs/perf.md). Nothing moves them, not even a rope (a rope on one pulls
-/// you to it, as on a site).
-pub fn spawn_fixed_rocks(commands: &mut Commands, seed: u64, rocks: &[(Vec3, f32)]) {
-    let mut field = FieldRng {
-        rng: ChaCha8Rng::seed_from_u64(seed),
-        next: 0,
-    };
-    for &(position, radius) in rocks {
-        spawn_rock(commands, &mut field, RigidBody::Static, radius, position, Vec3::ZERO, Vec3::ZERO);
     }
 }
 

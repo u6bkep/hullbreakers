@@ -6,8 +6,10 @@
 //! rope swings you round the turn at full speed (the jetpack alone has to
 //! brake for it, and tops out at a third of a reel's speed). The rest of
 //! the field is handholds to reel along the straights by, and scenery. The
-//! rocks are fixed in place (static bodies), so the line is the same every
-//! run and a field of thousands costs the physics nothing.
+//! anchors are fixed in place, so the line is the same every run; the rest
+//! sit still until knocked (a field of thousands at rest costs the physics
+//! nothing). The field is grown from a seed on every peer, not sent (see
+//! [`RockField`]).
 //!
 //! Each runner's time runs from their start ring to the finish; the board
 //! keeps their progress and time. It's won when the whole crew is through
@@ -33,7 +35,8 @@ use crate::sim::player::{DeckSlot, Player};
 use crate::sim::progression::Profile;
 use crate::sim::ship;
 use crate::sim::tuning::Tuning;
-use crate::sim::{SimTick, TICK_HZ, asteroids};
+use crate::sim::asteroids::{FieldLayout, RockField, RockPlace};
+use crate::sim::{SimTick, TICK_HZ};
 
 pub static SCENARIO: Scenario = Scenario {
     kind: ScenarioKind::GrappleRun,
@@ -181,12 +184,12 @@ pub fn rock_count() -> usize {
     std::env::var("HULLBREAKERS_RACE_ROCKS").ok().and_then(|v| v.parse().ok()).unwrap_or(ROCKS)
 }
 
-/// Where the field's `count` rocks are (centre, radius), in the world: the
-/// anchors, then handholds strung along the legs (25-90 m off the line,
-/// something to reel by every few seconds), then the rest scattered
-/// through the course's box and well past it. All clear of the racing line
-/// (by their reach and more), of the rings, of our ship and of each other.
-pub fn rock_places(count: usize) -> Vec<(Vec3, f32)> {
+/// Where the field's `count` rocks are, in the world: the anchors (fixed),
+/// then handholds strung along the legs (25-90 m off the line, something to
+/// reel by every few seconds), then the rest scattered through the course's
+/// box and well past it. All clear of the racing line (by their reach and
+/// more), of the rings, of our ship and of each other.
+pub fn rock_places(count: usize) -> Vec<RockPlace> {
     let course = design(COURSE);
     let line = racing_line();
     let rings: Vec<Vec3> = rings(course).iter().map(|&i| COURSE_AT + course.devices[i].at).collect();
@@ -238,15 +241,35 @@ pub fn rock_places(count: usize) -> Vec<(Vec3, f32)> {
             placed.push(at, radius);
         }
     }
-    placed.rocks
+    let anchors = anchors().len();
+    placed
+        .rocks
+        .into_iter()
+        .enumerate()
+        .map(|(i, (at, radius))| RockPlace {
+            at,
+            radius,
+            fixed: i < anchors,
+        })
+        .collect()
 }
 
 fn build(stage: &mut Stage) -> Entity {
     let home = stage.commands.spawn(ship::parked_home_ship()).id();
-    let course = stage.commands.spawn(ship::site("Course", COURSE, COURSE_AT, Quat::IDENTITY)).id();
-    // The rocks are the course, so they're there even when a test asks
-    // for a quiet field.
-    asteroids::spawn_fixed_rocks(stage.commands, ROCK_SEED, &rock_places(rock_count()));
+    // The rocks are the course (grown with it, wherever it goes), so
+    // they're there even when a test asks for a quiet field.
+    let course = stage
+        .commands
+        .spawn((
+            ship::site("Course", COURSE, COURSE_AT, Quat::IDENTITY),
+            RockField {
+                layout: FieldLayout::GrappleRun,
+                seed: ROCK_SEED,
+                count: rock_count() as u32,
+                laid: stage.tick,
+            },
+        ))
+        .id();
     stage.commands.spawn((
         Name::new("Grapple run"),
         Staged,

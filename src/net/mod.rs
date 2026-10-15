@@ -23,7 +23,7 @@ use lightyear::prelude::server::*;
 use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::sim::asteroids::Asteroid;
+use crate::sim::asteroids::{Asteroid, Grown, RockField};
 use crate::sim::bots::{Affixes, Condition, Robot, Wrecked};
 use crate::sim::pickups::Pickup;
 use crate::sim::combat::Combatant;
@@ -166,7 +166,7 @@ impl Plugin for NetPlugin {
             .insert_resource(ReplicationMetadata::new(SEND_INTERVAL))
             .add_observer(on_link)
             .add_observer(replicate_body::<Drift>)
-            .add_observer(replicate_body::<Asteroid>)
+            .add_observer(replicate_rock)
             // A grazer changes its own motion only in its pulses: between
             // them it's in free flight like a rock (see `sim::fauna`).
             .add_observer(replicate_body::<crate::sim::fauna::Grazer>)
@@ -184,7 +184,7 @@ impl Plugin for NetPlugin {
             .add_systems(Update, (publish_tuning, spawn_players, profiles::receive_profiles))
             .add_systems(
                 FixedPostUpdate,
-                (extrapolate::track_motion, robots::publish_robots).after(SimSystems::Players),
+                ((replicate_touched_rocks, extrapolate::track_motion).chain(), robots::publish_robots).after(SimSystems::Players),
             );
         } else {
             // Bodies here are posed from their motion, not simulated: Avian
@@ -314,6 +314,8 @@ impl Plugin for ProtocolPlugin {
         app.component::<crate::sim::scenarios::recovery::Pod>().replicate();
         app.component::<crate::sim::mission::BodyId>().replicate_once();
         app.component::<Asteroid>().replicate_once();
+        // A whole field of rocks: every peer grows it (see `sim::asteroids`).
+        app.component::<RockField>().replicate_once();
         // Its mood and when it began: every peer times its pulses from it.
         app.component::<crate::sim::fauna::Grazer>().replicate();
         app.component::<Debris>().replicate_once();
@@ -716,6 +718,54 @@ fn replicate_body<C: Component>(add: On<Add, C>, mut commands: Commands) {
         extrapolate::Extrapolated,
         DisableReplicateHierarchy,
     ));
+}
+
+/// Rocks reach clients like any body, except a field's grown ones (see
+/// [`RockField`]): a client grows those itself, and hears about one only
+/// once something happens to it ([`replicate_touched_rocks`]).
+fn replicate_rock(add: On<Add, Asteroid>, grown: Query<(), With<Grown>>, mut commands: Commands) {
+    if grown.contains(add.entity) {
+        return;
+    }
+    commands.entity(add.entity).insert((
+        Replicate::to_clients(NetworkTarget::All),
+        extrapolate::Extrapolated,
+        DisableReplicateHierarchy,
+    ));
+}
+
+/// A grown rock something has happened to is replicated from then on, like
+/// any body: a player (a robot too) stands on it, holds a rope to it or
+/// rides it as their frame, so their replicated state refers to it; or it's
+/// been knocked adrift, so its motion matters. It reaches a client mapped
+/// onto the client's own copy of it (by its signature: see
+/// [`RockField`]), so what's sent lands on the rock the client already
+/// has, and a player's reference to it resolves to the same rock the
+/// client's prediction chose. (Knocked, it also never sleeps again:
+/// `asteroids::keep_knocked_adrift`.)
+fn replicate_touched_rocks(
+    players: Query<&Player>,
+    rocks: Query<(Entity, &RigidBody, &LinearVelocity, &AngularVelocity), (With<Grown>, Without<Replicate>)>,
+    mut commands: Commands,
+) {
+    let mut touched: Vec<Entity> = players
+        .iter()
+        .flat_map(|p| [p.mode.body(), p.grapple.map(|g| g.target), p.reference_body])
+        .flatten()
+        .filter(|e| rocks.contains(*e))
+        .collect();
+    for (rock, body, linear, angular) in &rocks {
+        if body.is_dynamic() && (linear.0 != Vec3::ZERO || angular.0 != Vec3::ZERO) {
+            touched.push(rock);
+        }
+    }
+    for rock in touched {
+        commands.entity(rock).insert((
+            Replicate::to_clients(NetworkTarget::All),
+            extrapolate::Extrapolated,
+            DisableReplicateHierarchy,
+        ));
+    }
 }
 
 /// Ships flying a scripted path reach clients as that path (see

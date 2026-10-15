@@ -14,6 +14,7 @@ use bevy::prelude::*;
 use lightyear::prelude::client::LocalTimelineSync;
 
 use crate::sim::{SimTick, TICK_HZ};
+use crate::sim::asteroids::Grown;
 use crate::sim::bodies::{BodyInertia, PreviousVelocity};
 use crate::sim::flight::Flight;
 use crate::sim::frame::BodyFrame;
@@ -195,7 +196,8 @@ pub fn follow_motion(
 pub fn draw_extrapolated(
     time: Res<Time>,
     clock: Res<DrawClock>,
-    mut unposed: Query<&mut Visibility, (With<BodyInertia>, Without<Motion>, Without<Flight>)>,
+    // (A grown rock is posed as it was grown until it's sent a motion.)
+    mut unposed: Query<&mut Visibility, (With<BodyInertia>, Without<Motion>, Without<Flight>, Without<Grown>)>,
     mut bodies: Query<(
         &Motion,
         &BodyInertia,
