@@ -61,6 +61,10 @@ pub const TIME_LIMIT: f32 = 420.0;
 /// Rocks in the field, anchors included. `HULLBREAKERS_RACE_ROCKS=n`
 /// overrides it, for stress runs (see docs/perf.md).
 pub const ROCKS: usize = 6000;
+/// Of them, movers: big rocks adrift through the field from the start,
+/// tumbling, stirring what they hit. Placed clear of the line like any
+/// rock, then free to cross it: a race has its hazards.
+pub const MOVERS: usize = 16;
 const ROCK_SEED: u64 = 0x6a7e_0006;
 /// How far the field reaches past the course's box (m).
 const FIELD_MARGIN: f32 = 250.0;
@@ -185,10 +189,11 @@ pub fn rock_count() -> usize {
 }
 
 /// Where the field's `count` rocks are, in the world: the anchors (fixed),
-/// then handholds strung along the legs (25-90 m off the line, something to
-/// reel by every few seconds), then the rest scattered through the course's
-/// box and well past it. All clear of the racing line (by their reach and
-/// more), of the rings, of our ship and of each other.
+/// then the movers (adrift), then handholds strung along the legs (25-90 m
+/// off the line, something to reel by every few seconds), then the rest
+/// scattered through the course's box and well past it. All clear of the
+/// racing line (by their reach and more), of the rings, of our ship and of
+/// each other, to begin with.
 pub fn rock_places(count: usize) -> Vec<RockPlace> {
     let course = design(COURSE);
     let line = racing_line();
@@ -205,6 +210,23 @@ pub fn rock_places(count: usize) -> Vec<RockPlace> {
     };
     for (at, radius) in anchors() {
         placed.push(at, radius);
+    }
+    // The movers: through the course's box, 10-24 m, at 2-6 m/s any way,
+    // turning slowly.
+    let (lo, hi) = line.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), &p| (lo.min(p), hi.max(p)));
+    let mut movers = Vec::new();
+    for _ in 0..MOVERS * 40 {
+        if movers.len() == MOVERS || placed.rocks.len() >= count {
+            break;
+        }
+        let radius = rng.random_range(10.0..24.0);
+        let at = Vec3::new(rng.random_range(lo.x..hi.x), rng.random_range(lo.y..hi.y), rng.random_range(lo.z..hi.z));
+        if clear_of_course(at, radius, 20.0) && placed.clear(at, radius) {
+            placed.push(at, radius);
+            let velocity = random_unit(&mut rng) * rng.random_range(2.0..6.0);
+            let spin = random_unit(&mut rng) * rng.random_range(0.02..0.08);
+            movers.push((velocity, spin));
+        }
     }
     // Handholds: every 40 m along each leg, maybe one off to a side.
     let mut handholds = Vec::new();
@@ -228,7 +250,6 @@ pub fn rock_places(count: usize) -> Vec<RockPlace> {
         }
     }
     // The rest, through the course's box and its margin.
-    let (lo, hi) = line.iter().fold((Vec3::MAX, Vec3::MIN), |(lo, hi), &p| (lo.min(p), hi.max(p)));
     let (lo, hi) = (lo - Vec3::splat(FIELD_MARGIN), hi + Vec3::splat(FIELD_MARGIN));
     for _ in 0..count * 40 {
         if placed.rocks.len() >= count {
@@ -246,12 +267,25 @@ pub fn rock_places(count: usize) -> Vec<RockPlace> {
         .rocks
         .into_iter()
         .enumerate()
-        .map(|(i, (at, radius))| RockPlace {
-            at,
-            radius,
-            fixed: i < anchors,
+        .map(|(i, (at, radius))| {
+            let mut place = RockPlace::still(at, radius, i < anchors);
+            if let Some(&(velocity, spin)) = i.checked_sub(anchors).and_then(|m| movers.get(m)) {
+                place.velocity = velocity;
+                place.spin = spin;
+            }
+            place
         })
         .collect()
+}
+
+fn random_unit(rng: &mut impl Rng) -> Vec3 {
+    loop {
+        let v = Vec3::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0));
+        let len2 = v.length_squared();
+        if len2 > 1e-3 && len2 <= 1.0 {
+            return v / len2.sqrt();
+        }
+    }
 }
 
 fn build(stage: &mut Stage) -> Entity {

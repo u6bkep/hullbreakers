@@ -76,8 +76,19 @@ impl Session {
     /// Connects a client to a fresh server and waits until it is simulating
     /// its own player.
     fn start(lag: Option<SimulatedLag>) -> Self {
+        Self::start_with(lag, |_| {})
+    }
+
+    /// As [`Self::start`], with `before` run on the server (and a second
+    /// of it stepped) before the client connects: a late joiner.
+    fn start_with(lag: Option<SimulatedLag>, before: impl FnOnce(&mut App)) -> Self {
         let port = free_port();
-        let server = peer(NetMode::Server { port }, None);
+        let mut server = peer(NetMode::Server { port }, None);
+        before(&mut server);
+        for _ in 0..60 {
+            MockClock::advance(FRAME);
+            server.update();
+        }
         let client = peer(
             NetMode::Client {
                 server: format!("127.0.0.1:{port}").parse().unwrap(),
@@ -1375,12 +1386,12 @@ fn race(s: &mut Session) {
 }
 
 /// A race's field reaches a client as its seed: the client grows the rocks
-/// itself, and none of them is sent (before, 6000 rocks at about 160 B
+/// itself, and none at rest is sent (before, 6000 rocks at about 160 B
 /// each, a second's worth at the pace).
 #[test]
 fn a_grown_field_is_not_sent() {
     use hullbreakers::sim::asteroids::Grown;
-    use hullbreakers::sim::scenarios::grapple_run::rock_count;
+    use hullbreakers::sim::scenarios::grapple_run::{MOVERS, rock_count};
     let (_guard, mut s) = session(100);
     let before = s.client.world().resource::<Received>().0;
     race(&mut s);
@@ -1390,7 +1401,8 @@ fn a_grown_field_is_not_sent() {
     let sent = world.query_filtered::<(), (With<Asteroid>, With<Replicated>)>().iter(world).count();
     eprintln!("the race's start: {received} B to the client, {grown} rocks grown, {sent} sent");
     assert_eq!(grown, rock_count());
-    assert_eq!(sent, 0, "rocks reached the client by replication");
+    // Only the movers (adrift from the start) are sent, onto the client's copies.
+    assert_eq!(sent, MOVERS, "rocks at rest reached the client by replication");
     assert!(received < 100_000, "the race's start cost the client {received} B");
 }
 
@@ -1462,4 +1474,62 @@ fn a_knocked_rock_reaches_the_client() {
     eprintln!("knocked rock: server {moved:.2}, client {posed:.2}, started {before:.2}");
     assert!((posed - moved).length() < 1.0, "the client has the rock {:.2} m from the server", (posed - moved).length());
     assert_eq!(rocks, rock_count(), "the client has a second copy of a rock");
+}
+
+/// A client joining a race in progress finds rocks already in play (the
+/// movers, one knocked before it came) in its world before it grows the
+/// field: it grows onto them, so it ends up with one rock each, moving.
+#[test]
+fn a_late_joiner_grows_onto_the_rocks_already_in_play() {
+    use hullbreakers::sim::asteroids::Grown;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    use hullbreakers::sim::motion::Motion;
+    use hullbreakers::sim::scenarios::grapple_run::{MOVERS, rock_count};
+    let guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let lag = SimulatedLag {
+        latency_ms: 100,
+        loss_percent: 0.0,
+    };
+    let mut s = Session::start_with(Some(lag), |server| {
+        server.world_mut().resource_mut::<Director>().start(ScenarioKind::GrappleRun);
+        for _ in 0..60 {
+            MockClock::advance(FRAME);
+            server.update();
+        }
+        // The first rock at rest, knocked before anyone joins.
+        let world = server.world_mut();
+        let rock = world
+            .query::<(Entity, &Grown, &Asteroid, &LinearVelocity)>()
+            .iter(world)
+            .filter(|(_, _, a, v)| !a.fixed && v.0 == Vec3::ZERO)
+            .min_by_key(|(_, g, _, _)| g.index)
+            .map(|(e, ..)| e)
+            .unwrap();
+        world.get_mut::<LinearVelocity>(rock).unwrap().0 = Vec3::new(1.0, 0.0, 0.0);
+    });
+    race_grown(&mut s);
+    s.step(120);
+    let world = s.client.world_mut();
+    let rocks = world.query_filtered::<(), With<Asteroid>>().iter(world).count();
+    let grown = world.query_filtered::<(), With<Grown>>().iter(world).count();
+    let moving = world.query_filtered::<(), (With<Grown>, With<Motion>)>().iter(world).count();
+    eprintln!("late joiner: {rocks} rocks, {grown} grown, {moving} moving");
+    assert_eq!(rocks, rock_count(), "a rock in play came twice");
+    assert_eq!(grown, rock_count());
+    // The movers, the knocked rock, and whatever a mover has stirred by now.
+    assert!(moving >= MOVERS + 1, "the rocks in play aren't moving on the client ({moving})");
+    drop(guard);
+}
+
+/// Waits until the client has grown its field.
+fn race_grown(s: &mut Session) {
+    use hullbreakers::sim::asteroids::Grown;
+    for _ in 0..40 {
+        s.step(30);
+        let world = s.client.world_mut();
+        if world.query_filtered::<(), With<Grown>>().iter(world).next().is_some() {
+            return;
+        }
+    }
+    panic!("the client never grew the field");
 }

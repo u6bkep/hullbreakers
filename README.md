@@ -56,7 +56,9 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   minutes) runs out. No enemies: it's the grapple's show. The course turns
   between each ring and the next, and inside every turn is a big anchor
   rock (fixed; the rest of the field sits still until something knocks it
-  adrift): rope it as it comes abeam and it swings you round at full speed,
+  adrift, and sixteen big movers tumble through it from the start, stirring
+  what they hit and crossing the line when they will): rope it as it comes
+  abeam and it swings you round at full speed,
   where the jetpack has to brake (a flown course, assist off, at most
   45 m/s: 65 s swinging, 84 s on the jetpack). The rest of the field is
   handholds to reel along the straights by. The rocks are fixed in place,

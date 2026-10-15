@@ -1,5 +1,7 @@
 //! Procedural asteroid field streaming past the ship.
 
+use std::collections::HashMap;
+
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy_replicon::prelude::Signature;
@@ -64,7 +66,7 @@ pub enum FieldLayout {
     GrappleRun,
 }
 
-/// Where one of a field's rocks goes.
+/// Where one of a field's rocks goes, and how it moves.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RockPlace {
     pub at: Vec3,
@@ -72,6 +74,23 @@ pub struct RockPlace {
     /// Immovable (an anchor rocks are swung round); the rest of a field is
     /// at rest but can be knocked adrift.
     pub fixed: bool,
+    /// Adrift from the start (a mover, stirring the field as it goes):
+    /// its velocity (m/s) and spin (rad/s). Zero for a rock at rest.
+    pub velocity: Vec3,
+    pub spin: Vec3,
+}
+
+impl RockPlace {
+    /// A rock at rest.
+    pub fn still(at: Vec3, radius: f32, fixed: bool) -> Self {
+        Self {
+            at,
+            radius,
+            fixed,
+            velocity: Vec3::ZERO,
+            spin: Vec3::ZERO,
+        }
+    }
 }
 
 /// A rock grown from a [`RockField`]: which, and its index in its places.
@@ -96,33 +115,55 @@ fn rock_signature(field: &RockField, index: u32) -> u64 {
 }
 
 /// Grows every new [`RockField`]'s rocks. Each becomes a body as it's shaped
-/// ([`shape_asteroids`], a batch a tick). On the authority a rock that
-/// isn't fixed is a dynamic body: born awake, since a body spawned asleep
-/// is woken by its own first step, it falls asleep on its own, and sleeps
-/// until something knocks it (Avian wakes it on contact and on a change to
-/// its velocity).
-pub fn grow_fields(fields: Query<(Entity, &RockField), Added<RockField>>, mut commands: Commands) {
+/// ([`shape_asteroids`], a batch a frame). On the authority (which has the
+/// [`Director`]) a rock that isn't fixed is a dynamic body: born awake,
+/// since a body spawned asleep is woken by its own first step, it falls
+/// asleep on its own, and sleeps until something knocks it (Avian wakes it
+/// on contact and on a change to its velocity). A mover has its velocity
+/// from the start, so it's replicated from the start, and reaches a client
+/// as its motion on the client's own copy, which is grown at rest.
+///
+/// A rock the authority has already replicated to this client (a mover's,
+/// or one touched before the client joined) may be here before the field
+/// is grown: its signature then had nothing to map onto, and it arrived as
+/// a rock of its own. Growing the field finds it by its seed (every rock's
+/// is its own) and makes it the grown one, rather than growing a twin.
+pub fn grow_fields(
+    fields: Query<(Entity, &RockField), Added<RockField>>,
+    arrived: Query<(Entity, &Asteroid), Without<Grown>>,
+    director: Option<Res<Director>>,
+    mut commands: Commands,
+) {
     for (entity, field) in &fields {
         let places = field.layout.places(field.count as usize);
         info!("growing a field of {} rocks ({:?})", places.len(), field.layout);
+        let arrived: HashMap<u64, Entity> = arrived.iter().map(|(e, a)| (a.seed, e)).collect();
         let rng = &mut ChaCha8Rng::seed_from_u64(field.seed);
         for (index, place) in places.iter().enumerate() {
             let rotation = Quat::from_scaled_axis(random_unit(rng) * rng.random_range(0.0..3.14));
+            let seed: u64 = rng.random();
+            let grown = Grown {
+                field: entity,
+                index: index as u32,
+            };
+            let signature = Signature::from_hash(rock_signature(field, index as u32));
+            if let Some(&rock) = arrived.get(&seed) {
+                commands.entity(rock).insert((grown, signature));
+                continue;
+            }
+            let (velocity, spin) = if director.is_some() { (place.velocity, place.spin) } else { (Vec3::ZERO, Vec3::ZERO) };
             commands.spawn((
                 Name::new(format!("Rock {index}")),
                 Asteroid {
                     radius: place.radius,
-                    seed: rng.random(),
+                    seed,
                     fixed: place.fixed,
                 },
-                Grown {
-                    field: entity,
-                    index: index as u32,
-                },
-                Signature::from_hash(rock_signature(field, index as u32)),
+                grown,
+                signature,
                 PreviousVelocity::default(),
-                LinearVelocity::ZERO,
-                AngularVelocity::ZERO,
+                LinearVelocity(velocity),
+                AngularVelocity(spin),
                 Position(place.at),
                 Rotation(rotation),
                 // A client's physics doesn't write transforms (its bodies

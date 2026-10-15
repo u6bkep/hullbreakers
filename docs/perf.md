@@ -224,9 +224,18 @@ and the client grows the same rocks itself. Each rock carries a Replicon
 replicate one (the first time a player stands on it, ropes it or rides it,
 or it's knocked adrift: `net::replicate_touched_rocks`) it maps onto the
 client's own copy, and a player's reference to it resolves to the rock the
-client's prediction already chose. Measured in the netplay rig: the race's
-start costs a client 10 kB (was about 960 kB), a rope to a grown anchor
-rolls nothing back, and a knocked rock drifts on the client's copy. What a
+client's prediction already chose. A rock replicated before the client
+grows its field (a late joiner's case, and the movers' at the start: a
+rock adrift from the start is replicated from the start) arrives as a rock
+of its own, and growing the field adopts it by its seed rather than
+growing a twin. Measured in the netplay rig: the race's start costs a
+client 11 kB (was about 960 kB; the 16 movers are what's sent), a rope to
+a grown anchor rolls nothing back, a knocked rock drifts on the client's
+copy, and a late joiner ends up with one rock each. With the 16 movers
+adrift (`coop-race`, release, uncapped, load about 15, the user's game
+also running): host 222 fps, tick 2.1 ms, 15.7 kB/s to the client (14.8
+before the movers), 0.3-4 motion updates a second as they stir what they
+hit; the client 284 fps, 6000 rocks, no twins. What a
 joining client waits on now is its own CPU: the hulls (about 0.2 ms each
 across its cores) and the meshes, built a batch of `SHAPE_PER_FRAME` (200)
 rocks a frame so the frame stays alive, under a veil with a bar
