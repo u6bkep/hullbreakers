@@ -191,6 +191,39 @@ it.
   spawns go at a higher priority than updates; and 32000 rocks still time a
   client out.
 
+## Bevy time (the fixed loop)
+
+- 2026-10-14. Work metered "N a tick" isn't metered at all: one long tick
+  (shaping 1000 rocks, 125 ms) makes the next frame run every tick it
+  missed to catch up (`Time<Virtual>` allows 250 ms, 15 ticks), each doing
+  its N, until the lot is done in one frame (traced: 24 ticks of 1000 rocks
+  inside three frames, one of them 2.5 s). Anything meant to keep the frame
+  alive is budgeted per frame (`asteroids::ShapeBudget`, reset in `First`),
+  and per count rather than per time where the order of work must be the
+  same on every run. Cost: a build-and-trace cycle.
+
+## Avian and Bevy ECS (bulk spawns)
+
+- 2026-10-14. Spawning thousands of bodies at once is dominated by what
+  the insert triggers, not by what we compute: a batch of 1000 rock hulls
+  was 33 ms to build (in parallel) and about 90 ms to apply, nearly all
+  Avian's per-insert hooks (collider tree, mass properties, hierarchy and
+  island markers: about 64,000 hook spans for 32,000 rocks) and our mesh
+  observer. "The hulls are the cost" (docs/perf.md said so) was wrong by
+  three to one. Watch: measure the apply (`system_commands` spans in a
+  trace), not just the system.
+
+## Our stress tool (tools/stress)
+
+- 2026-10-14. In a co-op run the host finishes measuring first and exits;
+  the client times out 3 s later and tears its world down inside its own
+  measured window, and that sample drags every client-side count's mean
+  down (6000 rocks reads 5700, 2 players 1.9). Compare the client's `max`,
+  not its mean, or read the mean as 19 samples of 20. Also, `coop-race`
+  gives the client `HULLBREAKERS_STRESS=race` as well, so the client
+  teleports its predicted player every frame: its 9 rollbacks/s are the
+  tool's. Cost: ten minutes hunting a despawn that never happened.
+
 ## Bevy rendering
 
 - 2026-10-12. We wanted the headlamp not to light the player's own arms.

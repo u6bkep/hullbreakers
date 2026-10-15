@@ -355,7 +355,8 @@ pub fn asteroid_collider(seed: u64, radius: f32) -> Collider {
     }
 }
 
-fn random_unit(rng: &mut impl Rng) -> Vec3 {
+/// A direction, uniformly.
+pub fn random_unit(rng: &mut impl Rng) -> Vec3 {
     loop {
         let v = Vec3::new(
             rng.random_range(-1.0..1.0),

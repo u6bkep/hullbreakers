@@ -35,7 +35,7 @@ use crate::sim::player::{DeckSlot, Player};
 use crate::sim::progression::Profile;
 use crate::sim::ship;
 use crate::sim::tuning::Tuning;
-use crate::sim::asteroids::{FieldLayout, RockField, RockPlace};
+use crate::sim::asteroids::{FieldLayout, RockField, RockPlace, random_unit};
 use crate::sim::{SimTick, TICK_HZ};
 
 pub static SCENARIO: Scenario = Scenario {
@@ -276,16 +276,6 @@ pub fn rock_places(count: usize) -> Vec<RockPlace> {
             place
         })
         .collect()
-}
-
-fn random_unit(rng: &mut impl Rng) -> Vec3 {
-    loop {
-        let v = Vec3::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0));
-        let len2 = v.length_squared();
-        if len2 > 1e-3 && len2 <= 1.0 {
-            return v / len2.sqrt();
-        }
-    }
 }
 
 fn build(stage: &mut Stage) -> Entity {
