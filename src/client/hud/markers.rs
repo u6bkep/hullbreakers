@@ -152,7 +152,7 @@ fn edge_mark(painter: &egui::Painter, labels: &mut Labels, screen: Rect, dir: eg
 /// at the screen edge when it's off screen, so nobody loses the fight (or
 /// the way home) among the rocks. Only ships that matter: ours (FRIENDLY)
 /// and a hostile one (HOSTILE); a site built as a ship (a derelict, a
-/// course of gates) is the scenario's to mark. The ship you're standing on
+/// course of rings) is the scenario's to mark. The ship you're standing on
 /// or inside isn't marked.
 pub fn ship_markers(
     mut contexts: EguiContexts,

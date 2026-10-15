@@ -16,6 +16,9 @@
 //! inside): the player armed in the carrier's hangar, as if just in through
 //! its door, and nothing else done: they and the crew can die, the player
 //! drives.
+//! `=race` (start in the grapple run): the player flown round the race's
+//! line at 40 m/s, looking ahead, lap after lap: the whole rock field in
+//! view, coming and going (`HULLBREAKERS_RACE_ROCKS` sets its size).
 
 use bevy::prelude::*;
 
@@ -33,6 +36,7 @@ pub enum Stress {
     Carrier,
     Derelict,
     Aboard,
+    Race,
 }
 
 pub fn stress_from_env() -> Option<Stress> {
@@ -41,8 +45,9 @@ pub fn stress_from_env() -> Option<Stress> {
         "carrier" => Some(Stress::Carrier),
         "derelict" => Some(Stress::Derelict),
         "aboard" => Some(Stress::Aboard),
+        "race" => Some(Stress::Race),
         other => {
-            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight, carrier, derelict, aboard)");
+            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight, carrier, derelict, aboard, race)");
             None
         }
     }
@@ -69,6 +74,9 @@ impl Plugin for StressPlugin {
             }
             Stress::Aboard => {
                 app.init_resource::<Firefight>().add_systems(Update, board_carrier);
+            }
+            Stress::Race => {
+                app.add_systems(Update, fly_the_race);
             }
         }
     }
@@ -237,6 +245,33 @@ fn light_derelict(
         pitch: 0.0,
     };
     info!("stress: in the lit derelict");
+}
+
+/// Flies the local player round the race's line (see [`Stress::Race`]).
+fn fly_the_race(time: Res<Time>, mission: Option<Single<&Mission>>, mut player: Option<Single<&mut Player, With<LocalPlayer>>>) {
+    const SPEED: f32 = 40.0;
+    if mission.is_none_or(|m| m.kind != ScenarioKind::GrappleRun) {
+        return;
+    }
+    let Some(player) = player.as_mut() else { return };
+    let line = crate::sim::scenarios::grapple_run::racing_line();
+    let length: f32 = line.windows(2).map(|l| l[0].distance(l[1])).sum();
+    let mut d = (time.elapsed_secs() * SPEED) % length;
+    for leg in line.windows(2) {
+        let l = leg[0].distance(leg[1]);
+        if d <= l {
+            let ahead = (leg[1] - leg[0]).normalize();
+            player.reference_body = None;
+            player.mode = Mode::Eva {
+                position: leg[0] + ahead * d,
+                velocity: ahead * SPEED,
+                orientation: Transform::IDENTITY.looking_to(ahead, Vec3::Y).rotation,
+                pitch: 0.0,
+            };
+            return;
+        }
+        d -= l;
+    }
 }
 
 /// Keeps everyone alive and the player's guns loaded, so the load holds.

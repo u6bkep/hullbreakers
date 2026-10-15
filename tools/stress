@@ -20,6 +20,10 @@
 #   derelict   the dead ship with its power routed (its rooms lit), the
 #              player in its junction (HULLBREAKERS_STRESS=derelict)
 #   coop-boarding  the boarding action with a host and a client
+#   race       the grapple run, the player flown round its line at 40 m/s
+#              through the whole rock field (HULLBREAKERS_STRESS=race; set
+#              HULLBREAKERS_RACE_ROCKS=n for the field's size)
+#   coop-race  the same with a host and a client (the host flies)
 #
 # An authority's report also has what it sent each remote client
 # (sent_per_client: packets and kB a second).
@@ -142,6 +146,8 @@ run() {
     firefight) env+=(HULLBREAKERS_SCENARIO=field HULLBREAKERS_STRESS=firefight) ;;
     carrier) env+=(HULLBREAKERS_SCENARIO=boarding HULLBREAKERS_STRESS=carrier) ;;
     derelict) env+=(HULLBREAKERS_SCENARIO=derelict HULLBREAKERS_STRESS=derelict) ;;
+    race) env+=(HULLBREAKERS_SCENARIO=run HULLBREAKERS_STRESS=race) ;;
+    coop-race) env+=(HULLBREAKERS_SCENARIO=run HULLBREAKERS_STRESS=race) ;;
     coop) env+=(HULLBREAKERS_SCENARIO=field) ;;
     coop-boarding) env+=(HULLBREAKERS_SCENARIO=boarding) ;;
     *) echo "stress: unknown scenario $scenario" >&2; exit 2 ;;
@@ -151,7 +157,7 @@ run() {
         env+=(TRACE_CHROME="$trace" RUST_LOG="info,wgpu=error,naga=warn,bevy_ecs::query::state=warn,bevy_ecs::schedule::executor=warn")
     fi
     echo "stress: $label"
-    if [[ "$scenario" == coop || "$scenario" == coop-boarding ]]; then
+    if [[ "$scenario" == coop || "$scenario" == coop-boarding || "$scenario" == coop-race ]]; then
         env HULLBREAKERS_PROFILE_LABEL="$label-host" "${env[@]:1}" tools/hl game --port "$port" >/dev/null
         sleep 2
         env HULLBREAKERS_PROFILE_LABEL="$label-client" "${env[@]:1}" tools/hl game --connect "127.0.0.1:$port" >/dev/null

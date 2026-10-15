@@ -72,8 +72,8 @@ the data core.
 
 Not every design is a ship that flies. A **site** is a design set at rest in
 the world by a scenario (`ship::site`, a static body): the derelict
-(`assets/ships/derelict`) and the grapple run's course of gates
-(`assets/ships/course`, which is only devices). Sites are `hostile: false`;
+(`assets/ships/derelict`) and the grapple run's race course
+(`assets/ships/course`: rings, the apexes its turns are at, and two posts). Sites are `hostile: false`;
 only the design `home` is the crew's ship.
 
 ## Devices
@@ -104,7 +104,7 @@ full hands (bulky cargo) can press a device.
 
 `id` names it for other devices and for scenarios (unique in the ship);
 `label` is what players see (default: the id); `at` its middle; `face` the
-way it looks, out of the wall it's on (a gate's way through); `start` a
+way it looks, out of the wall it's on (a ring's way through); `start` a
 lever's (1 thrown) or junction's (its way) first setting.
 
 | Kind | Pressed (F) | Output, while powered |
@@ -120,14 +120,14 @@ lever's (1 thrown) or junction's (its way) first setting.
 | `Board(size, rows: [(label, cond)])` | no | lit, a lamp per row showing its condition |
 | `Lights(at: [...], color, flash)` | no | room lights at those points; `flash` for alarms |
 | `Conduit(path: [...])` | no | a cable through those waypoints, lit |
-| `Gate(size)` | no | a frame (structure) round a `size` opening; scenarios count flights through it |
+| `Ring(radius)` | no | a hologram ring (nothing to hit or hook) of `radius`; scenarios count flights through it the way it faces |
 
 `power` is a condition over other devices' outputs: `Always` (the default),
 `Never`, `On(id)`, `Port(id, way)`, `All([...])`, `Any([...])`, `Not(...)`.
 Devices are evaluated once a tick in dependency order, so a chain settles in
 a tick; a loop is refused when the design is read, as is an unknown id or
 way. Light colours mean the same everywhere: cyan is power, amber waiting
-(powered but not thrown, a key counting down, a gate), dark is dead, a shut
+(powered but not thrown, a key counting down, a ring), dark is dead, a shut
 door's strip dim red.
 
 ## What play needs: the check

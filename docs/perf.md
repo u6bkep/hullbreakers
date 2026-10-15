@@ -154,14 +154,73 @@ counts the tick. Splitting that the same way is harder (their own client
 predicts from the full state, and the others interpolate it), and at 11 kB/s
 for two players it's not yet worth it.
 
+## Big fields (the race, 2026-10-14)
+
+The grapple run's field is static rocks (`asteroids::spawn_fixed_rocks`),
+sized by `HULLBREAKERS_RACE_ROCKS` (default 6000), measured with
+`tools/stress race` (the player flown round the line at 40 m/s) and
+`coop-race`. Load 15-20.
+
+**The sim alone** (`tests/rock_scaling.rs`, ignored; headless, release, mean
+ms per tick, 0.35-0.42 with no rocks):
+
+| Rocks | Static | Dynamic, asleep | Kinematic, spinning | Dynamic (the field's kind) |
+|---|---|---|---|---|
+| 300 | 0.42 | 0.47 | 0.64 | 0.62 |
+| 2000 | 0.70 | 0.73 | 1.58 | 1.60 |
+| 8000 | 0.96 | 1.06 | 3.13 | 3.59 |
+
+A static rock costs Avian nearly nothing a tick; a moving one about 0.4 µs
+(its solver body, its box, the broad phase). Substeps barely matter at 300
+rocks (0.62 / 0.65 / 0.74 ms at 1 / 2 / 6). A slowly spinning rock that's
+allowed to sleep does, and stops turning: set `SleepingDisabled` on rocks
+meant to turn. Note the sim alone at 300 dynamic rocks is 0.6 ms, against
+the field's 1.5-2.1 ms in game above: the rest is the game's (lightyear,
+fauna, the frame around the tick), not the rocks.
+
+**In game** (1920x1080, release, uncapped):
+
+| Rocks | fps | frame p99 ms | tick ms | visible meshes | visible tris |
+|---|---|---|---|---|---|
+| 1000 | 256 | 6.1 | 1.22 | 427 | 96k |
+| 2000 | 250 | 5.9 | 1.31 | 635 | 179k |
+| 4000 | 238 | 6.5 | 1.51 | 1065 | 346k |
+| 8000 | 208 | 7.5 | 1.94 | 1899 | 672k |
+| 16000 | 162 | 10.0 | 2.93 | 4055 | 1.5M |
+| 32000 | 105 | 15.6 | 4.74 | 7868 | 3.0M |
+
+Drawing and simulating a field isn't the limit at any size we'd want. What
+is, is **making one**: each rock's hulls take about 0.2 ms to build, and a
+scenario's thousands were built one by one in the frame they arrived. The
+host stalled 3.5 s at 8000 rocks starting the race (traced), and a joining
+client as long, long enough to time out. Fixed: the hulls are built in
+parallel (`asteroids::shape_asteroids`). And the field reached a client as
+one burst, overflowing its UDP receive buffer (see TheBook, lightyear):
+paced now (`net::SEND_QUOTA`, 1 MB/s).
+
+**Co-op, joining a race in progress** (localhost, both fixes):
+
+| Rocks | client stall on joining | the whole field there |
+|---|---|---|
+| 2000 | 0.6 s | yes |
+| 8000 | 0.85 s | yes |
+| 16000 | 1.5 s | yes |
+| 32000 | 3 s, then timed out | no |
+
+So about 16000 rocks is the most a co-op field can be as things stand
+(over a real link, slower: a rock is about 160 B on the wire, so 6000 are a
+second at the pace). Past that, a static field shouldn't be replicated at
+all: every peer can grow it from its seed, as the gallery does its models.
+That needs ropes and boots on a rock to name it in a way both ends agree on
+without replicating it (a `BodyId`, or its index in the field).
+
 ## Bigger work (not done; numbers above)
 
-- **Rock colliders.** The field's tick is mostly Avian over 300 rocks, and
-  a rock's box is found from every point of its hulls (about 640 each)
-  every step. Fewer points per hull (ico2: 162) would cut that about 4x,
-  but rocks are drawn from their colliders, so they'd look coarser: an art
-  call. Alternatively draw from the fine shape and collide with a coarse
-  one.
+- **Rock colliders.** Withdrawn (2026-10-14): a rock's hulls aren't 640
+  points each but about 100 (parry drops the interior points of the noisy
+  sphere), ico2 gives 96, and it moved the tick 5% (within noise). The
+  field's tick isn't mostly the rocks either (see Big fields). REJECTED:
+  coarser rocks, which would cost the look for nothing measurable.
 - **Shadow casters.** The sun's cascades cost about 1 ms of CPU a frame
   aboard the carrier, over 1690 casters, many of them small parts (robot
   pieces, affix parts, frond segments, gun parts). Marking small or

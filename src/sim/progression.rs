@@ -825,9 +825,9 @@ pub fn pay_for(kind: ScenarioKind) -> Option<Pay> {
             per: &[("cell_home", (100, 100), "Power cell home")],
         },
         ScenarioKind::GrappleRun => Pay {
-            won: (150, 200),
+            won: (200, 260),
             lost: (30, 60),
-            par: 150.0,
+            par: 180.0,
             per: &[("finished", (15, 20), "Crew through the course")],
         },
         ScenarioKind::DeadShip => Pay {

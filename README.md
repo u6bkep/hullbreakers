@@ -48,14 +48,19 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   the full complement (seven walkers, six swarmers, three turrets). The fast way across is the rope: hook the carrier on a close
   pass (the first is 30 s in, at 100 m) and reel.
 
-- **Grapple run**: ten gates on a switchback just off our stern, lanes 8 m
-  apart with a hairpin round a pylon at each lane's end, climbing a level
-  halfway and dropping back to the finish. Fly them in order, each the way
-  it faces (in by the side whose edges glow cyan), before the clock (4
-  minutes) runs out. No enemies: it's the grapple's show. Rope the pylon as
-  you come abreast of it and it swings you round at full speed; the jetpack
-  has to brake for every hairpin (a flown course: 24 s on the rope, 31 s on
-  the jetpack). The board at the top keeps everyone's progress and times, and
+- **Grapple run**: a race round a three-kilometre loop through a field of
+  6000 rocks, from just off our stern and back: twelve rings 24 m across
+  (holograms: nothing to hit), climbing and diving over 400 m. Fly them in
+  order, each the way it faces (the vanes inside the rim point through it;
+  your next ring glows cyan, the one after amber), before the clock (7
+  minutes) runs out. No enemies: it's the grapple's show. The course turns
+  between each ring and the next, and inside every turn is a big anchor
+  rock: rope it as it comes abeam and it swings you round at full speed,
+  where the jetpack has to brake (a flown course, assist off, at most
+  45 m/s: 60 s swinging, 84 s on the jetpack). The rest of the field is
+  handholds to reel along the straights by. The rocks are fixed in place,
+  so the line is the same every run. Your time runs from the start ring to
+  the finish; the board at the top keeps everyone's progress and times, and
   the host remembers best times, the crew's and each runner's.
 
 - **Dead ship**: a dark derelict lies 22 m off our stern, its airlock facing
@@ -309,7 +314,7 @@ suit (health, regen, boots, assist, speed against the reference body,
 rope) bottom left, and a card per hand with the stances bottom right
 (weapon names and rarity; what's in a pickup in a card by the crosshair).
 In the world it marks our ship and hostile ones, brackets the reference
-body, and marks the scenario's markers (goals, gates, devices, the way
+body, and marks the scenario's markers (goals, rings, devices, the way
 home) plus the carrier's hangar, the mission wall after a win, the weapons
 locker while you're unarmed aboard, and your dropped kit; off screen
 they're arrows at the edge. Arcs round the centre point toward whatever
@@ -370,7 +375,7 @@ a breaker reset, the board), a death and the kit (the host tries it first:
 it isn't theirs), a crate, a fight, a hull crawler, the shield console and
 the mission wall (the pay and a rank-up on the debrief), the escort (key,
 gangway, the cell carried, set down, carried home), the derelict's
-devices, a gate, a tow, the gallery's affixed robots, and robots let loose
+devices, a ring, a tow, the gallery's affixed robots, and robots let loose
 on our bridge (gunners, a grappler, a crawler, a turret, a marksman) and a
 limpet's rock, watched by both (`<name>.png` and `host-<name>.png` from one
 capture), to compare how a client draws them. The script

@@ -254,18 +254,18 @@ fn course_vantages() -> Vec<(&'static str, Vantage)> {
             },
         ),
         (
-            "run_gate",
+            "run_start",
             Vantage::Eva {
                 offset: Vec3::new(4.0, 4.0, 22.0),
-                look_at: Vec3::new(18.0, 8.0, 75.0),
+                look_at: Vec3::new(0.0, 8.0, 200.0),
                 drift: Vec3::ZERO,
             },
         ),
         (
-            "run_cluster",
+            "run_field",
             Vantage::Eva {
-                offset: Vec3::new(30.0, 45.0, 40.0),
-                look_at: Vec3::new(-20.0, 0.0, 90.0),
+                offset: Vec3::new(80.0, 140.0, -80.0),
+                look_at: Vec3::new(60.0, 60.0, 180.0),
                 drift: Vec3::ZERO,
             },
         ),

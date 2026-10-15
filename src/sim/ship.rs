@@ -150,7 +150,7 @@ pub fn drifting_home_ship() -> impl Bundle {
 }
 
 /// The crew's ship held level and still at the origin, beside a site at
-/// rest (a derelict, a freighter, a course of gates, a rescue): rolling, it
+/// rest (a derelict, a freighter, a race course, a rescue): rolling, it
 /// would leave the crew stepping off it at an angle to the site, which they
 /// then have to roll level to fit through a doorway.
 pub fn parked_home_ship() -> impl Bundle {
@@ -171,7 +171,7 @@ pub fn parked_home_ship() -> impl Bundle {
 }
 
 /// A ship or site set at rest in the world (a derelict, a course of
-/// gates): a static body that only scenarios move (by replacing it).
+/// rings): a static body that only scenarios move (by replacing it).
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Site;
 

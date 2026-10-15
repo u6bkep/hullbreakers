@@ -44,7 +44,7 @@ pub enum ScenarioKind {
     Field,
     /// Under attack: cross to the enemy ship and drop its shield.
     Boarding,
-    /// Checkpoint gates strung through a cluster of rocks, against the clock.
+    /// A race round a loop of rings through a rock field, against the clock.
     GrappleRun,
     /// A dark derelict: bring its power back, open its vault, get out.
     DeadShip,
@@ -135,7 +135,7 @@ pub struct Debrief {
 pub enum MarkerKind {
     /// The thing the mission is about.
     Goal,
-    /// A place to go through (a gate).
+    /// A place to go through (a ring).
     Waypoint,
     /// Something to work (a lever, a key, a junction, a board to read).
     Device,

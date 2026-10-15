@@ -23,7 +23,7 @@ pub const ROCK_DENSITY: f32 = 2000.0;
 pub const FIELD_DIRECTION: Vec3 = Vec3::Z;
 
 /// A rock. Its shape is generated from `seed` wherever the component appears
-/// (see [`shape_asteroid`]), so replicating this is replicating the rock.
+/// (see [`shape_asteroids`]), so replicating this is replicating the rock.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Asteroid {
     pub radius: f32,
@@ -51,15 +51,35 @@ pub struct FieldRng {
 #[derive(Resource)]
 pub struct AppliedFieldSpeed(pub f32);
 
-/// Gives a new [`Asteroid`] its collider.
-pub fn shape_asteroid(add: On<Add, Asteroid>, rocks: Query<&Asteroid>, mut commands: Commands) {
-    let rock = rocks.get(add.entity).expect("just added");
-    let collider = asteroid_collider(rock.seed, rock.radius);
-    commands.entity(add.entity).insert((
-        dynamic_mass(&collider, ROCK_DENSITY),
-        collider,
-        SimMaterial::Rock,
-    ));
+/// Gives new [`Asteroid`]s their colliders, all of them at once on every
+/// core: a rock's hulls take about 0.2 ms to build, so a field of thousands
+/// arriving together (a scenario's, or a client's on joining) built one by
+/// one stalled a frame for seconds (8000 rocks: 3.5 s, which timed a
+/// joining client out; see docs/perf.md). Runs every tick before anything
+/// that needs a rock's shape (the fauna setting on new field rocks, the
+/// physics step), so a rock spawned or received since is shaped by then.
+/// They're built in parallel but given out in the query's order, which
+/// is the same on every run: the order bodies enter the physics decides
+/// how it steps them, and the sim must be deterministic.
+pub fn shape_asteroids(rocks: Query<(Entity, &Asteroid), Without<Collider>>, mut commands: Commands) {
+    let todo: Vec<(Entity, Asteroid)> = rocks.iter().map(|(e, r)| (e, *r)).collect();
+    if todo.is_empty() {
+        return;
+    }
+    let pool = bevy::tasks::ComputeTaskPool::get();
+    let chunk = todo.len().div_ceil(pool.thread_num().max(1) * 4).max(1);
+    let shapes: Vec<Collider> = pool
+        .scope(|scope| {
+            for rocks in todo.chunks(chunk) {
+                scope.spawn(async move { rocks.iter().map(|(_, r)| asteroid_collider(r.seed, r.radius)).collect::<Vec<_>>() });
+            }
+        })
+        .into_iter()
+        .flatten()
+        .collect();
+    for ((entity, _), collider) in todo.into_iter().zip(shapes) {
+        commands.entity(entity).insert((dynamic_mass(&collider, ROCK_DENSITY), collider, SimMaterial::Rock));
+    }
 }
 
 /// Builds a lumpy rock as a compound of 1–3 noisy convex lobes.
@@ -175,7 +195,7 @@ pub fn spawn_field(commands: &mut Commands, tuning: &Tuning) {
             (-FIELD_LENGTH / 2.0, FIELD_LENGTH / 2.0),
         );
         let (linear, angular) = drift(&mut field.rng, tuning.field_speed);
-        let rock = spawn_rock(commands, &mut field, radius, position, linear, angular);
+        let rock = spawn_rock(commands, &mut field, RigidBody::Dynamic, radius, position, linear, angular);
         commands.entity(rock).insert(FieldRock);
     }
     commands.insert_resource(field);
@@ -211,7 +231,7 @@ pub fn spawn_battlefield(
             continue;
         }
         let angular = random_unit(rng) * rng.random_range(0.0..0.2);
-        spawn_rock(commands, &mut field, radius, position, Vec3::ZERO, angular);
+        spawn_rock(commands, &mut field, RigidBody::Dynamic, radius, position, Vec3::ZERO, angular);
         placed += 1;
     }
 }
@@ -226,13 +246,29 @@ pub fn spawn_rocks(commands: &mut Commands, seed: u64, rocks: &[(Vec3, f32)]) {
     };
     for &(position, radius) in rocks {
         let angular = random_unit(&mut field.rng) * field.rng.random_range(0.0..0.08);
-        spawn_rock(commands, &mut field, radius, position, Vec3::ZERO, angular);
+        spawn_rock(commands, &mut field, RigidBody::Dynamic, radius, position, Vec3::ZERO, angular);
+    }
+}
+
+/// Rocks fixed in place at the given places (centre, radius), shaped and
+/// turned from `seed`: static bodies, which cost the physics nothing a
+/// tick, so a field of thousands is affordable (a race course's: see
+/// docs/perf.md). Nothing moves them, not even a rope (a rope on one pulls
+/// you to it, as on a site).
+pub fn spawn_fixed_rocks(commands: &mut Commands, seed: u64, rocks: &[(Vec3, f32)]) {
+    let mut field = FieldRng {
+        rng: ChaCha8Rng::seed_from_u64(seed),
+        next: 0,
+    };
+    for &(position, radius) in rocks {
+        spawn_rock(commands, &mut field, RigidBody::Static, radius, position, Vec3::ZERO, Vec3::ZERO);
     }
 }
 
 fn spawn_rock(
     commands: &mut Commands,
     field: &mut FieldRng,
+    body: RigidBody,
     radius: f32,
     position: Vec3,
     linear: Vec3,
@@ -240,14 +276,13 @@ fn spawn_rock(
 ) -> Entity {
     let rng = &mut field.rng;
     let rotation = Quat::from_scaled_axis(random_unit(rng) * rng.random_range(0.0..3.14));
-    let rock = commands.spawn((
+    let mut rock = commands.spawn((
         Name::new(format!("Asteroid {}", field.next)),
         Asteroid {
             radius,
             seed: rng.random(),
         },
-        RigidBody::Dynamic,
-        SleepingDisabled,
+        body,
         PreviousVelocity::default(),
         LinearVelocity(linear),
         AngularVelocity(angular),
@@ -255,9 +290,12 @@ fn spawn_rock(
         // replicates); Transform is derived from it for rendering.
         Position(position),
         Rotation(rotation),
-    )).id();
+    ));
+    if body.is_dynamic() {
+        rock.insert(SleepingDisabled);
+    }
     field.next += 1;
-    rock
+    rock.id()
 }
 
 /// Applies changes to `Tuning::field_speed` as a velocity delta to every rock.
@@ -340,7 +378,7 @@ pub fn recycle_field(
         }
         commands.entity(entity).despawn();
         let (linear, angular) = drift(&mut field.rng, tuning.field_speed);
-        let rock = spawn_rock(&mut commands, &mut field, rock.radius, candidate, linear, angular);
+        let rock = spawn_rock(&mut commands, &mut field, RigidBody::Dynamic, rock.radius, candidate, linear, angular);
         commands.entity(rock).insert(FieldRock);
     }
 }

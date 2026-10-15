@@ -290,7 +290,14 @@ fn a_missions_pay_is_saved_in_each_crew_members_file() {
         mission.decide(Phase::Won, tick, "COURSE CLEAR");
     }
     crew.server.world_mut().resource_mut::<Director>().start(ScenarioKind::Field);
-    crew.step(60);
+    // (Behind the race's rock field, paced out to the clients: a few
+    // seconds of the rig's clock.)
+    for _ in 0..40 {
+        crew.step(30);
+        if (load(&pa).profile.missions, load(&pb).profile.missions) == (1, 1) {
+            break;
+        }
+    }
     let (fa, fb) = (load(&pa), load(&pb));
     assert_eq!((fa.profile.missions, fb.profile.missions), (1, 1), "not saved at the mission's end");
     let pay = fa.profile.salvage - a.profile.salvage;

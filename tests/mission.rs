@@ -567,23 +567,26 @@ fn walk_forward(app: &mut App, on: bool) {
 
 #[test]
 fn the_mission_wall_starts_the_grapple_run_and_the_dead_ship() {
-    use hullbreakers::sim::scenarios::grapple_run::{COURSE, COURSE_AT, gates, rock_places};
+    use hullbreakers::sim::scenarios::grapple_run::{COURSE, COURSE_AT, ROCKS, anchors, rings, rock_places};
     let mut app = app();
     start(&mut app, ScenarioKind::GrappleRun);
     let course = ship_of(&mut app, COURSE).expect("no course");
     assert_eq!(app.world().get::<Position>(course).unwrap().0, COURSE_AT);
     let world = app.world_mut();
     let rocks = world.query::<&hullbreakers::sim::asteroids::Asteroid>().iter(world).count();
-    assert!(rocks > 200, "only {rocks} rocks");
-    // Every gate is clear of rocks.
+    assert_eq!(rocks, ROCKS, "the whole field");
+    // Every ring is clear of rocks, and every turn has its anchor.
     let course_design = design(COURSE);
-    for i in gates(course_design) {
-        let gate = COURSE_AT + course_design.devices[i].at;
-        for (at, r) in rock_places() {
-            assert!(gate.distance(at) > r * 2.0 + 8.0, "a rock at {at} (r {r}) crowds gate {i} at {gate}");
+    let places = rock_places(ROCKS);
+    for i in rings(course_design) {
+        let ring = COURSE_AT + course_design.devices[i].at;
+        for &(at, r) in &places {
+            assert!(ring.distance(at) > r * 2.0 + 20.0, "a rock at {at} (r {r}) crowds ring {i} at {ring}");
         }
     }
-    assert_eq!(mission(&mut app).markers.len(), 1, "a marker on the next gate");
+    assert_eq!(anchors().len(), rings(course_design).len() - 1);
+    assert_eq!(&places[..anchors().len()], &anchors()[..]);
+    assert_eq!(mission(&mut app).markers.len(), 1, "a marker on the next ring");
     start(&mut app, ScenarioKind::DeadShip);
     assert!(ship_of(&mut app, COURSE).is_none(), "the course outlived its scenario");
     assert!(ship_of(&mut app, "derelict").is_some());
@@ -726,38 +729,41 @@ fn the_dead_ship_is_lost_if_the_crew_is_still_out_when_it_goes() {
     assert!(matches!(player(&mut app).mode, Mode::Eva { .. }), "not thrown off the wreck");
 }
 
-/// Through every gate in order, by hopping from just before each to just
+/// Through every ring in order, by hopping from just before each to just
 /// after it.
-fn fly_the_gates(app: &mut App, order: impl IntoIterator<Item = usize>) {
-    use hullbreakers::sim::scenarios::grapple_run::{COURSE, COURSE_AT, gates};
+fn fly_the_rings(app: &mut App, order: impl IntoIterator<Item = usize>) {
+    use hullbreakers::sim::scenarios::grapple_run::{COURSE, COURSE_AT, rings};
     let course = design(COURSE);
-    let gates = gates(course);
+    let rings = rings(course);
     for k in order {
-        let gate = &course.devices[gates[k]];
-        let at = COURSE_AT + gate.at;
-        float(app, at - gate.face * 1.0);
+        let ring = &course.devices[rings[k]];
+        let at = COURSE_AT + ring.at;
+        float(app, at - ring.face * 1.0);
         ticks(app, 1);
-        float(app, at + gate.face * 1.0);
+        float(app, at + ring.face * 1.0);
         ticks(app, 1);
     }
 }
 
 #[test]
-fn the_grapple_run_is_won_through_every_gate_in_order() {
+fn the_grapple_run_is_won_through_every_ring_in_order() {
     use hullbreakers::sim::scenarios::BANNER_SECONDS;
     let mut app = app();
     start(&mut app, ScenarioKind::GrappleRun);
     ticks(&mut app, 60);
-    // Out of order doesn't count: the next gate is still the first.
-    fly_the_gates(&mut app, [1, 2]);
+    // Out of order doesn't count: the next ring is still the start.
+    fly_the_rings(&mut app, [1, 2]);
     let m = mission(&mut app);
-    assert_eq!(m.markers[0].label, "Gate 1", "{:?}", m.markers);
-    assert!(m.status[0].contains("to gate 1"), "{:?}", m.status);
-    fly_the_gates(&mut app, 0..4);
+    assert_eq!(m.markers[0].label, "Start", "{:?}", m.markers);
+    assert!(m.status[0].contains("to the start"), "{:?}", m.status);
+    fly_the_rings(&mut app, 0..4);
     let m = mission(&mut app);
-    assert_eq!(m.markers[0].label, "Gate 5");
-    assert!(m.status[0].contains("gate 4/10"), "{:?}", m.status);
-    fly_the_gates(&mut app, 4..10);
+    assert_eq!(m.markers[0].label, "Ring 5");
+    assert!(m.status[0].contains("ring 4/12"), "{:?}", m.status);
+    // (A slow first run, so the next can beat it: times run from the
+    // start ring.)
+    ticks(&mut app, 60);
+    fly_the_rings(&mut app, 4..12);
     let m = mission(&mut app);
     assert_eq!((m.phase, m.outcome.as_str()), (Phase::Won, "COURSE CLEAR"));
     assert!(m.report[0].starts_with("Player 1: 0:"), "{:?}", m.report);
@@ -773,7 +779,7 @@ fn the_grapple_run_is_won_through_every_gate_in_order() {
     // A second run: the board remembers the first.
     start(&mut app, ScenarioKind::GrappleRun);
     ticks(&mut app, 30);
-    fly_the_gates(&mut app, 0..10);
+    fly_the_rings(&mut app, 0..12);
     let report = mission(&mut app).report;
     assert!(report[0].contains("personal best"), "{report:?}");
     // Someone else in the same slot, by the same name: their own record,
@@ -788,7 +794,7 @@ fn the_grapple_run_is_won_through_every_gate_in_order() {
     });
     start(&mut app, ScenarioKind::GrappleRun);
     ticks(&mut app, 30);
-    fly_the_gates(&mut app, 0..10);
+    fly_the_rings(&mut app, 0..12);
     let report = mission(&mut app).report;
     assert!(report[0].starts_with("Player 1: ") && !report[0].contains("best"), "{report:?}");
 }
@@ -798,7 +804,7 @@ fn the_grapple_run_is_lost_when_the_clock_runs_out() {
     use hullbreakers::sim::scenarios::grapple_run::TIME_LIMIT;
     let mut app = app();
     start(&mut app, ScenarioKind::GrappleRun);
-    fly_the_gates(&mut app, 0..3);
+    fly_the_rings(&mut app, 0..3);
     {
         let world = app.world_mut();
         let mut m = world.query::<&mut Mission>().single_mut(world).unwrap();
@@ -807,7 +813,7 @@ fn the_grapple_run_is_lost_when_the_clock_runs_out() {
     ticks(&mut app, 2);
     let m = mission(&mut app);
     assert_eq!((m.phase, m.outcome.as_str()), (Phase::Lost, "OUT OF TIME"));
-    assert!(m.report.iter().any(|l| l.contains("out of time at gate 4 of 10")), "{:?}", m.report);
+    assert!(m.report.iter().any(|l| l.contains("out of time at ring 4 of 12")), "{:?}", m.report);
 }
 
 // ---------------------------------------------------------------------------

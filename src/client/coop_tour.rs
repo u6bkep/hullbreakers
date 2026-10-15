@@ -171,13 +171,13 @@ fn steps() -> Vec<Step> {
         step("derelict_reactor", DeadShip, booted(DERELICT, Vec3::new(2.4, 0.01, 10.0), Vec3::X, -0.35), Do::Nothing, 6.0),
         step("derelict_junction", DeadShip, booted(DERELICT, Vec3::new(5.7, 0.01, 1.0), Vec3::X, -0.25), Do::Nothing, 6.0),
         step(
-            "run_gate",
+            "run_ring",
             GrappleRun,
             Place::Eva {
                 ship: COURSE,
-                offset: Vec3::new(0.286, 0.103, 0.953) * -8.0,
+                offset: Vec3::new(0.0, 0.04, 0.999) * -14.0,
                 look_at: Vec3::ZERO,
-                drift: Vec3::new(0.286, 0.103, 0.953) * 5.0,
+                drift: Vec3::new(0.0, 0.04, 0.999) * 5.0,
             },
             Do::Nothing,
             8.0,

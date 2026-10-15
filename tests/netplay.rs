@@ -710,7 +710,7 @@ fn dropping_and_taking_back_is_predicted() {
 }
 
 /// Markers name their bodies by `BodyId` and their players by deck slot, so
-/// a client finds its own copy of the course under the grapple run's gate
+/// a client finds its own copy of the course under the grapple run's ring
 /// marker, and the marker is its own.
 #[test]
 fn markers_find_their_bodies_on_clients() {
@@ -722,12 +722,21 @@ fn markers_find_their_bodies_on_clients() {
         .world_mut()
         .resource_mut::<Director>()
         .start(ScenarioKind::GrappleRun);
-    s.step(180);
+    // (The race's rock field is paced out to the client first: a few
+    // seconds of the rig's clock.)
+    let mut mission = None;
+    for _ in 0..40 {
+        s.step(30);
+        let world = s.client.world_mut();
+        mission = world.query::<&Mission>().single(world).ok().filter(|m| !m.markers.is_empty()).cloned();
+        if mission.is_some() {
+            break;
+        }
+    }
     let world = s.client.world_mut();
-    let mission = world.query::<&Mission>().single(world).unwrap().clone();
-    let marker = mission.markers.first().expect("no markers on the client").clone();
-    assert_eq!(marker.label, "Gate 1");
-    let body = marker.body.expect("the gate marker is on the course");
+    let marker = mission.expect("no markers on the client").markers[0].clone();
+    assert_eq!(marker.label, "Start");
+    let body = marker.body.expect("the ring marker is on the course");
     let found: Vec<&ShipHull> = world.query::<(&BodyId, &ShipHull)>().iter(world).filter(|(id, _)| **id == body).map(|(_, h)| h).collect();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].0, "course");
@@ -1312,4 +1321,37 @@ fn a_robots_shots_reach_a_client() {
     eprintln!("robot shots: server {}, client {}, missed {missed}", server.len(), client.len());
     assert!(server.len() > 3, "the gunner hardly fired: {}", server.len());
     assert_eq!(missed, 0, "the client missed {missed} of {} shots", server.len());
+}
+
+/// How fast a client receives the race's rock field (all of it, at once,
+/// at the scenario's start). `RACE_ROCKS=n` sizes it (default the game's).
+#[test]
+#[ignore]
+fn race_field_reaches_a_client() {
+    use hullbreakers::sim::asteroids::Asteroid;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    if let Ok(n) = std::env::var("RACE_ROCKS") {
+        // SAFETY: an ignored test, run alone.
+        unsafe { std::env::set_var("HULLBREAKERS_RACE_ROCKS", n) };
+    }
+    let (_guard, mut s) = session(50);
+    s.server.world_mut().resource_mut::<Director>().start(ScenarioKind::GrappleRun);
+    let count = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<&Asteroid>().iter(world).count()
+    };
+    for second in 0..30 {
+        let rate = s.received_rate(60) / 1000.0;
+        let (host, client) = (count(&mut s.server), count(&mut s.client));
+        eprintln!("{second:>3} s: host {host}, client {client}, {rate:.1} kB/s");
+        if client == host && host > 0 {
+            break;
+        }
+    }
+    // And it stays.
+    for _ in 0..10 {
+        s.step(60);
+        let (host, client) = (count(&mut s.server), count(&mut s.client));
+        assert_eq!(client, host, "the client's field changed");
+    }
 }

@@ -194,7 +194,7 @@ if wait_step escort_home; then
 fi
 wait_step derelict_reactor && sleep 1.5 && shot reactor_1 && "$H" key f && sleep 2 && shot reactor_2
 wait_step derelict_junction && sleep 1.5 && shot junction_1 && "$H" key f && sleep 2 && shot junction_2
-if wait_step run_gate; then
+if wait_step run_ring; then
     for i in 1 2 3; do sleep 2; shot run_$i; done
 fi
 if wait_step recovery_tow; then

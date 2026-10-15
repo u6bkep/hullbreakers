@@ -632,8 +632,24 @@ fn meter_sends(mut meter: ResMut<SendMeter>, mut links: Query<(Entity, &mut Link
     }
 }
 
+/// The most the authority sends each client a second, and in one go
+/// (bytes). lightyear sends everything at once by default, and a scenario
+/// that spawns thousands of things (the race's rock field: 2000 rocks are
+/// 320 kB) overflowed a client's UDP receive buffer (212 kB by default on
+/// Linux): the kernel dropped hundreds of datagrams, and the reliable resends
+/// took the field over 20 s to arrive (measured: `RcvbufErrors` in
+/// /proc/net/snmp; 8000 rocks timed the client out). Paced, reliable messages
+/// wait their turn instead. Play itself sends 15-45 kB/s (docs/perf.md).
+const SEND_QUOTA: u32 = 1_000_000;
+const SEND_BURST: u32 = 64_000;
+
 fn on_link(add: On<Add, LinkOf>, mut commands: Commands) {
-    commands.entity(add.entity).insert(ReplicationSender);
+    // A transport of our own over the default (channels are added to a
+    // transport as it's inserted, so this one gets them too).
+    commands.entity(add.entity).insert((
+        ReplicationSender,
+        Transport::new(PriorityConfig::new(SEND_QUOTA).with_burst_size(SEND_BURST)),
+    ));
 }
 
 /// The player a connected client controls.

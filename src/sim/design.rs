@@ -330,15 +330,6 @@ pub(crate) fn assemble(id: &str, text: &str, files: &HashMap<&str, &str>) -> Res
         if device.pressable() {
             ship.controls.push((ControlAction::Device(i as u16), device.at, device.press_box()));
         }
-        // A gate's frame is structure: something to grapple and to hit.
-        for (center, size, rotation) in device.gate_frame() {
-            ship.boxes.push(HullBox {
-                center,
-                size,
-                rotation,
-                material: SimMaterial::Trim,
-            });
-        }
     }
     // Turret bases, where the turrets are mounted.
     for &mount in &file.turrets {
@@ -436,7 +427,7 @@ fn wall_across(z: f32, (x0, x1): (f32, f32), (y0, y1): (f32, f32), t: f32, doors
 /// shortfall (empty when it passes). See docs/ships.md.
 pub fn check(ship: &ShipDesign) -> Vec<String> {
     let mut problems = Vec::new();
-    // A site with nothing to walk to (a course of gates) has no floor plan
+    // A site with nothing to walk to (a course of rings) has no floor plan
     // to check, and may be far too big for one.
     let walked = ship.hostile || !ship.posts.is_empty() || !ship.controls.is_empty() || ship.markers.contains_key("entry");
     if !walked {

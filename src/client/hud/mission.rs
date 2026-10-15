@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn a_line_with_a_time_keeps_its_own_clock() {
-        assert!(has_clock("Fly the gates in order — 1:42 left"));
+        assert!(has_clock("Fly the rings in order — 1:42 left"));
         assert!(has_clock("Overload in 0:09"));
         assert!(!has_clock("Board the carrier and disable its shield on the bridge"));
         assert!(!has_clock("Aboard: 1 of 2"));

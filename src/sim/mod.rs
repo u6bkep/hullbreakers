@@ -109,7 +109,9 @@ impl Plugin for SimSharedPlugin {
             .add_observer(bots::add_body_tuning)
             .add_observer(bots::add_affix_tuning)
             .add_observer(ship::build_hull)
-            .add_observer(asteroids::shape_asteroid)
+            // Before the physics step, and (on the authority) after the
+            // field's new rocks and before their fauna.
+            .add_systems(FixedUpdate, asteroids::shape_asteroids)
             .add_observer(fauna::shape_grazer)
             .add_observer(mission::shape_debris)
             .init_resource::<bodies::VanishedBodies>()
@@ -212,7 +214,8 @@ impl Plugin for SimPlugin {
                     asteroids::apply_field_speed,
                     asteroids::recycle_field
                         .after(update_pins)
-                        .after(update_field_interest),
+                        .after(update_field_interest)
+                        .before(asteroids::shape_asteroids),
                     update_field_interest,
                 )
                     .run_if(in_field)
@@ -224,6 +227,7 @@ impl Plugin for SimPlugin {
                     fauna::swim,
                     (fauna::populate_field, fauna::cull_fauna)
                         .after(asteroids::recycle_field)
+                        .after(asteroids::shape_asteroids)
                         .run_if(resource_exists::<fauna::FaunaField>.and_then(in_field)),
                 )
                     .in_set(SimSystems::Drive),

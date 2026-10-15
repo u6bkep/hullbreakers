@@ -4,7 +4,7 @@
 //!
 //! The lights speak one language: **cyan** is power (a live circuit, a lit
 //! conduit, a junction's live way, an open door), **amber** is waiting (a
-//! powered switch not yet thrown, a turned key counting down, a gate), and
+//! powered switch not yet thrown, a turned key counting down, a ring), and
 //! dark is dead. A shut door shows a dim red strip. (Magenta is for weak
 //! spots only.)
 
@@ -39,8 +39,9 @@ pub struct DeviceLook {
     standby: Handle<StandardMaterial>,
     waiting: Handle<StandardMaterial>,
     shut: Handle<StandardMaterial>,
-    gate: Handle<StandardMaterial>,
-    gate_next: Handle<StandardMaterial>,
+    ring: Handle<StandardMaterial>,
+    ring_after: Handle<StandardMaterial>,
+    ring_next: Handle<StandardMaterial>,
     selected: Handle<StandardMaterial>,
     alarm: Handle<StandardMaterial>,
     bead: Handle<StandardMaterial>,
@@ -72,8 +73,9 @@ pub fn setup_device_look(mut commands: Commands, mut materials: ResMut<Assets<St
         standby: glow(&mut materials, WAITING, 0.6),
         waiting: glow(&mut materials, WAITING, 5.0),
         shut: glow(&mut materials, SHUT, 0.9),
-        gate: glow(&mut materials, WAITING, 2.0),
-        gate_next: glow(&mut materials, POWER, 9.0),
+        ring: glow(&mut materials, WAITING, 1.2),
+        ring_after: glow(&mut materials, WAITING, 6.0),
+        ring_next: glow(&mut materials, POWER, 12.0),
         selected: glow(&mut materials, Color::srgb(0.85, 0.85, 0.8), 0.35),
         alarm: glow(&mut materials, SHUT, 6.0),
         bead: glow(&mut materials, POWER, 1.6),
@@ -106,13 +108,9 @@ pub enum Part {
     Row(u8),
     /// A room light: on when live (an alarm flashes).
     Light { alarm: bool },
-    /// A gate's strip: bright when it's the local player's next.
-    /// The edges of a gate's opening, on the face you fly in by: lit when
-    /// it's your next gate.
-    GateStrip,
-    /// The same on the face you leave by: never lit, so a gate seen from
-    /// the wrong side looks dark.
-    GateStripBack,
+    /// A ring's hoop: bright cyan when it's the local player's next, amber
+    /// for the one after (to plan the turn by), dim otherwise.
+    Ring,
     /// A length of conduit (lit through its conduit's [`CableGlow`]).
     Cable,
     /// The bead of light running along a live conduit's path (in the
@@ -297,21 +295,22 @@ pub fn build_devices(
                 });
                 None
             }
-            DeviceKind::Gate { size } => {
-                // Strips along the opening's edges, on both faces of the
-                // frame (behind it, -z, is the way in).
-                let t = crate::sim::devices::GATE_FRAME;
-                for side in [-1.0, 1.0] {
-                    let z = side * (t / 2.0 + 0.01);
-                    let part = if side < 0.0 { Part::GateStrip } else { Part::GateStripBack };
-                    for (offset, extent) in [
-                        (Vec3::Y * (size.y / 2.0 + 0.06), Vec3::new(size.x, 0.1, 0.02)),
-                        (Vec3::NEG_Y * (size.y / 2.0 + 0.06), Vec3::new(size.x, 0.1, 0.02)),
-                        (Vec3::X * (size.x / 2.0 + 0.06), Vec3::new(0.1, size.y, 0.02)),
-                        (Vec3::NEG_X * (size.x / 2.0 + 0.06), Vec3::new(0.1, size.y, 0.02)),
-                    ] {
-                        parts.push((part.clone(), cuboid(&mut meshes, extent), look.gate.clone(), Transform::from_translation(offset.with_z(z))));
-                    }
+            DeviceKind::Ring { radius } => {
+                // A hoop round the way through (a torus about y, turned to
+                // lie across z), thick enough to read from a few hundred
+                // metres; and four short vanes inside its rim on the way-in
+                // side, angled through it, so which way it's flown shows.
+                let tube = 0.35 + radius * 0.02;
+                let hoop = meshes.add(Torus::new(radius - tube, radius + tube).mesh().major_resolution(48).minor_resolution(8));
+                let across = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+                parts.push((Part::Ring, hoop, look.ring.clone(), Transform::from_rotation(across)));
+                let vane = cuboid(&mut meshes, Vec3::new(tube * 1.2, radius * 0.18, tube * 0.5));
+                for k in 0..4 {
+                    let around = Quat::from_rotation_z(k as f32 * std::f32::consts::FRAC_PI_2);
+                    let rim = around * Vec3::Y * (radius - radius * 0.12);
+                    // Leaning back toward the way in: a chevron pointing through.
+                    let lean = around * Quat::from_rotation_x(-0.6);
+                    parts.push((Part::Ring, vane.clone(), look.ring.clone(), Transform::from_translation(rim - Vec3::Z * radius * 0.06).with_rotation(lean)));
                 }
                 Some((facing, Vec::new()))
             }
@@ -446,8 +445,8 @@ fn way_x(k: u8, ways: u8) -> f32 {
     }
 }
 
-/// The local player's next gate on `ship`, if they have one there.
-fn next_gate(mission: Option<&Mission>, local: Option<u32>, ship: Option<BodyId>) -> Option<u16> {
+/// The local player's next ring on `ship`, if they have one there.
+fn next_ring(mission: Option<&Mission>, local: Option<u32>, ship: Option<BodyId>) -> Option<u16> {
     mission?
         .markers
         .iter()
@@ -575,10 +574,21 @@ pub fn show_devices(
                     None => transform.scale = Vec3::ZERO,
                 }
             }
-            Part::GateStripBack => {}
-            Part::GateStrip => {
-                let next = next_gate(mission, local, ids.get(of.ship).ok().copied()) == Some(of.index);
-                set(&mut material, if next { &look.gate_next } else { &look.gate });
+            Part::Ring => {
+                let next = next_ring(mission, local, ids.get(of.ship).ok().copied());
+                // The one after: the next ring along the design's devices.
+                let after = next.and_then(|n| {
+                    let devices = &ships.get(of.ship).ok()?.0.design().devices;
+                    (n as usize + 1..devices.len()).find(|&i| matches!(devices[i].kind, DeviceKind::Ring { .. }))
+                });
+                let look = if next == Some(of.index) {
+                    &look.ring_next
+                } else if after == Some(of.index as usize) {
+                    &look.ring_after
+                } else {
+                    &look.ring
+                };
+                set(&mut material, look);
             }
         }
     }

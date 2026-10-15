@@ -3,7 +3,7 @@
 //!
 //! A design places devices as data (`devices: [...]` in a module, see
 //! docs/ships.md): levers, keys (timed switches), power junctions, doors,
-//! lamps, boards of labelled lamps, room lights, conduits, and gates to fly
+//! lamps, boards of labelled lamps, room lights, conduits, and rings to fly
 //! through. Each has a **power** condition over the others' outputs ("this
 //! door opens when both keys are turned", "this junction is fed by way 2 of
 //! that one"), and an output of its own:
@@ -17,7 +17,7 @@
 //! | `Door` | (not pressable) | open; a `latch` door stays open once opened |
 //! | `Bridge` | (not pressable) | extended: a floor panel (a gangway) that's solid only then |
 //! | `Sensor` | (not pressable) | on while a player stands in its box (so a door can stay open over a doorway) |
-//! | `Lamp`, `Board`, `Lights`, `Conduit`, `Gate` | (not pressable) | lit |
+//! | `Lamp`, `Board`, `Lights`, `Conduit`, `Ring` | (not pressable) | lit |
 //!
 //! A press works whether or not the device has power: a lever thrown, a
 //! junction turned or a key turned while dead takes effect when the power
@@ -54,10 +54,10 @@ pub struct DeviceFile {
     pub label: String,
     pub kind: KindFile,
     /// Its middle: of the box a player presses, the doorway a door fills,
-    /// the gate's opening. Lights and conduits give their own points.
+    /// the ring's centre. Lights and conduits give their own points.
     #[serde(default)]
     pub at: Vec3,
-    /// The way its face looks: out of the wall it's mounted on (or a gate's
+    /// The way its face looks: out of the wall it's mounted on (or a ring's
     /// way through).
     #[serde(default = "up")]
     pub face: Vec3,
@@ -118,8 +118,8 @@ pub enum KindFile {
     Conduit {
         path: Vec<Vec3>,
     },
-    Gate {
-        size: Vec2,
+    Ring {
+        radius: f32,
     },
 }
 
@@ -203,9 +203,10 @@ pub enum DeviceKind {
     /// Room lights at these points; an alarm flashes.
     Lights { at: Vec<Vec3>, color: Vec3, flash: bool },
     Conduit { path: Vec<Vec3> },
-    /// An opening `size` across (in the face's right and up), to fly
-    /// through along the face.
-    Gate { size: Vec2 },
+    /// A ring of `radius` to fly through along the face: a hologram, with
+    /// no frame (nothing to hit or hook; a course's rocks are its
+    /// handholds).
+    Ring { radius: f32 },
 }
 
 /// A device fitted to a ship, in ship coordinates.
@@ -222,9 +223,6 @@ pub struct Device {
     /// Whether hits can knock it (see [`Device::knock`]).
     pub fault: bool,
 }
-
-/// How thick a gate's frame is (m), and how deep.
-pub const GATE_FRAME: f32 = 0.5;
 
 impl Device {
     /// Whether it's out of the setting it starts in (knocked, or worked).
@@ -297,39 +295,19 @@ impl Device {
     }
 
     /// Whether the straight move from `a` to `b` (ship coordinates) goes
-    /// through this gate's opening the way it faces (in from behind it, out
-    /// of its face): a course's hairpins can't be cut by flying a gate
-    /// backwards.
+    /// through this ring the way it faces (in from behind it, out of its
+    /// face): a course can't be cut by flying a ring backwards.
     pub fn passed_through(&self, a: Vec3, b: Vec3) -> bool {
-        let DeviceKind::Gate { size } = self.kind else {
+        let DeviceKind::Ring { radius } = self.kind else {
             return false;
         };
-        let (r, u, n) = self.basis();
+        let n = self.face;
         let (da, db) = ((a - self.at).dot(n), (b - self.at).dot(n));
         if !(da < 0.0 && db >= 0.0) {
             return false;
         }
         let p = a + (b - a) * (da / (da - db)) - self.at;
-        p.dot(r).abs() <= size.x / 2.0 && p.dot(u).abs() <= size.y / 2.0
-    }
-
-    /// A gate's frame, as boxes (centre, full size along the face's right,
-    /// up and out, and the turn to those axes) in the ship.
-    pub fn gate_frame(&self) -> Vec<(Vec3, Vec3, Quat)> {
-        let DeviceKind::Gate { size } = self.kind else {
-            return Vec::new();
-        };
-        let (r, u, n) = self.basis();
-        let turn = Quat::from_mat3(&Mat3::from_cols(r, u, n));
-        let t = GATE_FRAME;
-        let across = Vec3::new(size.x + 2.0 * t, t, t);
-        let side = Vec3::new(t, size.y, t);
-        vec![
-            (self.at + u * (size.y + t) / 2.0, across, turn),
-            (self.at - u * (size.y + t) / 2.0, across, turn),
-            (self.at + r * (size.x + t) / 2.0, side, turn),
-            (self.at - r * (size.x + t) / 2.0, side, turn),
-        ]
+        p.length_squared() <= radius * radius
     }
 }
 
@@ -405,7 +383,7 @@ pub fn place(
         KindFile::Conduit { path } => DeviceKind::Conduit {
             path: cable_run(&path.iter().map(|&p| to_ship(p)).collect::<Vec<_>>()),
         },
-        KindFile::Gate { size } => DeviceKind::Gate { size: *size },
+        KindFile::Ring { radius } => DeviceKind::Ring { radius: *radius },
     };
     let device = Device {
         id: file.id.clone(),
@@ -854,14 +832,14 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_counts_a_move_through_its_opening_only() {
-        let d = design("(id: \"g\", kind: Gate(size: (4.0, 4.0)), at: (0.0, 0.0, 10.0), face: (0.0, 0.0, 1.0))").unwrap();
+    fn a_ring_counts_a_move_through_it_only() {
+        let d = design("(id: \"g\", kind: Ring(radius: 2.0), at: (0.0, 0.0, 10.0), face: (0.0, 0.0, 1.0))").unwrap();
         let g = &d.devices[0];
         assert!(g.passed_through(Vec3::new(1.0, 1.0, 9.5), Vec3::new(1.0, 1.0, 10.5)));
         assert!(!g.passed_through(Vec3::new(0.0, 0.0, 11.0), Vec3::new(0.0, 0.0, 9.0)), "the wrong way");
-        assert!(!g.passed_through(Vec3::new(3.0, 0.0, 9.5), Vec3::new(3.0, 0.0, 10.5)), "beside it");
+        assert!(!g.passed_through(Vec3::new(1.5, 1.5, 9.5), Vec3::new(1.5, 1.5, 10.5)), "past its rim");
         assert!(!g.passed_through(Vec3::new(0.0, 0.0, 8.0), Vec3::new(0.0, 0.0, 9.9)), "short of it");
-        // Its frame is structure.
-        assert_eq!(d.boxes.len(), 4);
+        // A hologram: nothing to hit.
+        assert!(d.boxes.is_empty());
     }
 }

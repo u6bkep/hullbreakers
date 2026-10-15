@@ -68,6 +68,9 @@ fn rock(app: &mut App, at: Vec3, radius: f32) -> Entity {
     let world = app.world_mut();
     asteroids::spawn_rocks(&mut world.commands(), 11, &[(at, radius)]);
     world.flush();
+    // Shaped in the next tick.
+    ticks(app, 1);
+    let world = app.world_mut();
     world
         .query_filtered::<(Entity, &Position), With<Asteroid>>()
         .iter(world)

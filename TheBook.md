@@ -161,6 +161,24 @@ it.
   client's mode, not just its events. Watch: deeper rollbacks re-simulate
   more ticks each (CPU at high lag).
 
+- 2026-10-14. A client joining the race (2000-32000 rocks spawned at once)
+  lost hundreds to hundreds of thousands of datagrams: lightyear sends
+  everything a tick has at once unless its bandwidth limiter is on (off by
+  default), and the burst overflowed the client's UDP receive buffer (212 kB
+  on Linux by default; `RcvbufErrors` in /proc/net/snmp: +1265 at 2000
+  rocks, +6237 at 8000, +159318 at 32000, when the client got nothing and
+  timed out). The limiter can't be configured on the link lightyear spawns
+  for a client (its fields are crate-private), so `net::on_link` inserts a
+  fresh `Transport::new(PriorityConfig::new(..))` over the default (channels
+  are added on `Insert<Transport>`, so the new one gets them). Paced at
+  1 MB/s: back to the baseline (~110-150 a run). The limiter runs on the wall
+  clock, so in the mock-clock test rig its rates read wrong (about a sixth of
+  the quota per rig second). Cost: two hours, a wrong first diagnosis (the
+  client's multi-second stall building the rocks, below, was half of it).
+  Watch: everything waits behind a big spawn (a scenario's start), since
+  spawns go at a higher priority than updates; and 32000 rocks still time a
+  client out.
+
 ## Bevy rendering
 
 - 2026-10-12. We wanted the headlamp not to light the player's own arms.
@@ -198,6 +216,13 @@ it.
   (B0002), not at compile time. The grazers' alarm (read damage) and
   trample (deal damage) became two systems (`sim/fauna.rs`). Cost: one
   test run.
+
+- 2026-10-14. Building rocks' colliders in parallel with
+  `Query::par_iter` and `ParallelCommands` broke `simulation_is_deterministic`:
+  the inserts land in whatever order the threads finish, and the order
+  bodies enter Avian decides how it steps them. Now the hulls are built on
+  the compute pool in chunks and inserted serially in query order
+  (`asteroids::shape_asteroids`). Cost: one test run.
 
 ## Blender pipeline (hb, the verifier, asset_view)
 
