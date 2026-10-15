@@ -326,6 +326,13 @@ const RAJDHANI_SEMIBOLD: &[u8] = include_bytes!("../../../assets/fonts/Rajdhani-
 const RAJDHANI_BOLD: &[u8] = include_bytes!("../../../assets/fonts/Rajdhani-Bold.ttf");
 const SHARE_TECH_MONO: &[u8] = include_bytes!("../../../assets/fonts/ShareTechMono-Regular.ttf");
 
+/// Whether the HUD's fonts are bound: fonts set in one egui pass bind at
+/// the next, and drawing text in a family that isn't bound yet is a panic
+/// (epaint's). Everything the HUD draws on the first frame checks this;
+/// most of it has nothing to draw until there's a player.
+#[derive(Resource, Default)]
+pub struct HudReady(pub bool);
+
 /// Installs the HUD's fonts and theme on the egui context, once; and keeps
 /// its zoom matched to the window's height, so the HUD covers the same
 /// share of the screen at any resolution.
@@ -333,8 +340,10 @@ pub fn setup_egui(
     mut contexts: EguiContexts,
     window: Option<Single<&Window, With<PrimaryWindow>>>,
     mut done: Local<bool>,
+    mut ready: ResMut<HudReady>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
+    ready.0 = *done;
     if !*done {
         *done = true;
         ctx.set_fonts(fonts());

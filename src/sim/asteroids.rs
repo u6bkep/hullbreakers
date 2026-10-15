@@ -95,21 +95,19 @@ fn rock_signature(field: &RockField, index: u32) -> u64 {
     mix(mix(field.seed ^ ((field.laid as u64) << 32) ^ field.layout as u64) ^ index as u64)
 }
 
-/// Grows every new [`RockField`]'s rocks. On the authority (which has the
-/// [`Director`]) a rock that isn't fixed is a dynamic body: born awake,
-/// since a body spawned asleep is woken by its own first step, it falls
-/// asleep on its own, and sleeps until something knocks it (Avian wakes it
-/// on contact and on a change to its velocity). A client's are all static:
-/// it doesn't simulate rocks, and one that moves reaches it by its motion.
-/// Before the physics step, so the rocks have their shapes by then.
-pub fn grow_fields(fields: Query<(Entity, &RockField), Added<RockField>>, director: Option<Res<Director>>, mut commands: Commands) {
+/// Grows every new [`RockField`]'s rocks. Each becomes a body as it's shaped
+/// ([`shape_asteroids`], a batch a tick). On the authority a rock that
+/// isn't fixed is a dynamic body: born awake, since a body spawned asleep
+/// is woken by its own first step, it falls asleep on its own, and sleeps
+/// until something knocks it (Avian wakes it on contact and on a change to
+/// its velocity).
+pub fn grow_fields(fields: Query<(Entity, &RockField), Added<RockField>>, mut commands: Commands) {
     for (entity, field) in &fields {
         let places = field.layout.places(field.count as usize);
         info!("growing a field of {} rocks ({:?})", places.len(), field.layout);
         let rng = &mut ChaCha8Rng::seed_from_u64(field.seed);
         for (index, place) in places.iter().enumerate() {
             let rotation = Quat::from_scaled_axis(random_unit(rng) * rng.random_range(0.0..3.14));
-            let body = if director.is_some() && !place.fixed { RigidBody::Dynamic } else { RigidBody::Static };
             commands.spawn((
                 Name::new(format!("Rock {index}")),
                 Asteroid {
@@ -122,7 +120,6 @@ pub fn grow_fields(fields: Query<(Entity, &RockField), Added<RockField>>, direct
                     index: index as u32,
                 },
                 Signature::from_hash(rock_signature(field, index as u32)),
-                body,
                 PreviousVelocity::default(),
                 LinearVelocity::ZERO,
                 AngularVelocity::ZERO,
@@ -181,33 +178,74 @@ pub struct FieldRng {
 #[derive(Resource)]
 pub struct AppliedFieldSpeed(pub f32);
 
-/// Gives new [`Asteroid`]s their colliders, all of them at once on every
-/// core: a rock's hulls take about 0.2 ms to build, so a field of thousands
-/// arriving together (a scenario's, or a client's on joining) built one by
-/// one stalled a frame for seconds (8000 rocks: 3.5 s, which timed a
-/// joining client out; see docs/perf.md). Runs every tick before anything
-/// that needs a rock's shape (the fauna setting on new field rocks, the
-/// physics step), so a rock spawned or received since is shaped by then.
-/// They're built in parallel but given out in the query's order, which
-/// is the same on every run: the order bodies enter the physics decides
-/// how it steps them, and the sim must be deterministic.
-pub fn shape_asteroids(rocks: Query<(Entity, &Asteroid), Without<Collider>>, mut commands: Commands) {
-    let todo: Vec<(Entity, Asteroid)> = rocks.iter().map(|(e, r)| (e, *r)).collect();
+/// How many rocks [`shape_asteroids`] shapes a frame: a field of thousands
+/// takes a few dozen frames, so the frame stays alive (and a loading
+/// veil's bar moves) instead of stalling for the lot. Per frame, not per
+/// tick: a long tick makes the fixed loop run several ticks the next frame
+/// to catch up, so a budget per tick bounded nothing (traced: 32,000 rocks
+/// in batches of 1000 a tick ran 24 ticks inside three frames, one of them
+/// 2.5 s). A batch costs about a tenth of a millisecond a rock, most of it
+/// applying the shape (Avian's collider and mass hooks, the mesh), so this
+/// is about 25 ms a frame. A count, not a time, so the order rocks enter
+/// the physics is the same on every run.
+pub const SHAPE_PER_FRAME: usize = 200;
+
+/// What's left of this frame's [`SHAPE_PER_FRAME`].
+#[derive(Resource)]
+pub struct ShapeBudget(pub usize);
+
+impl Default for ShapeBudget {
+    fn default() -> Self {
+        Self(SHAPE_PER_FRAME)
+    }
+}
+
+/// Each frame starts with a fresh budget.
+pub fn reset_shape_budget(mut budget: ResMut<ShapeBudget>) {
+    budget.0 = SHAPE_PER_FRAME;
+}
+
+/// Gives new [`Asteroid`]s their colliders, a batch a frame
+/// ([`SHAPE_PER_FRAME`]), each batch on every core: a rock's hulls take
+/// about 0.2 ms to build, so a field of thousands arriving together (a
+/// scenario's, or a client's on joining) built one by one stalled a frame
+/// for seconds (8000 rocks: 3.5 s, which timed a joining client out; see
+/// docs/perf.md). Runs every tick before anything that needs a rock's
+/// shape (the fauna setting on new field rocks, the physics step), so a
+/// rock spawned or received since is shaped by then. They're built in
+/// parallel but given out in the query's order, which is the same on every
+/// run: the order bodies enter the physics decides how it steps them, and
+/// the sim must be deterministic.
+///
+/// A grown rock (see [`RockField`]) becomes a body here, with its shape:
+/// a dynamic body without one would spend the ticks until its batch
+/// massless (which Avian warns about, per body). On the authority (which
+/// has the [`Director`]) a rock that isn't fixed is dynamic; a client's are
+/// all static, since it doesn't simulate rocks, and one that moves reaches
+/// it by its motion.
+pub fn shape_asteroids(
+    rocks: Query<(Entity, &Asteroid, Has<Grown>), Without<Collider>>,
+    director: Option<Res<Director>>,
+    mut budget: ResMut<ShapeBudget>,
+    mut commands: Commands,
+) {
+    let todo: Vec<(Entity, Asteroid, bool)> = rocks.iter().take(budget.0).map(|(e, r, g)| (e, *r, g)).collect();
     if todo.is_empty() {
         return;
     }
+    budget.0 -= todo.len();
     let pool = bevy::tasks::ComputeTaskPool::get();
     let chunk = todo.len().div_ceil(pool.thread_num().max(1) * 4).max(1);
     let shapes: Vec<Collider> = pool
         .scope(|scope| {
             for rocks in todo.chunks(chunk) {
-                scope.spawn(async move { rocks.iter().map(|(_, r)| asteroid_collider(r.seed, r.radius)).collect::<Vec<_>>() });
+                scope.spawn(async move { rocks.iter().map(|(_, r, _)| asteroid_collider(r.seed, r.radius)).collect::<Vec<_>>() });
             }
         })
         .into_iter()
         .flatten()
         .collect();
-    for ((entity, rock), collider) in todo.into_iter().zip(shapes) {
+    for ((entity, rock, grown), collider) in todo.into_iter().zip(shapes) {
         let mut e = commands.entity(entity);
         // A fixed rock must take no impulses: a static body's velocity is
         // never stepped or cleared, so a bump would leave it "moving" for
@@ -217,6 +255,9 @@ pub fn shape_asteroids(rocks: Query<(Entity, &Asteroid), Without<Collider>>, mut
             e.insert(BodyInertia::immovable(&collider));
         } else {
             e.insert(dynamic_mass(&collider, ROCK_DENSITY));
+        }
+        if grown {
+            e.insert(if director.is_some() && !rock.fixed { RigidBody::Dynamic } else { RigidBody::Static });
         }
         e.insert((collider, SimMaterial::Rock));
     }

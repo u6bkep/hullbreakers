@@ -112,6 +112,8 @@ impl Plugin for SimSharedPlugin {
             // Before the physics step, and (on the authority) after the
             // field's new rocks and before their fauna.
             .add_systems(FixedUpdate, (asteroids::grow_fields, asteroids::shape_asteroids).chain())
+            .init_resource::<asteroids::ShapeBudget>()
+            .add_systems(First, asteroids::reset_shape_budget)
             .add_observer(asteroids::clear_field)
             .add_observer(fauna::shape_grazer)
             .add_observer(mission::shape_debris)

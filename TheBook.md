@@ -95,6 +95,17 @@ it.
   (`ITEMS_HEIGHT`, `src/client/menu.rs`). Cost: one harness round-trip.
   Same pattern as the entry above: implicit sizing, caught only on screen.
 
+- 2026-10-14. A joining client died on its first frame: `FontFamily::Name
+  ("ui_bold") is not bound to any fonts`, a panic in epaint, from the
+  loading veil (the first HUD element to draw on frame one, since a client
+  is joining from the start). `Context::set_fonts` (in `style::setup_egui`,
+  first in the HUD chain) binds the fonts at the *next* pass, not the one
+  it's called in; every other element had been spared by having nothing to
+  draw until a player exists. Now `setup_egui` keeps `HudReady`, true from
+  the pass after the fonts are set, and the veil waits for it. Cost: a
+  crashed client taken for a missing veil (the screenshots were the host's
+  window), half an hour. Watch: any HUD element that can draw on frame one.
+
 ## HUD (our subsystem: what it can read)
 
 - 2026-10-12. The damage-direction indicator was specified "from the hit

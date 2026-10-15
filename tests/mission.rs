@@ -598,6 +598,34 @@ fn the_mission_wall_starts_the_grapple_run_and_the_dead_ship() {
     assert!(ship_of(&mut app, "derelict").is_some());
 }
 
+/// A big field is shaped a batch a frame, so the frame stays alive under
+/// the loading veil; a grown rock is a body only once it has its shape.
+/// (A frame is a tick here.)
+#[test]
+fn a_big_field_is_shaped_a_batch_a_frame() {
+    use hullbreakers::sim::asteroids::{Asteroid, SHAPE_PER_FRAME};
+    use hullbreakers::sim::scenarios::grapple_run::ROCKS;
+    let mut app = app();
+    start(&mut app, ScenarioKind::GrappleRun);
+    let count = |app: &mut App| {
+        let world = app.world_mut();
+        (
+            world.query_filtered::<(), (With<Asteroid>, With<Collider>)>().iter(world).count(),
+            world.query_filtered::<(), (With<Asteroid>, With<RigidBody>)>().iter(world).count(),
+            world.query_filtered::<(), With<Asteroid>>().iter(world).count(),
+        )
+    };
+    // The whole field is there, and its first batch shaped (which the
+    // button's two ticks allow for).
+    let (shaped, bodies, total) = count(&mut app);
+    assert_eq!(total, ROCKS);
+    assert_eq!(shaped, SHAPE_PER_FRAME.min(ROCKS), "shaped in one go, or not at all");
+    assert_eq!(bodies, shaped, "a rock without a shape is a body");
+    ticks(&mut app, ROCKS.div_ceil(SHAPE_PER_FRAME));
+    let (shaped, bodies, _) = count(&mut app);
+    assert_eq!((shaped, bodies), (ROCKS, ROCKS));
+}
+
 /// The race's anchors are fixed: flying into one at speed bounces you off
 /// (or lands you) and leaves it at rest, with no velocity to pass on.
 #[test]

@@ -13,10 +13,13 @@
 //!   dying.
 //! - [`hands`]: a card per hand and the stances, from [`view`].
 //! - [`progress`]: salvage and experience earned, and a new rank.
+//! - [`loading`]: the veil while the world can't be shown yet (joining, a
+//!   big field being built).
 //! - [`tuning`]: the F1 panel (a debug panel, left as one).
 
 pub mod flight;
 pub mod hands;
+pub mod loading;
 pub mod markers;
 pub mod mission;
 pub mod progress;
@@ -41,6 +44,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<tuning::PanelState>()
             .init_resource::<HudMemory>()
+            .init_resource::<style::HudReady>()
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -62,6 +66,7 @@ impl Plugin for HudPlugin {
                     progress::progress_hud,
                     reticle::hit_markers,
                     vitals::death_overlay,
+                    loading::loading_overlay,
                     tuning::tuning_panel,
                 )
                     .chain()

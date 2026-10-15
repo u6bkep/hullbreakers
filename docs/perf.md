@@ -227,9 +227,14 @@ client's own copy, and a player's reference to it resolves to the rock the
 client's prediction already chose. Measured in the netplay rig: the race's
 start costs a client 10 kB (was about 960 kB), a rope to a grown anchor
 rolls nothing back, and a knocked rock drifts on the client's copy. What a
-joining client waits on now is its own CPU (the hulls, about 0.2 ms each
-across its cores, then the meshes), which a loading screen can cover (not
-done).
+joining client waits on now is its own CPU: the hulls (about 0.2 ms each
+across its cores) and the meshes, built a batch of `SHAPE_PER_FRAME` (200)
+rocks a frame so the frame stays alive, under a veil with a bar
+(`client::hud::loading`), which also covers joining a host. Traced (32,000
+rocks, release): a batch of 1000 was 33 ms to build and about 90 ms to
+apply (Avian's collider-tree and mass hooks, our mesh observer), and a
+budget per *tick* bounded nothing, since the fixed loop caught up with 24
+ticks inside three frames (one 2.5 s long): hence per frame.
 
 ## Bigger work (not done; numbers above)
 

@@ -68,6 +68,20 @@ const HOST_PEER: PeerId = PeerId::Local(0);
 #[derive(Component)]
 pub struct LocalPlayer;
 
+/// A client that hasn't got its player yet (its clock in step with the
+/// host's, the host's world arriving): what the loading veil shows.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct Joining {
+    pub server: SocketAddr,
+}
+
+/// Client: joined once it has its player to present.
+fn finish_joining(joining: Option<Res<Joining>>, local: Query<(), With<LocalPlayer>>, mut commands: Commands) {
+    if joining.is_some() && !local.is_empty() {
+        commands.remove_resource::<Joining>();
+    }
+}
+
 /// This machine's input for its player, written by the input layer and sent
 /// to the authority each tick. Presentation also reads it for what the
 /// simulation hasn't applied yet (zero-latency look).
@@ -201,7 +215,7 @@ impl Plugin for NetPlugin {
             ))
             .add_observer(extrapolate::prepare_extrapolated)
             .add_observer(extrapolate::prepare_flight)
-            .add_systems(Update, adopt_host_tuning)
+            .add_systems(Update, (adopt_host_tuning, finish_joining))
             // Interpolate two send intervals behind the authority's latest,
             // not lightyear's 1.2: at 1.2 the next sample was often not in
             // yet when it was needed (the authority sends every third tick),
@@ -284,7 +298,7 @@ impl Plugin for NetPlugin {
                 });
             }
             NetMode::Client { server } => {
-                app.add_systems(Startup, move |mut commands: Commands| {
+                app.insert_resource(Joining { server }).add_systems(Startup, move |mut commands: Commands| {
                     connect(&mut commands, server, lag);
                 });
             }
