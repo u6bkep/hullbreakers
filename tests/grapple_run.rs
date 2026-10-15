@@ -189,7 +189,7 @@ fn fly(rope: bool) -> Option<f32> {
 }
 
 /// Over the whole course, swinging round the anchors beats braking for
-/// the turns on the jetpack by a good margin (measured: 59.5 s against
+/// the turns on the jetpack by a good margin (measured: 64.9 s against
 /// 84.1 s, both at most 45 m/s).
 #[test]
 fn the_rope_is_the_fast_line() {

@@ -65,6 +65,8 @@ fn peer(mode: NetMode, lag: Option<SimulatedLag>) -> App {
     );
     app.add_plugins(NetPlugin { mode, lag });
     app.insert_resource(TimeUpdateStrategy::ManualDuration(FRAME));
+    // The rig's clock is mocked; pacing goes by the wall clock.
+    app.insert_resource(hullbreakers::net::Unpaced);
     app.finish();
     app.cleanup();
     app
@@ -173,7 +175,7 @@ impl Session {
         world
             .spawn((
                 Name::new("Test rock"),
-                Asteroid { radius, seed: 7 },
+                Asteroid { radius, seed: 7, fixed: false },
                 RigidBody::Dynamic,
                 SleepingDisabled,
                 hullbreakers::sim::bodies::PreviousVelocity::default(),
@@ -722,8 +724,7 @@ fn markers_find_their_bodies_on_clients() {
         .world_mut()
         .resource_mut::<Director>()
         .start(ScenarioKind::GrappleRun);
-    // (The race's rock field is paced out to the client first: a few
-    // seconds of the rig's clock.)
+    // (The race's 6000 rocks reach the client first.)
     let mut mission = None;
     for _ in 0..40 {
         s.step(30);

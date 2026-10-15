@@ -112,12 +112,13 @@ pub fn anchors() -> Vec<(Vec3, f32)> {
             let into = (apex - course.devices[rings[k]].at).normalize();
             let out = (course.devices[rings[k + 1]].at - apex).normalize();
             let turn = into.angle_between(out);
-            // Bigger for the sharper turns: 11 m at 45 degrees, 15 at 150.
+            // Bigger for the sharper turns: 12 m at 45 degrees, 19.5 at
+            // 150.
             let radius = 9.0 + 4.0 * turn;
-            // Its surface well off both legs, at most three times that
-            // from the apex (a hairpin's would be far out).
+            // Its reach 12 m off both legs: on the bisector, as far out
+            // as that takes (a hairpin's is far out, between its legs).
             let clearance = radius * REACH + 12.0;
-            let reach = (clearance / (turn / 2.0).cos()).min(clearance * 3.0);
+            let reach = clearance / (turn / 2.0).cos();
             let inside = (out - into).normalize();
             (COURSE_AT + apex + inside * reach, radius)
         })
@@ -144,8 +145,8 @@ struct Placed {
 
 impl Placed {
     /// Big enough that two rocks that could touch are never more than a
-    /// cell apart: the biggest (an anchor's 15 m) reaches 30 m.
-    const CELL: f32 = 64.0;
+    /// cell apart: two of the biggest (anchors of 19.5 m) need 79 m.
+    const CELL: f32 = 80.0;
 
     fn cell(p: Vec3) -> IVec3 {
         (p / Self::CELL).floor().as_ivec3()
@@ -390,20 +391,22 @@ fn run_course(
         mission.decide(Phase::Lost, tick.0, "OUT OF TIME");
     }
     // The board: the finished by time, then everyone else by how far
-    // they've got.
+    // they've got (and who got there first). The clocks stop when the
+    // run's decided.
+    let now = mission.ended.unwrap_or(tick.0);
     let mut board: Vec<&Runner> = run.runners.values().collect();
     board.sort_by(|a, b| match (a.finished, b.finished) {
         (Some(x), Some(y)) => a.time(x).total_cmp(&b.time(y)),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => b.next.cmp(&a.next).then(a.name.cmp(&b.name)),
+        (None, None) => b.next.cmp(&a.next).then(a.splits.last().cmp(&b.splits.last())).then(a.name.cmp(&b.name)),
     });
     let status = board
         .iter()
         .map(|r| match r.finished {
             Some(at) => format!("{:<10} {}", r.name, clock(r.time(at))),
             None if r.next == 0 => format!("{:<10} to the start", r.name),
-            None => format!("{:<10} ring {}/{}  {}", r.name, r.next, rings.len(), clock(r.time(tick.0))),
+            None => format!("{:<10} ring {}/{}  {}", r.name, r.next, rings.len(), clock(r.time(now))),
         })
         .collect();
     let course_id = marked.id(run.course);

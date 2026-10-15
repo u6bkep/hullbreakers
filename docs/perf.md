@@ -196,13 +196,17 @@ host stalled 3.5 s at 8000 rocks starting the race (traced), and a joining
 client as long, long enough to time out. Fixed: the hulls are built in
 parallel (`asteroids::shape_asteroids`). And the field reached a client as
 one burst, overflowing its UDP receive buffer (see TheBook, lightyear):
-paced now (`net::SEND_QUOTA`, 1 MB/s).
+paced now (`net::SEND_QUOTA`, 1 MB/s; not in the netplay rig, whose clock
+is mocked). And the race's rocks are immovable to the sim, not only to
+Avian: as dynamic mass on a static body, a bump left a rock a velocity
+nothing cleared, re-sent to clients as drift (`Asteroid::fixed`).
 
 **Co-op, joining a race in progress** (localhost, both fixes):
 
 | Rocks | client stall on joining | the whole field there |
 |---|---|---|
 | 2000 | 0.6 s | yes |
+| 6000 (the race's) | 0.64 s | yes; then 14.8 kB/s to it, the host flying the line |
 | 8000 | 0.85 s | yes |
 | 16000 | 1.5 s | yes |
 | 32000 | 3 s, then timed out | no |

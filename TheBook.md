@@ -172,8 +172,9 @@ it.
   fresh `Transport::new(PriorityConfig::new(..))` over the default (channels
   are added on `Insert<Transport>`, so the new one gets them). Paced at
   1 MB/s: back to the baseline (~110-150 a run). The limiter runs on the wall
-  clock, so in the mock-clock test rig its rates read wrong (about a sixth of
-  the quota per rig second). Cost: two hours, a wrong first diagnosis (the
+  clock, so in the mock-clock test rig (frames several times faster than
+  real time) its rates read wrong and a test's waits would depend on the
+  machine's speed: the rig opts out (`net::Unpaced`). Cost: two hours, a wrong first diagnosis (the
   client's multi-second stall building the rocks, below, was half of it).
   Watch: everything waits behind a big spawn (a scenario's start), since
   spawns go at a higher priority than updates; and 32000 rocks still time a
@@ -451,6 +452,18 @@ it.
   (what `ControlledBy::owner` holds). An entity without the filter
   component has the scoped components hidden from every client, which is
   what the host's own player wants. Cost: an hour.
+
+## Our build script (build.rs)
+
+- 2026-10-14. A release build of the game had no ship designs at all, and
+  panicked starting any scenario. A reviewer agent had built a `git archive`
+  copy of the tree (in /tmp) into our `target/`, then deleted it: the build
+  script found its root with `env!("CARGO_MANIFEST_DIR")`, baked in when the
+  script is compiled, cargo reused that compiled script for our tree (same
+  source), and it walked the deleted copy, silently finding nothing. Now it
+  reads the variable when it runs, and refuses to embed no designs. Cost: one
+  stress run and a half hour. Watch: agents building other trees into a
+  shared target dir.
 
 ## Build cache (cargo, rustc)
 

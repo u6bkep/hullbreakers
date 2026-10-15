@@ -643,13 +643,24 @@ fn meter_sends(mut meter: ResMut<SendMeter>, mut links: Query<(Entity, &mut Link
 const SEND_QUOTA: u32 = 1_000_000;
 const SEND_BURST: u32 = 64_000;
 
-fn on_link(add: On<Add, LinkOf>, mut commands: Commands) {
-    // A transport of our own over the default (channels are added to a
-    // transport as it's inserted, so this one gets them too).
-    commands.entity(add.entity).insert((
-        ReplicationSender,
-        Transport::new(PriorityConfig::new(SEND_QUOTA).with_burst_size(SEND_BURST)),
-    ));
+/// Sends aren't paced while this resource is in: for the netplay test
+/// rig, whose clock is mocked (and runs several times faster than the wall
+/// clock the pacing goes by, so paced, a test's waits would depend on how
+/// fast the machine is).
+#[derive(Resource)]
+pub struct Unpaced;
+
+fn on_link(add: On<Add, LinkOf>, unpaced: Option<Res<Unpaced>>, mut commands: Commands) {
+    commands.entity(add.entity).insert(ReplicationSender);
+    if unpaced.is_none() {
+        // Our own transport. A remote client's link has none yet (it comes
+        // with `ClientOf`, so this is the first, and gets the channels as
+        // that's added); the host's own client's is replaced, and gets
+        // them again as this is inserted.
+        commands
+            .entity(add.entity)
+            .insert(Transport::new(PriorityConfig::new(SEND_QUOTA).with_burst_size(SEND_BURST)));
+    }
 }
 
 /// The player a connected client controls.

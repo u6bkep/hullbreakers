@@ -5,10 +5,15 @@
 use std::path::Path;
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/ships");
+    // The manifest's directory as cargo gives it now, not as it was when
+    // this script was compiled (`env!`): a build script is reused across
+    // copies of the tree with the same source, and one compiled in a copy
+    // since deleted walked nothing and embedded no designs at all.
+    let root = Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("assets/ships");
     println!("cargo:rerun-if-changed={}", root.display());
     let mut files = Vec::new();
     walk(&root, &root, &mut files);
+    assert!(!files.is_empty(), "no ship designs under {}", root.display());
     files.sort();
     let mut out = String::from("/// Every `.ron` under `assets/ships`: (path without `.ron`, contents).\npub const SHIP_FILES: &[(&str, &str)] = &[\n");
     for (name, path) in files {

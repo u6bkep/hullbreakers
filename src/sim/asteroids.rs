@@ -8,7 +8,7 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use super::SimMaterial;
-use super::bodies::{PreviousVelocity, dynamic_mass};
+use super::bodies::{BodyInertia, PreviousVelocity, dynamic_mass};
 use super::tuning::Tuning;
 
 pub const FIELD_LENGTH: f32 = 800.0;
@@ -28,6 +28,11 @@ pub const FIELD_DIRECTION: Vec3 = Vec3::Z;
 pub struct Asteroid {
     pub radius: f32,
     pub seed: u64,
+    /// Fixed in place (a static body; see [`spawn_fixed_rocks`]): nothing
+    /// can move it, so it has no mass to push against. Replicated with the
+    /// rock, since a client makes every rock it's sent static (it doesn't
+    /// simulate them) and can't tell otherwise.
+    pub fixed: bool,
 }
 
 /// A rock of the streaming field (not one set about a battle), new to it
@@ -77,8 +82,18 @@ pub fn shape_asteroids(rocks: Query<(Entity, &Asteroid), Without<Collider>>, mut
         .into_iter()
         .flatten()
         .collect();
-    for ((entity, _), collider) in todo.into_iter().zip(shapes) {
-        commands.entity(entity).insert((dynamic_mass(&collider, ROCK_DENSITY), collider, SimMaterial::Rock));
+    for ((entity, rock), collider) in todo.into_iter().zip(shapes) {
+        let mut e = commands.entity(entity);
+        // A fixed rock must take no impulses: a static body's velocity is
+        // never stepped or cleared, so a bump would leave it "moving" for
+        // good (and sent to clients as moving, and handed on to whoever
+        // stands on it).
+        if rock.fixed {
+            e.insert(BodyInertia::immovable(&collider));
+        } else {
+            e.insert(dynamic_mass(&collider, ROCK_DENSITY));
+        }
+        e.insert((collider, SimMaterial::Rock));
     }
 }
 
@@ -281,6 +296,7 @@ fn spawn_rock(
         Asteroid {
             radius,
             seed: rng.random(),
+            fixed: body.is_static(),
         },
         body,
         PreviousVelocity::default(),

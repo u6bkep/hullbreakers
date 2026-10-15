@@ -592,6 +592,42 @@ fn the_mission_wall_starts_the_grapple_run_and_the_dead_ship() {
     assert!(ship_of(&mut app, "derelict").is_some());
 }
 
+/// The race's rocks are fixed: flying into one at speed bounces you off
+/// (or lands you) and leaves it at rest, with no velocity to pass on.
+#[test]
+fn the_race_rocks_take_no_knocks() {
+    use hullbreakers::sim::asteroids::Asteroid;
+    let mut app = app();
+    start(&mut app, ScenarioKind::GrappleRun);
+    ticks(&mut app, 2);
+    let (rock, at, radius) = {
+        let world = app.world_mut();
+        world
+            .query::<(Entity, &Asteroid, &Position)>()
+            .iter(world)
+            .filter(|(_, a, _)| a.fixed)
+            .min_by(|a, b| a.1.radius.total_cmp(&b.1.radius))
+            .map(|(e, a, p)| (e, p.0, a.radius))
+            .unwrap()
+    };
+    let from = at + Vec3::X * (radius * 2.5 + 1.0);
+    set_player(&mut app, |p| {
+        p.mode = Mode::Eva {
+            position: from,
+            velocity: Vec3::NEG_X * 10.0,
+            orientation: Quat::IDENTITY,
+            pitch: 0.0,
+        };
+    });
+    ticks(&mut app, 60);
+    let moved = matches!(player(&mut app).mode, Mode::Eva { position, .. } if position.distance(from) > 1.0) || matches!(player(&mut app).mode, Mode::Booted { .. });
+    assert!(moved, "never reached the rock");
+    let world = app.world();
+    assert_eq!(world.get::<LinearVelocity>(rock).unwrap().0, Vec3::ZERO, "the rock was knocked");
+    assert_eq!(world.get::<AngularVelocity>(rock).unwrap().0, Vec3::ZERO, "the rock was spun");
+    assert_eq!(world.get::<Position>(rock).unwrap().0, at);
+}
+
 /// A door is a wall until it's opened: walking at the port door stops at
 /// it, until junction A is turned to it.
 #[test]
@@ -1427,7 +1463,7 @@ fn when_the_body_underfoot_goes_you_float_free_where_it_was() {
     let rock = app
         .world_mut()
         .spawn((
-            hullbreakers::sim::asteroids::Asteroid { radius: 3.0, seed: 7 },
+            hullbreakers::sim::asteroids::Asteroid { radius: 3.0, seed: 7, fixed: false },
             RigidBody::Dynamic,
             SleepingDisabled,
             hullbreakers::sim::bodies::PreviousVelocity::default(),
