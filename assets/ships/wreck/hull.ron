@@ -1,0 +1,175 @@
+// The wreck's hull: what's left of a two-deck ship, its stern half. Inside
+// 12 m wide (x = +-6). Lower deck y = 0 to 3, upper deck y = 3.3 to 6.3.
+// The stern is at z = +16; forward of z = -4.5 the ship is torn away, its
+// decks, sides and roof ending in a stepped, ragged edge open to space,
+// spars and ribs sticking out of the tear.
+//
+// From the break in: boarders come aboard on the lower deck's torn plates
+// (the entry). The lower deck runs aft through a torn bulkhead into the
+// hold, then engineering, where the emergency power is pulled. A fallen
+// deck plate leans from the lower deck's port side up to the upper deck's
+// torn edge: the way up. The upper deck's open forward end leads aft into
+// the crew hall (the recorder bay's lock lever) and, behind its door, the
+// recorder bay with the black box in its cradle.
+//
+// The chain: "Emergency power" (a Pull, engineering) lights the emergency
+// lamps and both boards, and powers the bay lock; the "Recorder bay lock"
+// (a Lever, crew hall) opens the bay door (latched); the "Black box clamp"
+// (a Pull, in the bay, live once the door is open) sets the black box out
+// on the bay floor.
+Module(
+    parts: [
+        // --- Lower deck ---
+        // Floor, with torn tongues of plate reaching out past the break
+        // (the port one carries the fallen plate's foot).
+        Span(lo: (-6.3, -0.3, -8.0), hi: (6.3, 0.0, 16.3)),
+        Span(lo: (-2.5, -0.3, -12.5), hi: (2.5, 0.0, -8.0)),
+        Span(lo: (-1.0, -0.3, -14.0), hi: (1.5, 0.0, -12.5)),
+        Span(lo: (2.5, -0.3, -10.5), hi: (6.3, 0.0, -8.0)),
+        Span(lo: (-6.0, -0.3, -14.5), hi: (-1.0, 0.0, -8.0)),
+        // Sides: whole aft of the bulkhead, stepping down and away forward
+        // of it.
+        Span(lo: (6.0, 0.0, -4.5), hi: (6.3, 3.0, 16.3)),
+        Span(lo: (6.0, 0.0, -7.0), hi: (6.3, 1.6, -4.5)),
+        Span(lo: (6.0, 0.0, -9.5), hi: (6.3, 0.7, -7.0)),
+        Span(lo: (-6.3, 0.0, -4.5), hi: (-6.0, 3.0, 16.3)),
+        Span(lo: (-6.3, 0.0, -6.0), hi: (-6.0, 1.0, -4.5)),
+        // The torn bulkhead into the hold; the hold to engineering.
+        WallAcross(z: -4.5, x: (-6.0, 6.0), y: (0.0, 3.0), thickness: 0.2, doors: [(-1.4, 1.1, 2.5)]),
+        WallAcross(z: 6.0, x: (-6.0, 6.0), y: (0.0, 3.0), thickness: 0.2, doors: [(1.8, 3.4, 2.3)]),
+        // --- Upper deck ---
+        // Floor (the lower deck's ceiling), torn back to the bulkhead on
+        // the port side, reaching farther to starboard.
+        Span(lo: (-6.3, 3.0, -4.5), hi: (6.3, 3.3, 16.3)),
+        Span(lo: (1.0, 3.0, -7.5), hi: (6.3, 3.3, -4.5)),
+        Span(lo: (3.5, 3.0, -9.0), hi: (6.3, 3.3, -7.5)),
+        // Sides, torn in steps.
+        Span(lo: (6.0, 3.3, -2.0), hi: (6.3, 6.3, 16.3)),
+        Span(lo: (6.0, 3.3, -5.5), hi: (6.3, 5.0, -2.0)),
+        Span(lo: (6.0, 3.3, -8.0), hi: (6.3, 4.0, -5.5)),
+        Span(lo: (-6.3, 3.3, 0.0), hi: (-6.0, 6.3, 16.3)),
+        Span(lo: (-6.3, 4.6, -3.0), hi: (-6.0, 6.3, 0.0)),
+        // Roof, torn back in steps.
+        Span(lo: (-6.3, 6.3, 2.0), hi: (6.3, 6.6, 16.3)),
+        Span(lo: (-6.3, 6.3, -1.0), hi: (-1.5, 6.6, 2.0)),
+        Span(lo: (2.0, 6.3, -3.0), hi: (6.3, 6.6, 2.0)),
+        Span(lo: (4.0, 6.3, -4.5), hi: (6.3, 6.6, -3.0)),
+        // The crew hall's forward wall; the recorder bay's.
+        WallAcross(z: 2.0, x: (-6.0, 6.0), y: (3.3, 6.3), thickness: 0.2, doors: [(-1.0, 1.0, 5.7)]),
+        WallAcross(z: 11.0, x: (-6.0, 6.0), y: (3.3, 6.3), thickness: 0.2, doors: [(-0.8, 0.8, 5.6)]),
+        // The stern, both decks.
+        Span(lo: (-6.3, 0.0, 16.0), hi: (6.3, 6.3, 16.3)),
+        // The fallen deck plate: the way up, from the lower deck's port
+        // tongue to the upper deck's torn edge (20 degrees).
+        Ramp(foot: (-4.6, 0.0, -13.5), top: (-4.6, 3.3, -4.5), width: 2.4, thickness: 0.2),
+        // --- Fittings ---
+        // Engineering: the emergency cell bank (its pull on the inboard
+        // face), a crate.
+        Box(center: (4.0, 1.1, 11.0), size: (2.6, 2.2, 3.0), material: Trim),
+        Box(center: (4.0, 2.6, 11.0), size: (1.0, 0.8, 1.0), material: Trim),
+        Box(center: (-4.8, 0.5, 8.0), size: (1.4, 1.0, 1.2), material: Trim),
+        // The hold: crates, one spilt, and a toppled rack.
+        Box(center: (4.2, 0.6, -2.0), size: (1.2, 1.2, 1.2), material: Trim),
+        Box(center: (4.6, 0.4, -0.4), size: (1.0, 0.8, 1.0), material: Trim),
+        Box(center: (-4.6, 0.6, 3.5), size: (1.6, 1.2, 2.4), material: Trim),
+        Box(center: (2.0, 0.25, 3.0), size: (3.0, 0.5, 0.9), material: Trim),
+        // The breach: a crate fetched up against the stepped side.
+        Box(center: (4.6, 0.5, -6.5), size: (1.0, 1.0, 1.4), material: Trim),
+        // Crew hall: bunks along the port side, a table.
+        Box(center: (-5.2, 3.8, 6.5), size: (1.4, 1.0, 4.0), material: Trim),
+        Box(center: (-5.2, 5.2, 6.5), size: (1.4, 0.2, 4.0), material: Trim),
+        Box(center: (1.5, 4.05, 8.0), size: (1.6, 0.1, 1.0), material: Trim),
+        Box(center: (1.5, 3.65, 8.0), size: (0.3, 0.7, 0.3), material: Trim),
+        // The upper deck's open end: a console torn off its mount.
+        Box(center: (3.5, 3.8, -3.5), size: (1.8, 1.0, 0.8), material: Trim),
+        // The recorder bay: the black box's cradle against the stern.
+        Box(center: (0.0, 3.8, 14.8), size: (1.6, 1.0, 1.2), material: Trim),
+        Box(center: (-4.5, 4.3, 14.5), size: (1.2, 2.0, 2.0), material: Trim),
+        // --- Outside ---
+        // The keel under the lower deck, and its torn end.
+        Box(center: (0.0, -0.8, 4.0), size: (3.0, 1.0, 24.0)),
+        Box(center: (0.0, -0.75, -12.0), size: (0.5, 0.5, 8.0), material: Trim),
+        // Engines at the stern; a dorsal spine and a bent mast.
+        Box(center: (-3.4, 1.6, 17.9), size: (3.0, 2.6, 3.2)),
+        Box(center: (3.4, 1.6, 17.9), size: (3.0, 2.6, 3.2)),
+        Box(center: (0.0, 4.8, 17.6), size: (4.0, 2.2, 2.6)),
+        Box(center: (0.0, 7.0, 9.0), size: (2.0, 0.8, 12.0)),
+        Box(center: (3.5, 7.6, 12.0), size: (0.3, 2.0, 0.3), material: Trim),
+        Box(center: (3.5, 8.5, 11.2), size: (0.3, 0.3, 1.8), material: Trim),
+        // Frame ribs left standing where the skin's torn off.
+        Box(center: (6.15, 1.5, -8.6), size: (0.3, 3.0, 0.3), material: Trim),
+        Box(center: (6.15, 4.8, -7.0), size: (0.3, 3.0, 0.3), material: Trim),
+        Box(center: (-6.15, 4.8, -3.6), size: (0.3, 3.0, 0.3), material: Trim),
+        Box(center: (-6.15, 1.5, -7.2), size: (0.3, 3.0, 0.3), material: Trim),
+        // Stringers sticking out of the torn deck and roof plates.
+        Box(center: (-2.0, 3.15, -7.0), size: (0.25, 0.25, 5.0), material: Trim),
+        Box(center: (4.8, 3.15, -10.6), size: (0.25, 0.25, 3.2), material: Trim),
+        Box(center: (1.0, 6.45, -4.5), size: (0.25, 0.25, 7.0), material: Trim),
+        Box(center: (-4.0, 6.45, -2.8), size: (0.25, 0.25, 3.6), material: Trim),
+        Box(center: (4.5, -0.15, -12.4), size: (0.25, 0.25, 3.8), material: Trim),
+        Box(center: (-4.2, -0.15, -16.0), size: (0.25, 0.25, 3.0), material: Trim),
+        // A side plate peeled outward from the starboard tear.
+        Box(center: (7.3, 2.2, -6.2), size: (2.2, 1.4, 0.2)),
+        // Loose debris: plates bent off the hull (fallen-plate tilts), and
+        // chunks, round the break and the hull.
+        Ramp(foot: (8.0, -3.0, -15.0), top: (10.0, 1.5, -18.0), width: 3.0, thickness: 0.2),
+        Ramp(foot: (-9.0, 8.0, -12.0), top: (-6.5, 10.5, -15.0), width: 2.5, thickness: 0.2),
+        Ramp(foot: (-14.0, -2.0, -6.0), top: (-12.0, 2.0, -4.0), width: 2.0, thickness: 0.2),
+        Ramp(foot: (11.0, 9.0, 4.0), top: (13.0, 11.0, 7.0), width: 2.5, thickness: 0.2),
+        Box(center: (-8.5, -4.0, -15.0), size: (1.5, 1.2, 2.0)),
+        Box(center: (14.0, 5.0, -12.0), size: (2.0, 1.0, 1.5)),
+        Box(center: (-15.0, 1.0, -9.0), size: (1.0, 1.0, 3.0)),
+        Box(center: (9.0, 7.0, -7.0), size: (1.2, 1.2, 1.2), material: Trim),
+        Box(center: (12.0, 8.0, 10.0), size: (1.5, 0.8, 2.0)),
+        Box(center: (-4.0, 11.0, 6.0), size: (2.0, 0.6, 1.4)),
+        Box(center: (6.0, -6.0, 0.0), size: (1.4, 1.4, 1.4), material: Trim),
+        Box(center: (-1.5, -5.0, -20.0), size: (1.0, 0.8, 1.6), material: Trim),
+        Box(center: (6.0, 4.0, -30.0), size: (1.6, 1.2, 1.2)),
+        Box(center: (-7.0, -1.0, -30.0), size: (2.2, 0.3, 1.8)),
+    ],
+    // Light probes for the enclosed rooms (the open ends are lit by space):
+    // the lower deck aft of the bulkhead, the crew hall and the bay.
+    cabins: [
+        (center: (0.0, 1.5, 5.75), size: (12.0, 3.0, 20.5)),
+        (center: (0.0, 4.8, 9.0), size: (12.0, 3.0, 14.0)),
+    ],
+    markers: {
+        "entry": (0.0, 0.0, -11.0),
+        "objective": (0.0, 3.32, 13.0),
+        "loot_hold": (-2.5, 0.0, 0.5),
+        "loot_engineering": (-3.0, 0.0, 13.5),
+        "loot_quarters": (-2.5, 3.3, 4.0),
+    },
+    devices: [
+        // Engineering: the emergency power, and the board that shows the
+        // chain.
+        (id: "emergency", label: "Emergency power", kind: Pull, at: (2.62, 1.2, 11.0), face: (-1.0, 0.0, 0.0)),
+        (id: "board", label: "Emergency board", kind: Board(size: (1.4, 1.2), rows: [
+            ("EMERGENCY POWER", On("emergency")),
+            ("BAY LOCK", On("bay_lock")),
+            ("RECORDER BAY", On("bay_door")),
+            ("BLACK BOX CLAMP", On("recorder_clamp")),
+        ]), at: (-5.95, 1.6, 11.0), face: (1.0, 0.0, 0.0), power: On("emergency")),
+        // The crew hall: the bay's lock, and a board beside it.
+        (id: "bay_lock", label: "Recorder bay lock", kind: Lever, at: (5.88, 4.6, 8.0), face: (-1.0, 0.0, 0.0), power: On("emergency")),
+        (id: "hall_board", label: "Recorder board", kind: Board(size: (1.2, 0.9), rows: [
+            ("EMERGENCY POWER", On("emergency")),
+            ("BAY LOCK", On("bay_lock")),
+            ("RECORDER BAY", On("bay_door")),
+        ]), at: (5.95, 4.9, 6.2), face: (-1.0, 0.0, 0.0), power: On("emergency")),
+        // The recorder bay's door, latched open once the lock is thrown,
+        // and its lamp.
+        (id: "bay_door", label: "Recorder bay", kind: Door(size: (1.6, 2.3, 0.15), latch: true), at: (0.0, 4.45, 11.0), face: (0.0, 0.0, -1.0), power: On("bay_lock")),
+        (id: "bay_lamp", label: "Bay lock", kind: Lamp, at: (1.3, 5.3, 10.86), face: (0.0, 0.0, -1.0), power: On("bay_lock")),
+        // The black box's clamp, on its cradle (pulled, it lets the box go).
+        (id: "recorder_clamp", label: "Black box clamp", kind: Pull, at: (0.0, 4.05, 14.12), face: (0.0, 0.0, -1.0), power: On("bay_door")),
+        // Lights: dim emergency lamps once the power's back; the bay's own
+        // once its door is open.
+        (id: "emergency_lights", kind: Lights(at: [(0.0, 2.85, 0.0), (0.0, 2.85, 11.0), (-3.0, 2.85, 14.0), (0.0, 6.15, 6.0)], color: (1.0, 0.55, 0.25)), power: On("emergency")),
+        (id: "bay_lights", kind: Lights(at: [(0.0, 6.15, 13.5)]), power: On("bay_door")),
+        // Conduits: the emergency feed up to the lock, and the lock's run
+        // to the bay door.
+        (id: "c_feed", kind: Conduit(path: [(5.3, 2.97, 11.0), (5.95, 2.97, 11.0), (5.95, 2.97, 8.3), (5.95, 4.3, 8.3)]), power: On("emergency")),
+        (id: "c_lock", kind: Conduit(path: [(5.95, 4.3, 7.7), (5.95, 3.33, 7.7), (5.95, 3.33, 10.85), (0.85, 3.33, 10.85), (0.85, 5.65, 10.85)]), power: On("bay_lock")),
+    ],
+)
