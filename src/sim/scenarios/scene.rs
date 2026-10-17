@@ -24,7 +24,7 @@ use rand_chacha::ChaCha8Rng;
 use super::{Scenario, Stage, after_banner};
 use crate::sim::asteroids::{FieldLayout, RockField};
 use crate::sim::bodies::{Bodies, PreviousVelocity};
-use crate::sim::bots::{self, Robot, Threat};
+use crate::sim::bots::{self, Brain, Robot, Threat};
 use crate::sim::design::{ShipDesign, design};
 use crate::sim::devices::Devices;
 use crate::sim::frame::BodyFrame;
@@ -218,7 +218,7 @@ fn run_scene(
     ships: Query<(&ShipHull, &Devices)>,
     homes: Query<Entity, With<HomeShip>>,
     players: Query<(Entity, &Player, Option<&Name>), Without<Robot>>,
-    robots: Query<&Player, With<Robot>>,
+    robots: Query<&Brain, With<Robot>>,
     pickups: Query<&Pickup>,
     mut pods: Query<(Entity, &mut Pod, &Position)>,
     marked: MarkedBodies,
@@ -230,6 +230,10 @@ fn run_scene(
     let mut mission = mission.into_inner();
     let Some(home) = homes.iter().next() else { return };
     let Some(ship) = bodies.frame(home) else { return };
+    if state.plan.sites.is_empty() {
+        Mission::show(&mut mission, "Nothing here: no design offers a scene".into(), vec![state.plan.seed.name()], vec![]);
+        return;
+    }
     let name = |e: Entity| players.get(e).ok().and_then(|(_, _, n)| n).map_or("?".to_string(), |n| n.to_string());
     let started = mission.started;
     let since = |t: u32| clock(t.wrapping_sub(started) as f32 / TICK_HZ as f32);
@@ -284,7 +288,7 @@ fn run_scene(
                     Cargo::Nowhere => false,
                 };
                 let (place, markers): (String, Vec<Option<Marker>>) = match where_ {
-                    _ if already => ("home".into(), vec![]),
+                    _ if at_home => ("home".into(), vec![]),
                     Cargo::Carried(who) => (format!("carried by {}", name(who)), vec![hold]),
                     Cargo::Lying { body: Some(b), at, .. } => (
                         if b == site { format!("in the {}", label.to_lowercase()) } else { "set down".into() },
@@ -300,7 +304,9 @@ fn run_scene(
                     },
                 };
                 Progress {
-                    done: already || at_home,
+                    // Judged as it stands: carried back off the ship, it's
+                    // not home (the jump checks again).
+                    done: at_home,
                     line: format!("{}: {place}", cargo.name()),
                     markers: markers.into_iter().flatten().collect(),
                 }
@@ -315,7 +321,7 @@ fn run_scene(
                 }
             }
             Encounter::Clear => {
-                let left = robots.iter().filter(|r| r.mode.body() == Some(site)).count();
+                let left = robots.iter().filter(|b| b.home == site).count();
                 Progress {
                     done: already || left == 0,
                     line: format!("{label}: {} robots aboard", left),
@@ -366,7 +372,9 @@ fn run_scene(
                     .chain(players.iter().any(|(_, p, _)| p.grapple.is_some_and(|g| mine.contains(&g.target))).then_some(hold).flatten())
                     .collect();
                 Progress {
-                    done: already || out == 0,
+                    // Everyone accounted for, and someone saved: all lost is
+                    // a rescue that never happened.
+                    done: already || (out == 0 && home_count > 0),
                     line: format!("{label}: {home_count} of {n} home, {out} adrift{}", if lost > 0 { format!(", {lost} lost") } else { String::new() }),
                     markers,
                 }
@@ -374,6 +382,8 @@ fn run_scene(
         };
         if p.done && state.done[i].is_none() && underway {
             state.done[i] = Some(tick.0);
+            // A side's first completion is its report; a salvage carried
+            // back off is judged again at the jump (`progress`).
             let what = state.plan.sites[i].encounter.label(&label);
             let role = if i == state.plan.main { "Main objective" } else { "Side" };
             mission.report.push(format!("{role} done at {}: {what}.", since(tick.0)));
@@ -381,16 +391,17 @@ fn run_scene(
         progress.push(p);
     }
 
-    // The jump window: opens when the main is done.
-    let main_done = state.done[state.plan.main].is_some();
+    // The jump window: opens when the main is first done, and stays open.
+    let main_done = progress[state.plan.main].done;
     if main_done && state.window_from.is_none() {
         state.window_from = Some(tick.0);
     }
-    let sides = state.plan.sites.len() - 1;
-    let sides_done = state.done.iter().enumerate().filter(|(i, d)| *i != state.plan.main && d.is_some()).count();
+    let sides = state.plan.sites.len().saturating_sub(1);
+    let sides_done = progress.iter().enumerate().filter(|(i, p)| *i != state.plan.main && p.done).count();
     let window_left = state.window_from.map(|from| state.plan.window - tick.0.wrapping_sub(from) as f32 / TICK_HZ as f32);
-    // Jumping: the window's closed, or the crew pressed the wall.
-    let jumped_early = director.switching() == Some(ScenarioKind::Field);
+    // Jumping: the window's closed, or the crew pressed the wall (any
+    // button: leaving is leaving).
+    let jumped_early = director.switching().is_some();
     if underway && (window_left.is_some_and(|left| left <= 0.0) || jumped_early) {
         mission.result("main_done", main_done as u32 as f32);
         mission.result("sides", sides as f32);
@@ -432,7 +443,7 @@ fn run_scene(
     let mut status = vec![state.plan.seed.name()];
     for (i, p) in progress.iter().enumerate() {
         let tag = if i == state.plan.main { "MAIN" } else { "side" };
-        let tick_ = if state.done[i].is_some() { " ✓" } else { "" };
+        let tick_ = if p.done { " ✓" } else { "" };
         status.push(format!("{tag}: {}{tick_}", p.line));
     }
     if let Some(left) = window_left

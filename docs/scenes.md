@@ -36,11 +36,13 @@ The size is rolled from the seed unless spelt (`7:vast`).
 - The board (the mission panel) names the scene and lists every
   encounter: `MAIN:` one, `side:` the rest, ticked when done.
 - Markers: the main's are goals; the sides' are waypoints.
-- When the main is done, the jump window opens: a countdown to be aboard.
-  The crew may jump early from the wall (the "Asteroid field" button). The
-  scene is **won** if the main is done at the jump, whoever's aboard (the
-  debrief says who was left drifting: `homecoming`); **lost** (abandoned)
-  if the crew jumps without it.
+- When the main is first done, the jump window opens: a countdown to be
+  aboard. The crew may jump early from the wall (any button: leaving is
+  the jump). The scene is **won** if the main is done at the jump as
+  things then stand (a salvage carried back off the ship isn't home),
+  whoever's aboard (the debrief says who was left drifting: `homecoming`);
+  **lost** (abandoned) if the crew jumps without it. A rescue with every
+  survivor lost is never done.
 - Pay (`progression::pay_for`): the win, the main, each side done, plus the
   usual credits and everyone-home bonus.
 
@@ -54,14 +56,18 @@ puzzle.
 |---|---|---|
 | `Salvage(cargo, released_by)` | an `objective` marker (where the cargo lies); if `released_by: Some(id)`, a device `id` that going live sets the cargo out (a clamp at the end of a device chain) | the cargo is in our hold or held by someone aboard |
 | `Restore(device)` | a device `device` | that device is live |
-| `Clear` | `crewed: true` and posts | no robots left aboard |
+| `Clear` | `crewed: true` and posts | no robots of its crew left (walkers, flyers, mounts) |
 | `Rescue(pods)` | nothing (survivors are scattered 50–140 m round the site on staggered air) | every survivor is home or lost |
 
 `cargo` is a `CargoKind` (`PowerCell`, bulky, both hands; `DataCore` or
 `BlackBox`, into the pack). Add kinds in `sim/items.rs` as sites need them.
 
 The main objective is a prize (a salvage or a rescue) when any site in the
-catalogue offers one; sides are anything.
+catalogue offers one; sides are anything. Each cargo kind is salvaged at
+most once in a scene (the judge finds cargo by kind), so a site whose only
+offer is a kind already in play is placed with another of its encounters
+or left out; the sites column above is also capped by how many designs
+declare a scene use.
 
 ## Making a site
 
@@ -125,6 +131,15 @@ agents to build, each a design with devices, posts and a `scene:` block.
 - **Patrol hulk**: a hostile gunship gone dark, crew still aboard, `Clear`.
 
 ## Open
+
+- The check can't tell that a `Restore` device is live from the start,
+  or that a `released_by` device can never go live: wire chains with a
+  dead start and test them by hand (the design tests build every design,
+  `tests/scene.rs` plays a plain salvage).
+- Rock placement uses `sin`/`cos`/`powf`, which can differ in the last
+  bit between platforms' libm (so could the race's); peers on different
+  OSes might grow fields that differ after some index. Same binary, same
+  field. A fixed-point or table-driven layout would close this.
 
 - A scene can't yet be lost before its main is done (no clocks on the
   crew). Those belong to the run (fuel, air), later.

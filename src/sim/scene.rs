@@ -274,31 +274,50 @@ pub fn plan(seed: SceneSeed) -> ScenePlan {
     let mut sites: Vec<SitePlan> = Vec::new();
     for (n, &i) in order.iter().take(count).enumerate() {
         let (design, use_) = catalogue[i];
-        let encounter = if n == 0 {
-            let prizes: Vec<&Encounter> = use_.encounters.iter().filter(|e| e.is_prize()).collect();
-            if prizes.is_empty() {
-                use_.encounters[rng.random_range(0..use_.encounters.len())].clone()
-            } else {
-                prizes[rng.random_range(0..prizes.len())].clone()
-            }
+        // Each kind of cargo once in a scene (the judge finds cargo by its
+        // kind).
+        let taken = |e: &Encounter| match e {
+            Encounter::Salvage { cargo, .. } => sites.iter().any(|s| matches!(&s.encounter, Encounter::Salvage { cargo: c, .. } if c == cargo)),
+            _ => false,
+        };
+        let offered: Vec<&Encounter> = use_.encounters.iter().filter(|e| !taken(e)).collect();
+        if offered.is_empty() {
+            continue;
+        }
+        let prizes: Vec<&Encounter> = offered.iter().copied().filter(|e| e.is_prize()).collect();
+        let encounter = if n == 0 && !prizes.is_empty() {
+            prizes[rng.random_range(0..prizes.len())].clone()
         } else {
-            use_.encounters[rng.random_range(0..use_.encounters.len())].clone()
+            offered[rng.random_range(0..offered.len())].clone()
         };
         let clearance = use_.clearance.unwrap_or(hull_reach(design) + 25.0);
         // Placed: at the size's reach, clear of the others. The nearer the
         // main, the better, so it's placed first and the sides fan out.
         let (lo, hi) = size.reach();
         let mut at = Vec3::ZERO;
-        for _ in 0..200 {
-            let dir = random_unit(&mut rng);
-            // Mostly round us, not above and below: a flat-ish scene reads
-            // from the deck.
-            let dir = Vec3::new(dir.x, dir.y * 0.35, dir.z).normalize_or(Vec3::Z);
-            at = dir * rng.random_range(lo..hi);
-            let clear = sites.iter().all(|s| s.at.distance(at) >= s.clearance + clearance + 40.0);
-            if clear {
+        let mut found = false;
+        // Farther out each round, if the size's ring is too crowded.
+        for round in 0..4 {
+            let (lo, hi) = (lo * (1.0 + 0.5 * round as f32), hi * (1.0 + 0.5 * round as f32));
+            for _ in 0..200 {
+                let dir = random_unit(&mut rng);
+                // Mostly round us, not above and below: a flat-ish scene
+                // reads from the deck.
+                let dir = Vec3::new(dir.x, dir.y * 0.35, dir.z).normalize_or(Vec3::Z);
+                at = dir * rng.random_range(lo..hi);
+                found = sites.iter().all(|s| s.at.distance(at) >= s.clearance + clearance + 40.0);
+                if found {
+                    break;
+                }
+            }
+            if found {
                 break;
             }
+        }
+        if !found {
+            // Too big for any ring round us: left out.
+            bevy::log::warn!("{}: no room for {} in a {} scene", seed.name(), design.id, size.id());
+            continue;
         }
         // Turned so its entry faces us: the way in is the side we see.
         let turn = match design.markers.get("entry") {
@@ -327,8 +346,10 @@ pub fn plan(seed: SceneSeed) -> ScenePlan {
     // past them.
     let mut drifting = Vec::new();
     for k in 0..size.drifting() {
-        let site = &sites[k % sites.len().max(1)];
-        let along = if sites.is_empty() { Vec3::Z * 100.0 } else { site.at * rng.random_range(0.3..1.3) };
+        let along = match sites.get(k % sites.len().max(1)) {
+            Some(site) => site.at * rng.random_range(0.3..1.3),
+            None => Vec3::Z * 100.0,
+        };
         let off = random_unit(&mut rng) * rng.random_range(25.0..80.0);
         let at = along + off;
         if at.length() < HOME_CLEARANCE || sites.iter().any(|s| s.at.distance(at) < s.clearance) {
@@ -397,17 +418,16 @@ pub fn rock_places(seed: SceneSeed, count: usize) -> Vec<RockPlace> {
     // A cluster round each site.
     for site in &plan.sites {
         let around = ((count / 5) / plan.sites.len().max(1)).max(8);
+        let mut here = 0;
         for _ in 0..around * 10 {
-            if placed.rocks.len() >= count {
+            if placed.rocks.len() >= count || here >= around {
                 break;
             }
             let radius = 1.0 * 7.0f32.powf(rng.random::<f32>().powi(2));
             let at = site.at + random_unit(&mut rng) * rng.random_range(site.clearance + 10.0..site.clearance + 120.0);
             if keep_out(at, radius) && placed.clear(at, radius) {
                 placed.push(at, radius);
-                if placed.rocks.len() >= around * (plan.sites.len()) + count / 10 {
-                    break;
-                }
+                here += 1;
             }
         }
     }
@@ -491,12 +511,21 @@ mod tests {
                     let d = a.at.length();
                     assert!(d >= lo - 1.0 && d <= hi + 1.0, "{s:?}: site {i} at {d} m, not in {lo}..{hi}");
                     for b in &p.sites[i + 1..] {
-                        assert!(a.at.distance(b.at) >= a.clearance + b.clearance, "{s:?}: sites overlap");
+                        assert!(a.at.distance(b.at) >= a.clearance + b.clearance + 40.0, "{s:?}: sites too close");
                     }
                 }
                 assert!(p.sites[p.main].encounter.is_prize() || !catalogue().iter().any(|(_, u)| u.encounters.iter().any(Encounter::is_prize)));
                 let rocks = rock_places(s, 400);
                 assert!(rocks.len() >= 300, "{s:?}: only {} rocks placed", rocks.len());
+                // Every site has its cluster.
+                for site in &p.sites {
+                    let near = rocks.iter().filter(|r| r.at.distance(site.at) < site.clearance + 130.0).count();
+                    assert!(near >= 8, "{s:?}: {} has {near} rocks round it", site.label);
+                }
+                let cargo: Vec<_> = p.sites.iter().filter_map(|s| match &s.encounter { Encounter::Salvage { cargo, .. } => Some(*cargo), _ => None }).collect();
+                let mut unique = cargo.clone();
+                unique.dedup();
+                assert_eq!(cargo.len(), unique.len(), "{s:?}: a cargo kind twice");
                 for r in &rocks {
                     assert!(r.at.length() >= HOME_CLEARANCE, "{s:?}: a rock on our ship");
                     for site in &p.sites {

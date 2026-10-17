@@ -200,3 +200,41 @@ fn the_window_closing_jumps_the_crew_out() {
     // The ship's a home: standing on it counts as aboard.
     assert!(m.results.iter().any(|(n, v)| n == "aboard" && *v == 1.0), "{:?}", m.results);
 }
+
+/// Home once, then carried off again: at the jump it's judged as it
+/// stands.
+#[test]
+fn a_salvage_carried_back_off_is_not_home_at_the_jump() {
+    let (scene, cargo) = salvage_seed();
+    let mut app = app(false);
+    app.world_mut().resource_mut::<Director>().start_scene(scene);
+    for _ in 0..10 {
+        app.update();
+    }
+    let e = me(&mut app);
+    let hold = |p: &mut Player, held: bool| {
+        if cargo.bulky() {
+            p.loadout.inventory.carrying = held.then_some(cargo);
+        } else {
+            p.loadout.inventory.pack[0] = held.then_some(hullbreakers::sim::items::Item::Cargo(cargo));
+        }
+    };
+    hold(&mut app.world_mut().get_mut::<Player>(e).unwrap(), true);
+    for _ in 0..3 {
+        app.update();
+    }
+    assert!(mission(&mut app).status.iter().any(|l| l.starts_with("Jump in")));
+    // Gone from their hands (the prize still lies at its site: the test
+    // never took that one).
+    hold(&mut app.world_mut().get_mut::<Player>(e).unwrap(), false);
+    for _ in 0..3 {
+        app.update();
+    }
+    let m = mission(&mut app);
+    assert!(m.status.iter().any(|l| l.starts_with("MAIN:") && !l.ends_with("home ✓")), "{:?}", m.status);
+    app.world_mut().resource_mut::<Director>().start(ScenarioKind::Scene);
+    app.update();
+    app.update();
+    let debrief = mission(&mut app).debrief.expect("a debrief");
+    assert_eq!(debrief.phase, Phase::Lost);
+}
