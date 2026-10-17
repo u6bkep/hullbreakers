@@ -292,7 +292,10 @@ fn run_scene(
                     ),
                     Cargo::Lying { body: None, world, .. } => ("adrift".into(), vec![Some(Marker::at(world, cargo.name(), MarkerKind::Goal))]),
                     Cargo::Nowhere => match &released_by {
-                        Some(id) if !state.released[i] => (format!("held by the {}", design.devices[design.device(id)].label.to_lowercase()), vec![entry, device(id, MarkerKind::Device)]),
+                        Some(id) if !state.released[i] => (
+                            format!("not yet released ({}, {})", design.devices[design.device(id)].label.to_lowercase(), label),
+                            vec![entry, device(id, MarkerKind::Device)],
+                        ),
                         _ => ("lost".into(), vec![]),
                     },
                 };
