@@ -1,0 +1,33 @@
+// The pod train: five cargo pods strung along a spine truss, adrift, with
+// robots aboard and a power cell in the last pod. The spine has snapped
+// between the third pod and the fourth: one longeron still holds the two
+// halves together, and the gap is crossed on a jetpack or on the gangway
+// that runs out from its lever on the far side (as the freighter's does).
+// Ship coordinates, metres: +Y up, the far end (bow) toward -Z, the near end
+// (the dock, the entry) toward +Z. The origin is near the train's middle.
+// See docs/ships.md and docs/scenes.md.
+Design(
+    name: "POD TRAIN",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 0.8, 1.0), radii: (6.0, 5.0, 37.0)),
+    turrets: [],
+    modules: [
+        // The spine, the catwalks, the dock, the gangway; the markers,
+        // posts and devices (which can't repeat with a pod).
+        (module: "pods/spine"),
+        // The pods, near to far, each turned from the last so their racks
+        // alternate sides.
+        (module: "pods/pod", at: (0.0, 0.0, 27.0)),
+        (module: "pods/pod", at: (0.0, 0.0, 14.0), turn: 180.0),
+        (module: "pods/pod", at: (0.0, 0.0, 1.0)),
+        (module: "pods/pod", at: (0.0, 0.0, -15.6), turn: 180.0),
+        (module: "pods/pod", at: (0.0, 0.0, -28.6)),
+    ],
+    // In a scene: its power cell, carried back along the train and across
+    // the gap; or its robots, cleared.
+    scene: Some(Site(
+        encounters: [Salvage(cargo: PowerCell, released_by: None), Clear],
+        crewed: true,
+    )),
+)
