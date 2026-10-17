@@ -1,0 +1,90 @@
+// The pod train's spine and everything that isn't a pod: the truss, the
+// catwalks between the pods, the dock at the near end, the gangway across
+// the break; the train's markers, robot posts and devices. In the design's
+// frame (placed unturned at the origin).
+//
+// The pods (pods/pod, 8.6 m long outside), near to far, by their middles:
+// 1 at z = 27, 2 at 14, 3 at 1, 4 at -15.6, 5 at -28.6. Between them,
+// from the near end: the dock (z = 31.3 to 35, the entry), pod 1,
+// catwalk A, pod 2, catwalk B, pod 3, the break (z = -11.3 to -3.3: an
+// 8 m gap with nothing to walk on), pod 4, catwalk C, pod 5 (its far
+// hatch sealed; the power cell lies inside). Every deck is at y = 0.
+//
+// The spine is a beam under the pods (top at y = -1.15) with a longeron
+// either side of it below; at the break the beam and the starboard
+// longeron have snapped, and only the port longeron still holds the two
+// halves together. The gangway runs out across the break only from its
+// lever inside pod 4 (the far side): the first across goes on a jetpack.
+// A lamp inside pod 3, over the hatch onto the break, shows it's out.
+//
+// Robots: a gunner in pod 2 and one guarding the cell in pod 5, a swarmer
+// in pod 4; turrets on the roofs of pods 2 (covering the dock and catwalk
+// A) and 4 (covering the break); crawlers on the flanks of pods 1 and 5.
+Module(
+    parts: [
+        // The dock, before pod 1's near hatch, and its rails.
+        Span(lo: (-1.5, -0.3, 31.3), hi: (1.5, 0.0, 35.0)),
+        Box(center: (-1.45, 1.0, 33.15), size: (0.08, 0.08, 3.7), material: Trim),
+        Box(center: (1.45, 1.0, 33.15), size: (0.08, 0.08, 3.7), material: Trim),
+        Box(center: (-1.45, 0.5, 34.96), size: (0.08, 1.0, 0.08), material: Trim),
+        Box(center: (1.45, 0.5, 34.96), size: (0.08, 1.0, 0.08), material: Trim),
+        // Catwalk A (pod 1 to pod 2): deck, rails, a strut down to the spine.
+        Span(lo: (-1.2, -0.3, 18.3), hi: (1.2, 0.0, 22.7)),
+        Box(center: (-1.15, 1.0, 20.5), size: (0.08, 0.08, 4.4), material: Trim),
+        Box(center: (1.15, 1.0, 20.5), size: (0.08, 0.08, 4.4), material: Trim),
+        Box(center: (0.0, -0.725, 20.5), size: (0.3, 0.85, 0.3), material: Trim),
+        // Catwalk B (pod 2 to pod 3).
+        Span(lo: (-1.2, -0.3, 5.3), hi: (1.2, 0.0, 9.7)),
+        Box(center: (-1.15, 1.0, 7.5), size: (0.08, 0.08, 4.4), material: Trim),
+        Box(center: (1.15, 1.0, 7.5), size: (0.08, 0.08, 4.4), material: Trim),
+        Box(center: (0.0, -0.725, 7.5), size: (0.3, 0.85, 0.3), material: Trim),
+        // Catwalk C (pod 4 to pod 5).
+        Span(lo: (-1.2, -0.3, -24.3), hi: (1.2, 0.0, -19.9)),
+        Box(center: (-1.15, 1.0, -22.1), size: (0.08, 0.08, 4.4), material: Trim),
+        Box(center: (1.15, 1.0, -22.1), size: (0.08, 0.08, 4.4), material: Trim),
+        Box(center: (0.0, -0.725, -22.1), size: (0.3, 0.85, 0.3), material: Trim),
+        // The spine's beam, in two halves, snapped at the break.
+        Span(lo: (-0.45, -2.05, -4.6), hi: (0.45, -1.15, 35.5)),
+        Span(lo: (-0.45, -2.05, -33.4), hi: (0.45, -1.15, -10.2)),
+        // The longerons: the port one whole, the starboard one snapped.
+        Span(lo: (-0.95, -2.35, -33.4), hi: (-0.75, -2.15, 35.5), material: Trim),
+        Span(lo: (0.75, -2.35, -5.4), hi: (0.95, -2.15, 35.5), material: Trim),
+        Span(lo: (0.75, -2.35, -33.4), hi: (0.95, -2.15, -9.0), material: Trim),
+        // Ties across the longerons, under each pod and the dock.
+        Box(center: (0.0, -2.2, 33.5), size: (2.1, 0.3, 0.3), material: Trim),
+        Box(center: (0.0, -2.2, 27.0), size: (2.1, 0.3, 0.3), material: Trim),
+        Box(center: (0.0, -2.2, 14.0), size: (2.1, 0.3, 0.3), material: Trim),
+        Box(center: (0.0, -2.2, 1.0), size: (2.1, 0.3, 0.3), material: Trim),
+        Box(center: (0.0, -2.2, -15.6), size: (2.1, 0.3, 0.3), material: Trim),
+        Box(center: (0.0, -2.2, -28.6), size: (2.1, 0.3, 0.3), material: Trim),
+        // The couplers at the spine's ends.
+        Box(center: (0.0, -1.6, 36.1), size: (1.6, 1.6, 1.2), material: Trim),
+        Box(center: (0.0, -1.6, -34.0), size: (1.6, 1.6, 1.2), material: Trim),
+        // Pod 5's far hatch, sealed.
+        Box(center: (0.0, 1.2, -32.75), size: (1.8, 2.4, 0.3)),
+        // Beacon masts on the end pods' roofs.
+        Box(center: (-2.0, 4.3, 29.5), size: (0.2, 2.0, 0.2), material: Trim),
+        Box(center: (2.0, 4.3, -31.0), size: (0.2, 2.0, 0.2), material: Trim),
+    ],
+    posts: [
+        (robot: Gunner, at: (0.5, 0.0, 16.0), facing: 180.0),
+        (robot: Swarmer, at: (0.5, 1.6, -16.5), facing: 180.0),
+        (robot: Gunner, at: (-1.2, 0.0, -28.5), facing: 180.0),
+        (robot: Turret, at: (1.5, 3.3, 16.5), facing: 180.0),
+        (robot: Turret, at: (-1.5, 3.3, -12.5), facing: 180.0),
+        (robot: Crawler, at: (3.3, 1.5, 26.0)),
+        (robot: Crawler, at: (-3.3, 1.5, -27.0)),
+    ],
+    markers: {
+        "entry": (0.0, 0.0, 33.5),
+        "objective": (0.0, 0.0, -30.0),
+        "loot_pod1": (-1.5, 0.0, 25.0),
+        "loot_pod3": (-1.5, 0.0, -1.0),
+        "loot_pod4": (1.5, 0.0, -14.0),
+    },
+    devices: [
+        (id: "gangway_lever", label: "Gangway", kind: Lever, at: (2.0, 1.3, -11.62), face: (0.0, 0.0, -1.0)),
+        (id: "gangway", label: "Gangway", kind: Bridge(size: (2.0, 0.2, 8.2)), at: (0.0, -0.1, -7.3), power: On("gangway_lever")),
+        (id: "gangway_lamp", label: "Gangway", kind: Lamp, at: (1.4, 2.0, -2.96), face: (0.0, 0.0, 1.0), power: On("gangway_lever")),
+    ],
+)
