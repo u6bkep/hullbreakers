@@ -26,6 +26,7 @@ use super::bots::{self, Gait, Robot};
 use super::devices::{Device, DeviceFile};
 use super::mission::ScenarioKind;
 use super::nav::NavGrid;
+use super::scene::{Encounter, SceneUse};
 use super::ship::ControlAction;
 
 include!(concat!(env!("OUT_DIR"), "/ship_files.rs"));
@@ -43,6 +44,10 @@ struct DesignFile {
     /// Laser turret mounts (each gets a base box under it).
     turrets: Vec<Vec3>,
     modules: Vec<Placement>,
+    /// What it offers a scene, if it can be set in one (see
+    /// `sim::scene`).
+    #[serde(default)]
+    scene: Option<SceneUse>,
 }
 
 /// A ship's shield: an ellipsoid around the hull.
@@ -208,6 +213,8 @@ pub struct ShipDesign {
     /// in (each after whatever its conditions read).
     pub devices: Vec<Device>,
     pub device_order: Vec<u16>,
+    /// What it offers a scene, if it can be set in one.
+    pub scene: Option<SceneUse>,
 }
 
 impl ShipDesign {
@@ -274,6 +281,7 @@ pub(crate) fn assemble(id: &str, text: &str, files: &HashMap<&str, &str>) -> Res
         markers: HashMap::new(),
         devices: Vec::new(),
         device_order: Vec::new(),
+        scene: file.scene,
     };
     let mut conds = Vec::new();
     let hull = if file.hostile { SimMaterial::HostileHull } else { SimMaterial::Hull };
@@ -519,6 +527,47 @@ pub fn check(ship: &ShipDesign) -> Vec<String> {
                 problems.push(format!("conduit {:?}: the run from {} to {} leaves the surfaces at {p}", d.id, leg[0], leg[1]));
                 break;
             }
+        }
+    }
+    // A scene site: what its encounters refer to is there.
+    if let Some(use_) = &ship.scene {
+        if use_.encounters.is_empty() {
+            problems.push("scene: no encounters (nothing to do there)".into());
+        }
+        for e in &use_.encounters {
+            match e {
+                Encounter::Salvage { released_by, .. } => {
+                    if !ship.markers.contains_key("objective") {
+                        problems.push(format!("scene {e:?}: no \"objective\" marker for the cargo to lie at"));
+                    }
+                    if let Some(id) = released_by
+                        && ship.device_index(id).is_none()
+                    {
+                        problems.push(format!("scene {e:?}: no device {id:?}"));
+                    }
+                }
+                Encounter::Restore { device } => {
+                    if ship.device_index(device).is_none() {
+                        problems.push(format!("scene {e:?}: no device {device:?}"));
+                    }
+                }
+                Encounter::Clear => {
+                    if !use_.crewed || ship.posts.is_empty() {
+                        problems.push("scene Clear: the site isn't crewed (crewed: true, and posts)".into());
+                    }
+                }
+                Encounter::Rescue { pods } => {
+                    if *pods == 0 {
+                        problems.push("scene Rescue: no pods".into());
+                    }
+                }
+            }
+        }
+        if use_.crewed && ship.posts.is_empty() {
+            problems.push("scene: crewed, but no posts".into());
+        }
+        if !ship.markers.contains_key("entry") {
+            problems.push("scene: no \"entry\" marker (the side turned to face our ship)".into());
         }
     }
     if ship.id == super::ship::HOME {

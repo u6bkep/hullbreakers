@@ -70,6 +70,17 @@ fn main() {
             director.start(kind);
         }
     }
+    // `HULLBREAKERS_SCENE=<seed>[:<size>]`: start in that scene, and keep
+    // to it (the wall's button rebuilds the same one).
+    if let Ok(text) = std::env::var("HULLBREAKERS_SCENE") {
+        let seed = hullbreakers::sim::scene::SceneSeed::parse(&text).unwrap_or_else(|e| {
+            eprintln!("hullbreakers: HULLBREAKERS_SCENE: {e}");
+            std::process::exit(2);
+        });
+        if let Some(mut director) = app.world_mut().get_resource_mut::<Director>() {
+            director.start_scene(seed);
+        }
+    }
     app.run();
 }
 

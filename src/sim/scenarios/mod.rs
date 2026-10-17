@@ -32,6 +32,7 @@ pub mod field;
 pub mod gallery;
 pub mod grapple_run;
 pub mod recovery;
+pub mod scene;
 
 /// What a scenario's world is built with.
 pub struct Stage<'a, 'w, 's> {
@@ -46,6 +47,8 @@ pub struct Stage<'a, 'w, 's> {
     /// How many players there are (at least one): a scenario may size its
     /// opposition to the crew.
     pub players: usize,
+    /// The scene to build, for the scene scenario (see `sim::scene`).
+    pub scene: super::scene::SceneSeed,
 }
 
 pub struct Scenario {
@@ -70,10 +73,23 @@ pub struct Scenario {
 }
 
 impl super::asteroids::FieldLayout {
-    /// Where a field of `count` rocks in this layout has them.
-    pub fn places(self, count: usize) -> Vec<super::asteroids::RockPlace> {
+    /// Where a field of `count` rocks in this layout has them, laid from
+    /// `seed` (the race's layout has its own).
+    pub fn places(self, seed: u64, count: usize) -> Vec<super::asteroids::RockPlace> {
         match self {
             Self::GrappleRun => grapple_run::rock_places(count),
+            Self::Scene(scene) => {
+                debug_assert_eq!(scene.seed, seed);
+                super::scene::rock_places(scene, count)
+            }
+        }
+    }
+
+    /// A number telling layouts apart, for the rocks' signatures.
+    pub fn tag(self) -> u64 {
+        match self {
+            Self::GrappleRun => 0,
+            Self::Scene(scene) => 1 ^ (scene.seed << 8) ^ ((scene.size as u64) << 4),
         }
     }
 }
@@ -88,6 +104,7 @@ pub fn scenario(kind: ScenarioKind) -> &'static Scenario {
         ScenarioKind::Recovery => &recovery::SCENARIO,
         ScenarioKind::Escort => &escort::SCENARIO,
         ScenarioKind::Gallery => &gallery::SCENARIO,
+        ScenarioKind::Scene => &scene::SCENARIO,
     }
 }
 

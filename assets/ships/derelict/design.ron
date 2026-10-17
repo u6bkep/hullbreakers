@@ -9,4 +9,9 @@ Design(
     shield: (center: (0.0, 1.5, 0.0), radii: (9.0, 5.0, 23.0)),
     turrets: [],
     modules: [(module: "derelict/hull")],
+    // In a scene: its data core, behind its power puzzle and vault; or just
+    // its reactor, for a side job.
+    scene: Some(Site(
+        encounters: [Salvage(cargo: DataCore, released_by: Some("core_clamp")), Restore(device: "reactor")],
+    )),
 )

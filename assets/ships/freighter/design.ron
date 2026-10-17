@@ -8,4 +8,10 @@ Design(
     shield: (center: (0.0, 1.5, -3.0), radii: (7.0, 5.0, 23.0)),
     turrets: [],
     modules: [(module: "freighter/hull")],
+    // In a scene: its power cell, carried out past its crew; or just the
+    // crew, cleared.
+    scene: Some(Site(
+        encounters: [Salvage(cargo: PowerCell, released_by: None), Clear],
+        crewed: true,
+    )),
 )

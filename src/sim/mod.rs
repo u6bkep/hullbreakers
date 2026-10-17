@@ -24,6 +24,7 @@ pub mod player;
 pub mod progression;
 pub mod rope;
 pub mod scenarios;
+pub mod scene;
 pub mod ship;
 pub mod shots;
 pub mod tuning;

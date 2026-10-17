@@ -64,6 +64,8 @@ pub struct RockField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FieldLayout {
     GrappleRun,
+    /// A scene's field (see `sim::scene`), round the sites of that seed.
+    Scene(super::scene::SceneSeed),
 }
 
 /// Where one of a field's rocks goes, and how it moves.
@@ -111,7 +113,7 @@ fn rock_signature(field: &RockField, index: u32) -> u64 {
         x = x.wrapping_mul(0x94d0_49bb_1331_11eb);
         x ^ (x >> 31)
     }
-    mix(mix(field.seed ^ ((field.laid as u64) << 32) ^ field.layout as u64) ^ index as u64)
+    mix(mix(field.seed ^ ((field.laid as u64) << 32) ^ field.layout.tag()) ^ index as u64)
 }
 
 /// Grows every new [`RockField`]'s rocks. Each becomes a body as it's shaped
@@ -135,7 +137,7 @@ pub fn grow_fields(
     mut commands: Commands,
 ) {
     for (entity, field) in &fields {
-        let places = field.layout.places(field.count as usize);
+        let places = field.layout.places(field.seed, field.count as usize);
         info!("growing a field of {} rocks ({:?})", places.len(), field.layout);
         let arrived: HashMap<u64, Entity> = arrived.iter().map(|(e, a)| (a.seed, e)).collect();
         let rng = &mut ChaCha8Rng::seed_from_u64(field.seed);

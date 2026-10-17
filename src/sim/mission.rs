@@ -54,11 +54,14 @@ pub enum ScenarioKind {
     Escort,
     /// Every model in the game set out behind our ship, for review.
     Gallery,
+    /// A scene laid out from a seed: sites to work round our ship (see
+    /// `sim::scene`).
+    Scene,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 7] = [
+    pub const ALL: [ScenarioKind; 8] = [
         ScenarioKind::Field,
         ScenarioKind::Boarding,
         ScenarioKind::GrappleRun,
@@ -66,6 +69,7 @@ impl ScenarioKind {
         ScenarioKind::Recovery,
         ScenarioKind::Escort,
         ScenarioKind::Gallery,
+        ScenarioKind::Scene,
     ];
 
     pub fn button_label(self) -> &'static str {
@@ -373,12 +377,25 @@ pub struct Director {
     /// Whether enemy ships carry robots, and the field has fauna (tests of
     /// other things turn them off).
     pub robots: bool,
+    /// The scene the next scene scenario builds: rolled fresh from the
+    /// tick when its button is pressed, unless one is pinned
+    /// (`HULLBREAKERS_SCENE`, a test).
+    pub scene: super::scene::SceneSeed,
+    pub pinned_scene: bool,
 }
 
 impl Director {
     /// Switches to `kind` at the end of this tick.
     pub fn start(&mut self, kind: ScenarioKind) {
         self.next = Some(kind);
+    }
+
+    /// Switches to the scene of `seed` at the end of this tick, and keeps
+    /// to that seed until another is pinned.
+    pub fn start_scene(&mut self, seed: super::scene::SceneSeed) {
+        self.scene = seed;
+        self.pinned_scene = true;
+        self.next = Some(ScenarioKind::Scene);
     }
 
     /// The scenario the world switches to at the end of this tick, if it does.
@@ -391,6 +408,8 @@ impl Director {
             next: Some(ScenarioKind::Field),
             asteroids,
             robots: true,
+            scene: default(),
+            pinned_scene: false,
         }
     }
 }
@@ -432,6 +451,12 @@ pub fn handle_presses(
 ) {
     for (_, _, action) in presses(tick.0, &players) {
         match action {
+            ControlAction::Scenario(ScenarioKind::Scene) => {
+                if !director.pinned_scene {
+                    director.scene = super::scene::SceneSeed::roll(tick.0 as u64);
+                }
+                director.next = Some(ScenarioKind::Scene);
+            }
             ControlAction::Scenario(kind) => director.next = Some(kind),
             ControlAction::Lurch => {
                 orders.write(ShipCommand::Lurch);
@@ -741,6 +766,7 @@ pub fn switch_scenario(
         asteroids: director.asteroids,
         robots: director.robots,
         players: players.iter().count().max(1),
+        scene: director.scene,
     });
     **mission = Mission {
         kind,
