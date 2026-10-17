@@ -120,20 +120,25 @@ To see a site in a scene: pick a seed whose plan uses it
 `tests/scene.rs` builds every size for a few seeds and plays a salvage
 through to the jump.
 
-## Site ideas for the catalogue
+## The catalogue
 
-What the planner can't do is make geometry or stories; these are for
-agents to build, each a design with devices, posts and a `scene:` block.
+Built (each `assets/ships/<id>`, with its `scene:` block):
 
-- **Wreck**: a broken hull (half a ship, decks open to space), survivors
-  adrift round it (`Rescue`), a black box deep in what's left (`Salvage`).
-- **Outpost / relay**: a small crewed station; `Clear`, or `Restore` its
-  transmitter through a breaker chain.
-- **Cargo pod cluster**: pods strung on a spine; a `PowerCell` in one, the
-  rest crates; `Clear` of crawlers and turrets on its hull.
-- **Mining rig** on a big rock: `Restore` its drill (route power, reset the
-  tripped breakers), `Salvage` its ore core.
-- **Patrol hulk**: a hostile gunship gone dark, crew still aboard, `Clear`.
+| Site | Offers | Crewed | The puzzle |
+|---|---|---|---|
+| `derelict` | Salvage DataCore (clamp), Restore reactor | no | reactor → junctions read off a board → two keys → vault → clamp |
+| `freighter` | Salvage PowerCell (from the start), Clear | yes | the gangway's lever on the far side, the bay door's key |
+| `wreck` | Rescue 4, Salvage BlackBox (clamp) | no | emergency power → recorder bay lock → door → clamp; two boards |
+| `pods` (pod train) | Salvage PowerCell (from the start), Clear | yes | five pods on a snapped spine; the gap's gangway from the far side |
+| `relay` | Restore transmitter, Clear | yes | breaker → 3-way feed selector → coolant valve → transmitter lever |
+
+Adding a design changes every seed's plan (the catalogue is shuffled by
+seed), so seeds noted as placing a site are only good for the catalogue as
+it was.
+
+Ideas not built: a mining rig on a big rock (Restore its drill, Salvage
+its ore core); a patrol hulk (a hostile gunship gone dark, Clear); a
+station big enough to be a scene by itself.
 
 ## Open
 
