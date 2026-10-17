@@ -1,0 +1,20 @@
+// The relay: a small comms outpost, crewed by robots. Its transmitter has
+// gone dark; bring it back on the air, or clear the station of its crew.
+// Ship coordinates, metres: +Y up, the bow (the deep end) toward -Z; the
+// docking collar (the entry) at the stern, +Z. See docs/ships.md and
+// docs/scenes.md.
+Design(
+    name: "RELAY",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 6.0, -1.0), radii: (14.0, 20.0, 20.0)),
+    turrets: [],
+    modules: [(module: "relay/hull")],
+    // In a scene: its transmitter, brought live through its breaker chain
+    // (main breaker, coolant, the feed selector to TX BUS, the transmitter's
+    // lever); or its crew, cleared.
+    scene: Some(Site(
+        encounters: [Restore(device: "transmitter"), Clear],
+        crewed: true,
+    )),
+)
