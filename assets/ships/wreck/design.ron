@@ -1,0 +1,27 @@
+// The wreck: the stern half of a two-deck ship that broke up. Its bow is
+// gone; the decks end in a torn edge open to space, and the pieces of the
+// rest hang round it. Dark inside until its emergency power is pulled.
+// Ship coordinates, metres: +Y up, the torn end toward -Z. See
+// docs/ships.md and docs/scenes.md.
+Design(
+    name: "WRECK",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 3.0, 2.0), radii: (9.0, 6.0, 17.0)),
+    turrets: [],
+    modules: [
+        (module: "wreck/hull"),
+        // The rest of the ship, adrift ahead of the break and round it:
+        // torn hull sections, turned every which way.
+        (module: "wreck/section", at: (-13.0, 3.5, -20.0), turn: 35.0),
+        (module: "wreck/section", at: (12.0, -4.0, -23.0), turn: -62.0),
+        (module: "wreck/section", at: (3.0, 10.0, -26.0), turn: 118.0),
+        (module: "wreck/section", at: (-12.0, -6.0, 4.0), turn: 200.0),
+    ],
+    // In a scene: survivors adrift round it, or its black box, behind its
+    // emergency power and the recorder bay's lock.
+    scene: Some(Site(
+        encounters: [Rescue(pods: 4), Salvage(cargo: BlackBox, released_by: Some("recorder_clamp"))],
+        crewed: false,
+    )),
+)

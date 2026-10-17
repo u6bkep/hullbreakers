@@ -1,0 +1,14 @@
+// A torn piece of the wreck's lost half: a stretch of deck plate with the
+// side skin still on it, a frame rib and a stringer poking out of the tear.
+// Placed several times round the wreck (design.ron), turned each way.
+Module(
+    parts: [
+        Span(lo: (-3.0, -0.3, -2.5), hi: (3.0, 0.0, 2.5)),
+        Span(lo: (-1.0, -0.3, 2.5), hi: (2.0, 0.0, 3.6)),
+        Span(lo: (3.0, 0.0, -2.5), hi: (3.3, 3.0, 2.5)),
+        Span(lo: (3.0, 0.0, 2.5), hi: (3.3, 1.4, 3.8)),
+        Box(center: (3.15, 1.5, -1.0), size: (0.35, 3.6, 0.3), material: Trim),
+        Box(center: (0.5, -0.15, -4.2), size: (0.25, 0.25, 3.6), material: Trim),
+        Box(center: (-1.5, 0.5, 0.5), size: (1.2, 1.0, 1.4), material: Trim),
+    ],
+)
