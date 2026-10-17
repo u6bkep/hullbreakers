@@ -1,0 +1,56 @@
+// The dead ship: a dim red dwarf, big in the sky, and little else. Little
+// fill, so the derelict's dark rooms stay dark and its silhouette is cut
+// out against a dusty amber haze.
+Ambience(
+    sun: (
+        direction: (-0.6, 0.25, 0.5),
+        color: "#ffa86b",
+        illuminance: 6500.0,
+        size: 4.5,
+        corona: 1.0,
+    ),
+    light: (ambient: "#c9a48a", ambient_brightness: 30.0, fill: 2000.0),
+    stars: (
+        seed: 202,
+        count: 15000,
+        banded: 0.25,
+        brightness: 6.0,
+        colors: ["#ffffff", "#ffe6c4", "#ffc896"],
+        glints: 24,
+    ),
+    band: (
+        pole: (0.1, 0.4, 0.9),
+        width: 16.0,
+        bulge: (0.7, -0.7, 0.2),
+        color: "#9fb6c9",
+        bulge_color: "#d8c49a",
+        brightness: 0.045,
+        dust: 0.85,
+        seed: 21,
+        tones: 3,
+    ),
+    nebulae: [
+        (
+            direction: (0.5, -0.3, -0.8),
+            size: 55.0,
+            inner: "#f2a65a",
+            outer: "#5a2e16",
+            brightness: 0.12,
+            seed: 23,
+            tones: 3,
+            dust: 0.7,
+            rim: 0.5,
+            stretch: 2.2,
+            turn: 70.0,
+        ),
+    ],
+    bodies: [
+        (
+            kind: Rocky,
+            direction: (0.2, 0.5, -0.8),
+            size: 6.0,
+            colors: ["#9c8a72", "#625545"],
+            seed: 25,
+        ),
+    ],
+)

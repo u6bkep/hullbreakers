@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use hullbreakers::client::{gallery, render, sky};
+use hullbreakers::client::{ambience, gallery, render};
 
 /// Distance between models (m).
 const SPACING: f32 = 0.6;
@@ -56,9 +56,9 @@ fn main() {
                     ..default()
                 }),
         )
-        // The game's own sky and lights.
-        .add_observer(sky::add_sky_to_cameras)
-        .add_systems(PreStartup, sky::setup_sky)
+        // The game's own lights, under the reference sky (`ambience`'s
+        // until a scenario sets another: here, never).
+        .add_plugins(ambience::AmbiencePlugin)
         .add_systems(Startup, render::setup_lighting)
         .insert_resource(Plan {
             out: PathBuf::from(out),

@@ -34,7 +34,7 @@ pub use affixes::{Affix, Affixes, Condition, absorb, robot_upkeep};
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Wrecked;
 pub use blast::{Detonation, blast_of, detonate};
-pub use crew::{POST_LEASH, Posting, Threat, compose_crew, crew_ship, man_posts, mount, spawn_zoo, zoo_cell};
+pub use crew::{POST_LEASH, Posting, Threat, compose_crew, crew_ship, man_posts, mount, spawn_dormant, spawn_zoo, zoo_cell};
 
 use avian3d::prelude::*;
 use bevy::ecs::entity::MapEntities;

@@ -201,3 +201,12 @@ The game is mostly dark: one sun, a dim fill from the sky, suit headlamps, and
 emissives. Judge every model in-engine with `asset_view` (assets.md), including
 the shadow-side shot. If a model is a black blob from the shadow side, its
 emissives or its value contrast need work, not the lighting.
+
+`asset_view` lights models under the **reference sky**
+(`assets/ambience/reference.ron`). Each place in the game has its own sky
+(an ambience, see docs/plan-ambience.md): a red dwarf's dim warm light, a
+gas giant's coloured fill. A model judged under the reference sky should
+hold up under all of them; the sky preview scenario's test stand is where to
+check one that might not. Skies follow the same colour rule as models (clear
+of the weak spots' magenta), and their backdrops stay dark, so a model reads
+as a dark outline against them.

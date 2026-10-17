@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Tiles the sky tour's screenshots into one contact sheet per sky.
+
+    tools/sky-sheet <dir>
+
+<dir> holds the tour's `<sky>_<view>.png` (see src/client/sky_tour.rs);
+writes `<dir>/sheets/<sky>.png`: its views in a grid, each labelled, and
+prints their paths.
+"""
+import sys
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+VIEWS = ["stand", "sun", "away", "band", "body", "narrow"]
+TILE = (640, 360)
+COLUMNS = 3
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    shots = Path(sys.argv[1])
+    out = shots / "sheets"
+    out.mkdir(exist_ok=True)
+    skies = {}
+    for path in sorted(shots.glob("*.png")):
+        sky, _, view = path.stem.rpartition("_")
+        if view in VIEWS:
+            skies.setdefault(sky, {})[view] = path
+    for sky, views in skies.items():
+        tiles = [(v, views[v]) for v in VIEWS if v in views]
+        rows = (len(tiles) + COLUMNS - 1) // COLUMNS
+        sheet = Image.new("RGB", (TILE[0] * COLUMNS, TILE[1] * rows), (20, 20, 20))
+        draw = ImageDraw.Draw(sheet)
+        for i, (view, path) in enumerate(tiles):
+            x, y = TILE[0] * (i % COLUMNS), TILE[1] * (i // COLUMNS)
+            sheet.paste(Image.open(path).convert("RGB").resize(TILE, Image.LANCZOS), (x, y))
+            draw.text((x + 8, y + TILE[1] - 20), f"{sky}: {view}", fill=(255, 255, 255))
+        target = out / f"{sky}.png"
+        sheet.save(target)
+        print(target)
+
+
+if __name__ == "__main__":
+    main()

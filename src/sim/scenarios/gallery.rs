@@ -21,6 +21,7 @@ pub static SCENARIO: Scenario = Scenario {
     systems: |_| {},
     return_after: stay,
     homecoming: false,
+    ambience: crate::sim::ambience::Choice::named("reference"),
 };
 
 /// Where the model gallery starts: a row behind our ship's stern, centred

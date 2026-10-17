@@ -190,6 +190,7 @@ impl Plugin for NetPlugin {
             .add_observer(replicate_flight)
             .add_observer(replicate_mission)
             .add_observer(replicate_gallery)
+            .add_observer(replicate_ambience)
             .add_observer(replicate_robot)
             .add_observer(replicate_pickup)
             // Measured only when profiling (see `client::profile`).
@@ -334,6 +335,8 @@ impl Plugin for ProtocolPlugin {
         app.component::<crate::sim::fauna::Grazer>().replicate();
         app.component::<Debris>().replicate_once();
         app.component::<GalleryAnchor>().replicate_once();
+        // The sky, whole (the sky preview changes it as it goes).
+        app.component::<crate::sim::ambience::Ambience>().replicate();
         app.component::<Robot>().replicate_once();
         // A robot reaches a remote client as what's drawn of it, not its
         // whole player (see `robots`).
@@ -800,6 +803,14 @@ fn replicate_mission(add: On<Add, Mission>, mut commands: Commands) {
 /// The gallery reaches clients as just its anchor; each sets out the models
 /// it has (see `client::gallery`).
 fn replicate_gallery(add: On<Add, GalleryAnchor>, mut commands: Commands) {
+    commands
+        .entity(add.entity)
+        .insert(Replicate::to_clients(NetworkTarget::All));
+}
+
+/// A place's sky reaches clients as its whole description, which each
+/// draws (see `client::ambience`).
+fn replicate_ambience(add: On<Add, crate::sim::ambience::Ambience>, mut commands: Commands) {
     commands
         .entity(add.entity)
         .insert(Replicate::to_clients(NetworkTarget::All));

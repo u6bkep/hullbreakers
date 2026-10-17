@@ -14,7 +14,9 @@
 //!                    frame (keeps the light they made in the first seconds)
 //!     no_envmap      no environment-map light at all
 //!     no_shadows     no shadow maps on any light
-//!     no_bloom, no_msaa, no_skybox
+//!     no_bloom, no_msaa
+//!     no_backdrop    no baked backdrop behind everything (the band, nebulae)
+//!     no_stars, no_bodies  none of the sky's stars, or bodies and sun disc
 //! ```
 //!
 //! Measured over the window: frame time (mean, percentiles, FPS), time in
@@ -114,8 +116,18 @@ fn apply_ab_switches(
     mut points: Query<&mut PointLight>,
     mut spots: Query<&mut SpotLight>,
     mut dirs: Query<&mut DirectionalLight>,
+    off: Option<ResMut<super::ambience::LayersOff>>,
 ) {
     let on = |name: &str| switches.0.iter().any(|s| s == name);
+    if let Some(mut off) = off {
+        let wanted = super::ambience::LayersOff {
+            stars: on("no_stars"),
+            bodies: on("no_bodies"),
+        };
+        if *off != wanted {
+            *off = wanted;
+        }
+    }
     // Leave the generated maps a moment to be filtered once.
     let settled = match profile.phase {
         Phase::Starting => false,
@@ -152,7 +164,7 @@ fn apply_ab_switches(
         if on("no_msaa") {
             commands.entity(camera).insert(Msaa::Off);
         }
-        if on("no_skybox") {
+        if on("no_backdrop") {
             commands.entity(camera).remove::<bevy::light::Skybox>();
         }
     }
@@ -433,11 +445,14 @@ fn sample_counts(world: &mut World) {
                 continue;
             }
             visible += 1;
+            // (A mesh kept only in the render world, the sky's stars, can't
+            // be read here: left out.)
             if let Some(mesh) = meshes.get(&mesh.0) {
-                triangles += mesh
-                    .indices()
-                    .map_or_else(|| mesh.count_vertices(), |i| i.len())
-                    / 3;
+                triangles += match mesh.try_indices_option() {
+                    Ok(Some(indices)) => indices.len() / 3,
+                    Ok(None) => mesh.count_vertices() / 3,
+                    Err(_) => 0,
+                };
             }
         }
     }

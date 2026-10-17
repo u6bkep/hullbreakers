@@ -32,6 +32,7 @@ pub mod field;
 pub mod gallery;
 pub mod grapple_run;
 pub mod recovery;
+pub mod sky;
 
 /// What a scenario's world is built with.
 pub struct Stage<'a, 'w, 's> {
@@ -67,6 +68,8 @@ pub struct Scenario {
     /// Whether getting home is part of it: the debrief then says who made it
     /// home and who was left drifting.
     pub homecoming: bool,
+    /// The sky its world is under (see [`crate::sim::ambience`]).
+    pub ambience: crate::sim::ambience::Choice,
 }
 
 impl super::asteroids::FieldLayout {
@@ -88,6 +91,7 @@ pub fn scenario(kind: ScenarioKind) -> &'static Scenario {
         ScenarioKind::Recovery => &recovery::SCENARIO,
         ScenarioKind::Escort => &escort::SCENARIO,
         ScenarioKind::Gallery => &gallery::SCENARIO,
+        ScenarioKind::Sky => &sky::SCENARIO,
     }
 }
 
@@ -121,4 +125,14 @@ pub const BANNER_SECONDS: f32 = 8.0;
 
 pub fn after_banner(_: Phase, _: &Tuning) -> Option<f32> {
     Some(BANNER_SECONDS)
+}
+
+#[cfg(test)]
+#[test]
+fn every_scenario_names_a_shipped_sky() {
+    for kind in ScenarioKind::ALL {
+        if let crate::sim::ambience::Choice::Named(name) = &scenario(kind).ambience {
+            crate::sim::ambience::Ambience::named(name).unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+        }
+    }
 }

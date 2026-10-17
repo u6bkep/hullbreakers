@@ -54,11 +54,13 @@ pub enum ScenarioKind {
     Escort,
     /// Every model in the game set out behind our ship, for review.
     Gallery,
+    /// A test stand under a sky worked from a console, for review.
+    Sky,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 7] = [
+    pub const ALL: [ScenarioKind; 8] = [
         ScenarioKind::Field,
         ScenarioKind::Boarding,
         ScenarioKind::GrappleRun,
@@ -66,6 +68,7 @@ impl ScenarioKind {
         ScenarioKind::Recovery,
         ScenarioKind::Escort,
         ScenarioKind::Gallery,
+        ScenarioKind::Sky,
     ];
 
     pub fn button_label(self) -> &'static str {
@@ -373,6 +376,9 @@ pub struct Director {
     /// Whether enemy ships carry robots, and the field has fauna (tests of
     /// other things turn them off).
     pub robots: bool,
+    /// The sky every scenario is under instead of its own, if one's been
+    /// asked for (`HULLBREAKERS_AMBIENCE`, for screenshots).
+    pub ambience: Option<super::ambience::Choice>,
 }
 
 impl Director {
@@ -391,6 +397,7 @@ impl Director {
             next: Some(ScenarioKind::Field),
             asteroids,
             robots: true,
+            ambience: None,
         }
     }
 }
@@ -438,7 +445,11 @@ pub fn handle_presses(
             }
             // The player's own simulation armed them already; the rest are
             // the scenario's and the devices'.
-            ControlAction::Armory | ControlAction::Workbench | ControlAction::DisableShields | ControlAction::Device(_) => {}
+            ControlAction::Armory
+            | ControlAction::Workbench
+            | ControlAction::DisableShields
+            | ControlAction::Device(_)
+            | ControlAction::Sky(_) => {}
         }
     }
 }
@@ -742,6 +753,13 @@ pub fn switch_scenario(
         robots: director.robots,
         players: players.iter().count().max(1),
     });
+    // Its sky, cleared with the rest of its world.
+    let choice = director.ambience.as_ref().unwrap_or(&scenario.ambience);
+    let ambience = choice.make().unwrap_or_else(|err| {
+        warn!("{err}; using the reference sky");
+        super::ambience::Ambience::reference()
+    });
+    commands.spawn((Name::new("Ambience"), Staged, ambience));
     **mission = Mission {
         kind,
         started: tick.0,

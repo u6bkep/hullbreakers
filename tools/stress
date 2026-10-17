@@ -24,6 +24,8 @@
 #              through the whole rock field (HULLBREAKERS_STRESS=race; set
 #              HULLBREAKERS_RACE_ROCKS=n for the field's size)
 #   coop-race  the same with a host and a client (the host flies)
+#   sky        the sky preview with its sun turning: the sky baked again
+#              every few ticks (HULLBREAKERS_STRESS=sky)
 #
 # An authority's report also has what it sent each remote client
 # (sent_per_client: packets and kB a second).
@@ -42,7 +44,8 @@
 #   --ab "V1 V2..."  also run each scenario with rendering features off, one
 #                    run per variant; a variant is a comma list of
 #                    HULLBREAKERS_PROFILE_AB switches (static_envmap, no_envmap,
-#                    no_shadows, no_bloom, no_msaa, no_skybox)
+#                    no_shadows, no_bloom, no_msaa, no_backdrop,
+#                    no_stars, no_bodies)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -147,6 +150,7 @@ run() {
     carrier) env+=(HULLBREAKERS_SCENARIO=boarding HULLBREAKERS_STRESS=carrier) ;;
     derelict) env+=(HULLBREAKERS_SCENARIO=derelict HULLBREAKERS_STRESS=derelict) ;;
     race) env+=(HULLBREAKERS_SCENARIO=run HULLBREAKERS_STRESS=race) ;;
+    sky) env+=(HULLBREAKERS_SCENARIO=sky HULLBREAKERS_STRESS=sky) ;;
     coop-race) env+=(HULLBREAKERS_SCENARIO=run HULLBREAKERS_STRESS=race) ;;
     coop) env+=(HULLBREAKERS_SCENARIO=field) ;;
     coop-boarding) env+=(HULLBREAKERS_SCENARIO=boarding) ;;

@@ -256,15 +256,32 @@ pub fn spawn_zoo(commands: &mut Commands, tuning: &Tuning, home: Entity, at: Vec
                 orientation: turn * Quat::from_rotation_y(PI * 0.85),
                 pitch: 0.0,
             };
-            let mut robot = commands.spawn(new_robot(kind, affixes, mode, home, post, tuning, i as u32));
-            robot.insert(Name::new(affixes.describe(kind)));
-            robot.queue(|mut entity: EntityWorldMut| {
-                if let Some(mut brain) = entity.get_mut::<Brain>() {
-                    brain.dormant = true;
-                }
-            });
+            let robot = spawn_asleep(commands, new_robot(kind, affixes, mode, home, post, tuning, i as u32));
+            commands.entity(robot).insert(Name::new(affixes.describe(kind)));
         }
     }
+}
+
+/// A robot that never wakes: floating at `at`, turned `facing`, for show
+/// (the sky preview's test stand).
+pub fn spawn_dormant(commands: &mut Commands, tuning: &Tuning, home: Entity, kind: Robot, at: Vec3, facing: Quat) -> Entity {
+    let mode = Mode::Eva {
+        position: at,
+        velocity: Vec3::ZERO,
+        orientation: facing,
+        pitch: 0.0,
+    };
+    spawn_asleep(commands, new_robot(kind, Affixes::NONE, mode, home, at, tuning, 1))
+}
+
+fn spawn_asleep(commands: &mut Commands, robot: impl Bundle) -> Entity {
+    let mut robot = commands.spawn(robot);
+    robot.queue(|mut entity: EntityWorldMut| {
+        if let Some(mut brain) = entity.get_mut::<Brain>() {
+            brain.dormant = true;
+        }
+    });
+    robot.id()
 }
 
 /// Where in the gallery's robot table (see [`spawn_zoo`]) the cell in

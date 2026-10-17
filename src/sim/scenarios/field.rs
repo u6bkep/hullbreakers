@@ -18,6 +18,7 @@ pub static SCENARIO: Scenario = Scenario {
     systems: |_| {},
     return_after: stay,
     homecoming: false,
+    ambience: crate::sim::ambience::Choice::named("field"),
 };
 
 fn build(stage: &mut Stage) -> Entity {

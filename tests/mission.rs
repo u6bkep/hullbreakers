@@ -1774,3 +1774,40 @@ fn a_tow_keeps_the_assist_flying_by_our_ship() {
     let limit = Tuning::default().assist_max_speed;
     assert!(velocity.length() < limit * 1.1, "a runaway tow at {:.1} m/s (limit {limit})", velocity.length());
 }
+
+/// The sky preview: its mission-wall button starts it under the reference
+/// sky, and its console's buttons, levers and junction change the sky.
+#[test]
+fn the_sky_console_changes_the_sky() {
+    use hullbreakers::sim::ambience::Ambience;
+    use hullbreakers::sim::scenarios::sky::{CONSOLE, SkyControl};
+    let sky = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<&Ambience>().single(world).unwrap().clone()
+    };
+    let mut app = app();
+    start(&mut app, ScenarioKind::Sky);
+    ticks(&mut app, 2);
+    assert_eq!(sky(&mut app).name, "reference");
+    let console = ship_of(&mut app, CONSOLE).expect("no sky console");
+    // The next sky after the reference is the first generated one.
+    let (_, button, _) = *design(CONSOLE)
+        .controls
+        .iter()
+        .find(|(a, ..)| *a == ControlAction::Sky(SkyControl::NextSky))
+        .expect("no next-sky button");
+    let feet = Vec3::new(button.x, 0.01, button.z + 1.0);
+    stand(&mut app, console, feet, button - (feet + Vec3::Y * eye_height()));
+    interact(&mut app);
+    ticks(&mut app, 2);
+    let next = sky(&mut app);
+    assert!(next.name.starts_with("calm"), "{}", next.name);
+    assert!(mission(&mut app).status[0].contains(&next.name), "{:?}", mission(&mut app).status);
+    // The band's lever takes the band away; the sun's junction moves it.
+    assert!(next.show.band);
+    press_device(&mut app, console, "band");
+    assert!(!sky(&mut app).show.band);
+    let own = sky(&mut app).sun.direction;
+    press_device(&mut app, console, "sun");
+    assert_ne!(sky(&mut app).sun.direction, own);
+}

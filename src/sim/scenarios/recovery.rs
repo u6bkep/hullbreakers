@@ -37,6 +37,7 @@ pub static SCENARIO: Scenario = Scenario {
     systems: |app| super::judge(app, ScenarioKind::Recovery, recover),
     return_after: after_banner,
     homecoming: true,
+    ambience: crate::sim::ambience::Choice::named("recovery"),
 };
 
 /// What's adrift.

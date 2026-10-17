@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::LocalPlayer;
+use super::ambience::SpaceLevels;
 use super::combat_fx::{glyph, wrap};
 use crate::sim::SimTick;
 use crate::sim::devices::{Device, DeviceKind, DeviceState, ShownDevices, face_basis};
@@ -728,17 +729,17 @@ const DARK_AMBIENT: f32 = 0.0;
 /// own they'd light a dead ship's insides through its walls: inside the
 /// cabin of a ship lit by its devices, both go with how many of that ship's
 /// lights are on (as its cabin's fill does), easing as you cross the
-/// threshold. Everywhere else (open space, our own ship) they're space's.
+/// threshold. Everywhere else (open space, our own ship) they're space's,
+/// as the sky sets them ([`SpaceLevels`]).
 pub fn interior_ambient(
     time: Res<Time>,
     camera: Option<Single<&Transform, With<super::camera::PlayerCamera>>>,
     ships: Query<(&ShipHull, Option<&ShownDevices>, &GlobalTransform)>,
+    levels: Res<SpaceLevels>,
     mut ambient: ResMut<GlobalAmbientLight>,
-    mut sky_fill: Query<(Entity, Option<&mut EnvironmentMapLight>, Option<&mut GeneratedEnvironmentMapLight>), (With<Camera3d>, Without<LightProbe>)>,
-    mut space: Local<Option<f32>>,
-    mut fills: Local<Vec<(Entity, f32)>>,
+    mut sky_fill: Query<(Option<&mut EnvironmentMapLight>, Option<&mut GeneratedEnvironmentMapLight>), (With<Camera3d>, Without<LightProbe>)>,
 ) {
-    let space = *space.get_or_insert(ambient.brightness);
+    let space = levels.ambient;
     let Some(camera) = camera else { return };
     let eye = camera.translation;
     let inside = ships.iter().find_map(|(hull, devices, pose)| {
@@ -756,19 +757,10 @@ pub fn interior_ambient(
     if (brightness - ambient.brightness).abs() > 1e-3 {
         ambient.brightness = brightness;
     }
-    // The sky's fill follows the same fraction of its own full strength
-    // (each camera's, as first seen).
+    // The sky's fill follows the same fraction of its own full strength.
     let fraction = if space > 0.0 { brightness / space } else { 1.0 };
-    for (camera, map, generated) in &mut sky_fill {
-        let full = match fills.iter().find(|(e, _)| *e == camera) {
-            Some(&(_, full)) => full,
-            None => {
-                let Some(full) = map.as_ref().map(|m| m.intensity).or(generated.as_ref().map(|g| g.intensity)) else { continue };
-                fills.push((camera, full));
-                full
-            }
-        };
-        let intensity = full * fraction;
+    for (map, generated) in &mut sky_fill {
+        let intensity = levels.fill * fraction;
         if let Some(mut map) = map
             && (map.intensity - intensity).abs() > 1e-2
         {
@@ -856,6 +848,10 @@ mod tests {
         app.insert_resource(GlobalAmbientLight {
             brightness: 60.0,
             ..default()
+        });
+        app.insert_resource(SpaceLevels {
+            ambient: 60.0,
+            fill: 3500.0,
         });
         app.add_systems(Update, interior_ambient);
         let derelict = design("derelict");

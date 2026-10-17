@@ -50,6 +50,7 @@ pub static SCENARIO: Scenario = Scenario {
     },
     return_after: after_banner,
     homecoming: false,
+    ambience: crate::sim::ambience::Choice::named("grapple_run"),
 };
 
 /// The course's design.

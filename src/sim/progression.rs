@@ -842,7 +842,7 @@ pub fn pay_for(kind: ScenarioKind) -> Option<Pay> {
             par: 300.0,
             per: &[("survivors_home", (25, 30), "Survivors home")],
         },
-        ScenarioKind::Field | ScenarioKind::Gallery => return None,
+        ScenarioKind::Field | ScenarioKind::Gallery | ScenarioKind::Sky => return None,
     })
 }
 

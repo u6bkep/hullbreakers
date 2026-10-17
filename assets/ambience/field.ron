@@ -1,0 +1,55 @@
+// The asteroid field: home. A calm sky with a warm white sun, the band
+// across it, one cool cloud and a small grey moon off to the side.
+Ambience(
+    sun: (
+        direction: (0.45, 0.4, -0.35),
+        color: "#fff2dc",
+        illuminance: 12000.0,
+        size: 1.6,
+        corona: 2.0,
+    ),
+    light: (ambient: "#99b3ff", ambient_brightness: 60.0, fill: 3500.0),
+    stars: (
+        seed: 101,
+        count: 18000,
+        banded: 0.25,
+        brightness: 7.0,
+        colors: ["#cfdcff", "#ffffff", "#ffffff", "#ffe6c4", "#ffc896"],
+        glints: 36,
+    ),
+    band: (
+        pole: (0.3, 0.8, 0.5),
+        width: 20.0,
+        bulge: (-0.85, 0.35, 0.0),
+        color: "#a9bedb",
+        bulge_color: "#e8d2a8",
+        brightness: 0.075,
+        dust: 0.6,
+        seed: 3,
+        tones: 4,
+    ),
+    nebulae: [
+        (
+            direction: (-0.3, -0.2, 0.9),
+            size: 40.0,
+            inner: "#5fc4c9",
+            outer: "#1d4a63",
+            brightness: 0.18,
+            seed: 5,
+            tones: 3,
+            dust: 0.3,
+            rim: 0.6,
+            stretch: 1.8,
+            turn: 30.0,
+        ),
+    ],
+    bodies: [
+        (
+            kind: Rocky,
+            direction: (-0.7, 0.25, -0.6),
+            size: 3.0,
+            colors: ["#8a8580", "#5c5853"],
+            seed: 9,
+        ),
+    ],
+)

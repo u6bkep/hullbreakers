@@ -1,0 +1,11 @@
+// The sky preview's console and test stand (the "Sky preview" scenario
+// places it beside the stand, behind our ship's stern; see
+// `sim::scenarios::sky`). Not a ship: a site, floating still.
+Design(
+    name: "SKY CONSOLE",
+    hostile: false,
+    model: None,
+    shield: (center: (0.0, 1.0, 0.0), radii: (3.0, 3.0, 3.0)),
+    turrets: [],
+    modules: [(module: "sky_console/console")],
+)
