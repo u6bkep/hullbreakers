@@ -98,6 +98,11 @@ What the planner relies on:
   ship.
 - **Posts** if `crewed`: who stands there is rolled from the threat
   (`bots::compose_crew`). The scene's threat is 1–3, eased for a small crew.
+  A hull turret sees 320 m and shoots to 300, so at a site within that of
+  our ship (every tight and wide scene) its mounts are left unmanned: it
+  would fire onto our deck from the first tick. Mounts are a vast-scene
+  defence; give the close fight to walkers, flyers and crawlers, and put
+  mounts where they cover the approach, not the far field.
 - **Devices** are the puzzle: wire whatever chain the site's story wants
   and name the device an encounter refers to. The dead ship's chain
   (reactor → junctions read off a board → two keys → vault → clamp) is the

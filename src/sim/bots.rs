@@ -255,6 +255,11 @@ impl Robot {
         }
     }
 
+    /// How far it notices the crew (m), given a clear line.
+    pub fn sight(self) -> f32 {
+        self.mind().sight
+    }
+
     /// Its gun, if it has one (the Grappler has its harpoon instead).
     fn gun(self, affixes: Affixes) -> Option<GunKind> {
         match self {

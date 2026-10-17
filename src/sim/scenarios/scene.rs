@@ -86,7 +86,17 @@ fn build(stage: &mut Stage) -> Entity {
                 linear_velocity: Vec3::ZERO,
                 angular_velocity: Vec3::ZERO,
             };
-            bots::crew_ship(commands, stage.tuning, entity, design, &frame, tick.wrapping_add(i as u32), threat);
+            // A hull turret sees 320 m and shoots to 300: at a site that
+            // near, it would fire onto our deck from the start, so mounts
+            // are left unmanned unless the site is well out of their reach.
+            // The close fight is the walkers', flyers' and crawlers'.
+            let turret_reach = Robot::Turret.sight();
+            let out_of_reach = site.at.length() > turret_reach + site.clearance + 50.0;
+            let crew: Vec<bots::Posting> = bots::compose_crew(design, threat, tick.wrapping_add(i as u32) as u64)
+                .into_iter()
+                .filter(|p| out_of_reach || p.robot != Robot::Turret)
+                .collect();
+            bots::man_posts(commands, stage.tuning, entity, design, &frame, crew, None);
         }
         pickups::stock_ship(commands, entity, design, draw(plan.seed.seed as u32, i as u32));
         let mut adrift = Vec::new();
