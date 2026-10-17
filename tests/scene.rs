@@ -238,3 +238,34 @@ fn a_salvage_carried_back_off_is_not_home_at_the_jump() {
     let debrief = mission(&mut app).debrief.expect("a debrief");
     assert_eq!(debrief.phase, Phase::Lost);
 }
+
+/// A crewed site's hull turrets are obstacles on the way in: their sight
+/// is capped short of our ship. And the scene is under its own sky.
+#[test]
+fn site_turrets_are_short_sighted_and_the_scene_has_its_sky() {
+    use hullbreakers::sim::ambience::Ambience;
+    use hullbreakers::sim::bots::{Robot, Sight};
+    use hullbreakers::sim::scenarios::scene::SITE_TURRET_SIGHT;
+    let scene = (0..200u64)
+        .map(|seed| SceneSeed { seed, size: SceneSize::Tight })
+        .find(|s| plan(*s).sites.iter().any(|site| site.design == "pods" || site.design == "relay"))
+        .expect("a seed with a turreted site");
+    let mut app = app(true);
+    app.world_mut().resource_mut::<Director>().start_scene(scene);
+    for _ in 0..10 {
+        app.update();
+    }
+    let world = app.world_mut();
+    let turrets: Vec<Option<f32>> = world
+        .query::<(&Robot, Option<&Sight>)>()
+        .iter(world)
+        .filter(|(r, _)| **r == Robot::Turret)
+        .map(|(_, s)| s.map(|s| s.0))
+        .collect();
+    assert!(!turrets.is_empty(), "{scene:?}: no turrets manned");
+    for sight in turrets {
+        let sight = sight.expect("a site turret is capped");
+        assert!((SITE_TURRET_SIGHT.0..=SITE_TURRET_SIGHT.1).contains(&sight), "{sight}");
+    }
+    assert_eq!(world.query::<&Ambience>().iter(world).count(), 1, "{scene:?}: one sky");
+}

@@ -42,6 +42,7 @@ pub static SCENARIO: Scenario = Scenario {
     systems: |app| super::judge(app, ScenarioKind::DeadShip, salvage),
     return_after: after_banner,
     homecoming: true,
+    ambience: crate::sim::ambience::Choice::named("derelict"),
 };
 
 /// The derelict's design.

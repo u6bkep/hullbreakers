@@ -20,6 +20,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
+use super::ambience::{Archetype, Choice};
 use super::asteroids::{RockPlace, random_unit};
 use super::design::{ShipDesign, designs};
 use super::items::CargoKind;
@@ -230,6 +231,8 @@ pub struct ScenePlan {
     pub threat: u8,
     /// Seconds to be aboard once the main is done.
     pub window: f32,
+    /// The sky it's under: grown from the seed (see `sim::ambience`).
+    pub sky: Choice,
 }
 
 impl ScenePlan {
@@ -369,6 +372,7 @@ pub fn plan(seed: SceneSeed) -> ScenePlan {
         drifting,
         threat: rng.random_range(1..=3),
         window: size.window(),
+        sky: Choice::Generated(Archetype::ALL[rng.random_range(0..Archetype::ALL.len())], seed.seed ^ 0x5c1),
     }
 }
 

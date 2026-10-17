@@ -848,7 +848,7 @@ pub fn pay_for(kind: ScenarioKind) -> Option<Pay> {
             par: 600.0,
             per: &[("main_done", (80, 100), "Main objective"), ("sides_done", (60, 80), "Side objective")],
         },
-        ScenarioKind::Field | ScenarioKind::Gallery => return None,
+        ScenarioKind::Field | ScenarioKind::Gallery | ScenarioKind::Sky => return None,
     })
 }
 

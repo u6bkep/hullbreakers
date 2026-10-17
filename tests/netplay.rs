@@ -676,6 +676,44 @@ fn devices_reach_clients() {
     assert!(objective.starts_with("Route power"), "{objective}");
 }
 
+/// A scenario's sky reaches a client whole, and the sky preview's console
+/// changes it there too.
+#[test]
+fn the_sky_reaches_clients() {
+    use hullbreakers::sim::ambience::Ambience;
+    use hullbreakers::sim::devices::Devices;
+    use hullbreakers::sim::mission::{Director, ScenarioKind};
+    use hullbreakers::sim::ship::ShipHull;
+    let (_guard, mut s) = session(100);
+    let sky = |app: &mut App| {
+        let world = app.world_mut();
+        let skies: Vec<Ambience> = world.query::<&Ambience>().iter(world).cloned().collect();
+        assert!(skies.len() <= 1, "{} skies", skies.len());
+        skies.into_iter().next()
+    };
+    s.step(120);
+    let field = sky(&mut s.server).expect("no sky on the server");
+    assert_eq!(field.name, "field");
+    assert_eq!(sky(&mut s.client), Some(field));
+    s.server.world_mut().resource_mut::<Director>().start(ScenarioKind::Sky);
+    s.step(120);
+    let preview = sky(&mut s.server).expect("no sky in the preview");
+    assert_eq!(preview.name, "reference");
+    assert!(preview.show.band);
+    assert_eq!(sky(&mut s.client).as_ref(), Some(&preview));
+    // The server's crew throws the band's lever back.
+    {
+        let world = s.server.world_mut();
+        let (hull, mut devices) = world.query::<(&ShipHull, &mut Devices)>().iter_mut(world).find(|(h, _)| h.0 == "sky_console").unwrap();
+        let band = hull.design().device("band");
+        devices.0[band].set = 0;
+    }
+    s.step(60);
+    let preview = sky(&mut s.server).unwrap();
+    assert!(!preview.show.band);
+    assert_eq!(sky(&mut s.client), Some(preview));
+}
+
 /// Putting a gun down and taking it back, on a client: the inventory is
 /// predicted, the pickup is the authority's, and the two agree.
 #[test]

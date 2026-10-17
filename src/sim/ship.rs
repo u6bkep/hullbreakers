@@ -65,6 +65,9 @@ pub enum ControlAction {
     /// Work one of the ship's devices (an index into its design's; see
     /// [`super::devices`]).
     Device(u16),
+    /// One of the sky preview console's buttons (see
+    /// [`super::scenarios::sky`]).
+    Sky(super::scenarios::sky::SkyControl),
 }
 
 impl ControlAction {
@@ -77,6 +80,7 @@ impl ControlAction {
             ControlAction::Armory => "Weapons locker",
             ControlAction::Workbench => "Workbench",
             ControlAction::Device(_) => "Device",
+            ControlAction::Sky(control) => control.label(),
         }
     }
 }

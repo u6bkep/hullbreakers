@@ -372,6 +372,13 @@ it.
   ceiling, and back. Harmless, and the door still blocks the way, but the
   door test had to stop asserting where the walk ends. (`tests/mission.rs`,
   `a_door_blocks_the_way_until_its_power_opens_it`.)
+- 2026-10-16. A button's face is drawn toward the design's origin along its
+  thinnest axis (`combat_fx::fit_buttons`: "inward from a wall"). Fine
+  for a cabin; the sky console is a free-standing panel, and with its
+  origin in front of it every label faced the back. Worked around by
+  standing the panel a metre behind its origin
+  (`assets/ships/sky_console/console.ron`). Cost: one look at a screenshot,
+  5 minutes. A `face` on a control (as devices have) would fix it.
 
 ## Bevy rendering (lighting)
 
@@ -387,6 +394,34 @@ it.
   untouched. Cost: an hour, most of it finding that the camera's fill, not
   the ambient, was the light. Limit: it's lit as the eye is, so from outside
   you see a dark ship's insides at space's light (fine through one airlock).
+- 2026-10-16. Baking our own sky cubemaps (`client::ambience::bake`):
+  Bevy's cubemaps are left-handed. Its skybox and environment-map shaders
+  sample with z negated, so a baked texel's world direction is its face
+  direction with z negated, or the sky comes out mirrored against the sun's
+  light. Found by reading `skybox.wgsl` before writing the bake, so no bug;
+  cost: 15 minutes. Not documented on `Skybox`.
+- 2026-10-16. The backdrop bakes into `Rg11b10Ufloat` (HDR at 4 bytes a
+  texel), which isn't a storage format, so the bake can't be one compute
+  dispatch like Bevy's own environment-map filter. Instead it's a render
+  pass per cube face, a fullscreen triangle into a one-layer view of it.
+  Cost: a little more code (12 passes, not 1); `Rgba16Float` storage would
+  have doubled the display map to 113 MB.
+- 2026-10-16. `GeneratedEnvironmentMapLight` re-filters every frame for as
+  long as it's on, reads its source's size from the *main-world* image
+  each time it's added, and Bevy has no way for the render world to tell
+  the main world a pass ran. So the baked cubemaps keep their main-world
+  copy (`RenderAssetUsages::all()`, no data), the render world reports the
+  generation it baked through an `Arc<AtomicU32>` in `SkyBake`, and the
+  main world puts the generator back on the cameras only then, for 30
+  frames (`refilter_when_baked`, `settle_environment_maps`). Without the
+  wait, the first bake (its shaders still compiling) left the cameras lit
+  by an empty map. Cost: an hour of design.
+- 2026-10-17. Pricing the sky bake: GPU spans recorded outside a view
+  (`pass_span` in a `Render` system, ours and Bevy's own environment-map
+  filter alike) never appear among the render diagnostics, so
+  `tools/stress` can't see them. Measured instead by frame time with and
+  without continuous bakes (docs/perf.md, The sky). Cost: a stress run and
+  an hour.
 
 ## Our player controller (flight assist)
 

@@ -1,0 +1,43 @@
+// The recovery: a wreck's crew adrift above a big rocky world, half lit,
+// its night side a dark disc the beacons show up against.
+Ambience(
+    sun: (
+        direction: (0.7, 0.3, 0.2),
+        color: "#fff0d0",
+        illuminance: 11000.0,
+        size: 1.5,
+        corona: 1.5,
+    ),
+    light: (ambient: "#99b3ff", ambient_brightness: 50.0, fill: 3000.0),
+    stars: (
+        seed: 505,
+        count: 16000,
+        banded: 0.25,
+        brightness: 7.0,
+        colors: ["#cfdcff", "#ffffff", "#ffe6c4"],
+        glints: 30,
+    ),
+    band: (
+        pole: (0.0, 0.6, 0.8),
+        width: 22.0,
+        bulge: (1.0, 0.0, 0.0),
+        color: "#a9bedb",
+        bulge_color: "#e8d2a8",
+        brightness: 0.06,
+        dust: 0.6,
+        seed: 51,
+        tones: 4,
+    ),
+    nebulae: [],
+    bodies: [
+        (
+            kind: Rocky,
+            direction: (-0.4, -0.6, -0.7),
+            size: 40.0,
+            colors: ["#7d8590", "#4e5560", "#9c8a72"],
+            seed: 53,
+            axis: (0.2, 1.0, 0.1),
+            atmosphere: "#9fc8ff",
+        ),
+    ],
+)

@@ -1,0 +1,40 @@
+// The sky console: a panel facing the visitors (+Z), worked like the
+// mission wall. Top row, buttons: step through the skies, and a generated
+// sky's seed. Middle row, a lever per layer of the sky (thrown: shown).
+// Bottom, the sun's junction: its own place, high, low, behind the stand,
+// edge-on, turning (see `sim::scenarios::sky`).
+//
+// The panel stands a metre behind the design's origin: a button's face is
+// drawn toward the origin (as a wall's is toward its cabin), so this way
+// they face the visitors.
+//
+// The test stand's hull section is here too, 5 m to the console's right
+// and 4 m beyond its origin (the stand's middle), so the light can be
+// judged on a hull's flat faces and edges.
+Module(
+    parts: [
+        // The panel, and a deck plate in front of it to stand on (booted;
+        // visitors float up to it).
+        Box(center: (0.0, 1.0, -1.0), size: (3.4, 2.0, 0.2), material: Trim),
+        Box(center: (0.0, -0.1, 0.0), size: (3.6, 0.2, 2.2), material: Trim),
+        // The hull section: a pale plate on a dark frame.
+        Box(center: (5.0, 0.8, -4.0), size: (2.4, 1.6, 1.2), material: Hull),
+        Box(center: (5.0, 1.68, -4.0), size: (2.6, 0.16, 1.4), material: Trim),
+        Box(center: (5.0, -0.08, -4.0), size: (2.6, 0.16, 1.4), material: Trim),
+    ],
+    controls: [
+        (action: Sky(PreviousSky), center: (-1.3, 1.65, -0.84), half_size: (0.28, 0.18, 0.06)),
+        (action: Sky(NextSky), center: (-0.65, 1.65, -0.84), half_size: (0.28, 0.18, 0.06)),
+        (action: Sky(PreviousSeed), center: (0.0, 1.65, -0.84), half_size: (0.28, 0.18, 0.06)),
+        (action: Sky(NextSeed), center: (0.65, 1.65, -0.84), half_size: (0.28, 0.18, 0.06)),
+        (action: Sky(RandomSeed), center: (1.3, 1.65, -0.84), half_size: (0.28, 0.18, 0.06)),
+    ],
+    devices: [
+        (id: "stars", label: "Stars", kind: Lever, at: (-1.3, 1.05, -0.9), face: (0.0, 0.0, 1.0), start: 1),
+        (id: "band", label: "Band", kind: Lever, at: (-0.65, 1.05, -0.9), face: (0.0, 0.0, 1.0), start: 1),
+        (id: "nebulae", label: "Nebulae", kind: Lever, at: (0.0, 1.05, -0.9), face: (0.0, 0.0, 1.0), start: 1),
+        (id: "bodies", label: "Bodies", kind: Lever, at: (0.65, 1.05, -0.9), face: (0.0, 0.0, 1.0), start: 1),
+        (id: "sun_disc", label: "Sun disc", kind: Lever, at: (1.3, 1.05, -0.9), face: (0.0, 0.0, 1.0), start: 1),
+        (id: "sun", label: "Sun", kind: Junction(ways: 6), at: (0.0, 0.45, -0.9), face: (0.0, 0.0, 1.0)),
+    ],
+)

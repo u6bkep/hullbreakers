@@ -13,6 +13,10 @@ from agents; the planner chooses and connects.
 
 ## One seed, everything derived
 
+The sky is the seed's too: an ambience grown from one of the archetypes
+(`sim::ambience`), picked by seed, so each scene has its own light.
+`HULLBREAKERS_AMBIENCE` still overrides it for screenshots.
+
 `SceneSeed { seed, size }` → `plan(seed)` → `ScenePlan`: the sites (which
 design, where, how turned, what to do there, crewed or not), which one is
 the main objective, the loot adrift, the threat, the jump window. Every
@@ -98,11 +102,11 @@ What the planner relies on:
   ship.
 - **Posts** if `crewed`: who stands there is rolled from the threat
   (`bots::compose_crew`). The scene's threat is 1–3, eased for a small crew.
-  A hull turret sees 320 m and shoots to 300, so at a site within that of
-  our ship (every tight and wide scene) its mounts are left unmanned: it
-  would fire onto our deck from the first tick. Mounts are a vast-scene
-  defence; give the close fight to walkers, flyers and crawlers, and put
-  mounts where they cover the approach, not the far field.
+  A hull turret sees 320 m on a ship, which would fire onto our deck
+  from the first tick in any tight scene; posted at a site it's an
+  obstacle on the way in: its sight is capped at 25–80 m, short of our
+  ship (`SITE_TURRET_SIGHT`, `bots::Sight`). Put mounts where they cover
+  the approach and the entry.
 - **Devices** are the puzzle: wire whatever chain the site's story wants
   and name the device an encounter refers to. The dead ship's chain
   (reactor → junctions read off a board → two keys → vault → clamp) is the

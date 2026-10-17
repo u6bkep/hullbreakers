@@ -47,7 +47,13 @@ pub static SCENARIO: Scenario = Scenario {
     systems: |app| super::judge(app, ScenarioKind::Scene, run_scene),
     return_after: after_banner,
     homecoming: true,
+    // Never used: the build picks the plan's.
+    ambience: crate::sim::ambience::Choice::named("field"),
 };
+
+/// How far a site's hull turret sees (m), at least and at most: enough to
+/// cover its approach, never our deck.
+pub const SITE_TURRET_SIGHT: (f32, f32) = (25.0, 80.0);
 
 /// Survivors adrift round a wreck lie this far out (m), on this much air
 /// (s), the nearest first.
@@ -57,8 +63,10 @@ const POD_AIR: (f32, f32) = (150.0, 400.0);
 fn build(stage: &mut Stage) -> Entity {
     let plan = plan(stage.scene);
     info!("building {}: {} sites, threat {}", plan.seed.name(), plan.sites.len(), plan.threat);
+    stage.ambience = Some(plan.sky.clone());
     let (commands, tick) = (&mut *stage.commands, stage.tick);
     let home = commands.spawn(ship::parked_home_ship()).id();
+    let home_reach = crate::sim::scene::hull_reach(design(ship::HOME));
     // The crew's opposition: the scene's threat, eased for a small crew.
     let threat = Threat(((plan.threat as usize + stage.players) / 2).clamp(1, 3) as u8);
     let mut rng = ChaCha8Rng::seed_from_u64(plan.seed.seed ^ 0x5cee);
@@ -87,16 +95,17 @@ fn build(stage: &mut Stage) -> Entity {
                 angular_velocity: Vec3::ZERO,
             };
             // A hull turret sees 320 m and shoots to 300: at a site that
-            // near, it would fire onto our deck from the start, so mounts
-            // are left unmanned unless the site is well out of their reach.
-            // The close fight is the walkers', flyers' and crawlers'.
-            let turret_reach = Robot::Turret.sight();
-            let out_of_reach = site.at.length() > turret_reach + site.clearance + 50.0;
-            let crew: Vec<bots::Posting> = bots::compose_crew(design, threat, tick.wrapping_add(i as u32) as u64)
-                .into_iter()
-                .filter(|p| out_of_reach || p.robot != Robot::Turret)
-                .collect();
-            bots::man_posts(commands, stage.tuning, entity, design, &frame, crew, None);
+            // near, it would fire onto our deck from the start. Posted in
+            // a scene it's an obstacle on the way in instead: its sight is
+            // capped short of our ship (and at [`SITE_TURRET_SIGHT`]).
+            let crew = bots::compose_crew(design, threat, tick.wrapping_add(i as u32) as u64);
+            for (posting, robot) in bots::man_posts(commands, stage.tuning, entity, design, &frame, crew, None) {
+                if posting.robot == Robot::Turret {
+                    let at = frame.point_to_world(posting.post.at);
+                    let sight = (at.length() - home_reach - 5.0).clamp(SITE_TURRET_SIGHT.0, SITE_TURRET_SIGHT.1);
+                    commands.entity(robot).insert(bots::Sight(sight));
+                }
+            }
         }
         pickups::stock_ship(commands, entity, design, draw(plan.seed.seed as u32, i as u32));
         let mut adrift = Vec::new();

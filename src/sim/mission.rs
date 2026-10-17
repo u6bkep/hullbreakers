@@ -57,11 +57,13 @@ pub enum ScenarioKind {
     /// A scene laid out from a seed: sites to work round our ship (see
     /// `sim::scene`).
     Scene,
+    /// A test stand under a sky worked from a console, for review.
+    Sky,
 }
 
 impl ScenarioKind {
     /// In the order of the buttons on the mission wall.
-    pub const ALL: [ScenarioKind; 8] = [
+    pub const ALL: [ScenarioKind; 9] = [
         ScenarioKind::Field,
         ScenarioKind::Boarding,
         ScenarioKind::GrappleRun,
@@ -70,6 +72,7 @@ impl ScenarioKind {
         ScenarioKind::Escort,
         ScenarioKind::Gallery,
         ScenarioKind::Scene,
+        ScenarioKind::Sky,
     ];
 
     pub fn button_label(self) -> &'static str {
@@ -382,6 +385,9 @@ pub struct Director {
     /// (`HULLBREAKERS_SCENE`, a test).
     pub scene: super::scene::SceneSeed,
     pub pinned_scene: bool,
+    /// The sky every scenario is under instead of its own, if one's been
+    /// asked for (`HULLBREAKERS_AMBIENCE`, for screenshots).
+    pub ambience: Option<super::ambience::Choice>,
 }
 
 impl Director {
@@ -410,6 +416,7 @@ impl Director {
             robots: true,
             scene: default(),
             pinned_scene: false,
+            ambience: None,
         }
     }
 }
@@ -463,7 +470,11 @@ pub fn handle_presses(
             }
             // The player's own simulation armed them already; the rest are
             // the scenario's and the devices'.
-            ControlAction::Armory | ControlAction::Workbench | ControlAction::DisableShields | ControlAction::Device(_) => {}
+            ControlAction::Armory
+            | ControlAction::Workbench
+            | ControlAction::DisableShields
+            | ControlAction::Device(_)
+            | ControlAction::Sky(_) => {}
         }
     }
 }
@@ -759,7 +770,7 @@ pub fn switch_scenario(
     commands.remove_resource::<asteroids::FieldRng>();
     commands.remove_resource::<super::fauna::FaunaField>();
     let scenario = scenarios::scenario(kind);
-    let home = (scenario.build)(&mut Stage {
+    let mut stage = Stage {
         commands: &mut commands,
         tuning: &tuning,
         tick: tick.0,
@@ -767,7 +778,17 @@ pub fn switch_scenario(
         robots: director.robots,
         players: players.iter().count().max(1),
         scene: director.scene,
+        ambience: None,
+    };
+    let home = (scenario.build)(&mut stage);
+    // Its sky, cleared with the rest of its world: the one asked for, else
+    // the build's, else the scenario's.
+    let choice = director.ambience.as_ref().or(stage.ambience.as_ref()).unwrap_or(&scenario.ambience);
+    let ambience = choice.make().unwrap_or_else(|err| {
+        warn!("{err}; using the reference sky");
+        super::ambience::Ambience::reference()
     });
+    commands.spawn((Name::new("Ambience"), Staged, ambience));
     **mission = Mission {
         kind,
         started: tick.0,

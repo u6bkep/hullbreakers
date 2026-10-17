@@ -1,0 +1,56 @@
+// The escort: a gold nebula behind the freighter's route and a pale blue
+// companion star, a second, shadowless light.
+Ambience(
+    sun: (
+        direction: (-0.3, 0.6, -0.5),
+        color: "#fff4e0",
+        illuminance: 11500.0,
+        size: 1.4,
+        corona: 1.8,
+    ),
+    light: (ambient: "#a6b0cc", ambient_brightness: 55.0, fill: 3200.0),
+    stars: (
+        seed: 606,
+        count: 15000,
+        banded: 0.25,
+        brightness: 7.0,
+        colors: ["#cfdcff", "#ffffff", "#ffe6c4", "#ffc896"],
+        glints: 32,
+    ),
+    band: (
+        pole: (0.6, 0.3, 0.75),
+        width: 18.0,
+        bulge: (0.5, -0.85, -0.1),
+        color: "#b8c4d6",
+        bulge_color: "#f0dcb4",
+        brightness: 0.065,
+        dust: 0.5,
+        seed: 61,
+        tones: 4,
+    ),
+    nebulae: [
+        (
+            direction: (0.6, -0.1, 0.8),
+            size: 50.0,
+            inner: "#ffd98f",
+            outer: "#5c4a22",
+            brightness: 0.16,
+            seed: 63,
+            tones: 3,
+            dust: 0.5,
+            rim: 0.6,
+            stretch: 2.4,
+            turn: 140.0,
+        ),
+    ],
+    bodies: [
+        (
+            kind: Star,
+            direction: (0.8, 0.35, -0.45),
+            size: 0.8,
+            colors: ["#bcd4ff"],
+            seed: 65,
+            light: 1500.0,
+        ),
+    ],
+)

@@ -40,6 +40,7 @@ pub static SCENARIO: Scenario = Scenario {
     systems: |app| super::judge(app, ScenarioKind::Escort, escort),
     return_after: after_banner,
     homecoming: true,
+    ambience: crate::sim::ambience::Choice::named("escort"),
 };
 
 /// The freighter's design.

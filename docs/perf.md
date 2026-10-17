@@ -245,6 +245,36 @@ apply (Avian's collider-tree and mass hooks, our mesh observer), and a
 budget per *tick* bounded nothing, since the fixed loop caught up with 24
 ticks inside three frames (one 2.5 s long): hence per frame.
 
+## The sky (ambiences, 2026-10-17)
+
+What the sky's layers cost (docs/plan-ambience.md): `tools/stress --builds
+release --present novsync --ab "no_backdrop,no_stars,no_bodies" field
+boarding sky`, 12 s after 8 s, load about 4-9.
+
+| Situation | all layers: fps / gpu* ms | layers off: fps / gpu* ms | transparent pass (stars, bodies) |
+|---|---|---|---|
+| field (a moon, the band) | 232 / 2.16 | 232 / 2.06 | |
+| boarding (ringed gas giant) | 222 / 2.52 | 224 / 2.31 | 0.165 vs 0.019 ms |
+| sky preview, sun turning | 232 / 0.51 | 250 / 0.41 | 0.084 vs 0.003 ms |
+
+So the drawn sky is 0.1-0.2 ms of GPU a frame, most of it the stars and
+bodies (the transparent pass); the backdrop is a cubemap lookup, as before.
+
+**A bake** is drawn once when the sky changes, a few milliseconds of GPU
+in one frame. Bevy's render diagnostics don't time passes outside a view,
+so the `sky_bake_*` spans never reach the profile. Measured instead in the
+sky preview (`HULLBREAKERS_SCENARIO=sky`, release, novsync), sun still
+against sun turning (`HULLBREAKERS_STRESS=sky`: a new sky every 6 ticks,
+each baked, and the fill filtered again for each):
+
+| Sun | fps | frame mean / p99 / max ms | GPU busy |
+|---|---|---|---|
+| still | 274 | 3.65 / 5.0 / 6.8 | 70% |
+| turning (10 bakes a second) | 233 | 4.29 / 6.7 / 10.0 | 86% |
+
+In play a sky changes once per scenario, under the switch; only the
+preview's turning sun bakes continuously.
+
 ## Bigger work (not done; numbers above)
 
 - **Rock colliders.** Withdrawn (2026-10-14): a rock's hulls aren't 640

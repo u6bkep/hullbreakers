@@ -8,7 +8,9 @@
 //! ```
 //!
 //! `HULLBREAKERS_SCENARIO=boarding` starts a host in the boarding action
-//! rather than the asteroid field. `HULLBREAKERS_PRESENT=novsync` (or
+//! rather than the asteroid field; `HULLBREAKERS_AMBIENCE=derelict` (a file
+//! in `assets/ambience`) or `=calm:42` (an archetype and a seed) puts every
+//! scenario under that sky. `HULLBREAKERS_PRESENT=novsync` (or
 //! `vsync`, `immediate`, `mailbox`, `fifo`) overrides the window's present
 //! mode, for measuring (see `tools/stress`).
 
@@ -17,6 +19,7 @@ use core::time::Duration;
 
 use bevy::prelude::*;
 use hullbreakers::client::ClientPlugin;
+use hullbreakers::sim::ambience::Choice;
 use hullbreakers::sim::mission::{Director, ScenarioKind};
 use hullbreakers::net::{DEFAULT_PORT, NetMode, NetPlugin, SimulatedLag, add_headless_plugins};
 
@@ -79,6 +82,17 @@ fn main() {
         });
         if let Some(mut director) = app.world_mut().get_resource_mut::<Director>() {
             director.start_scene(seed);
+        }
+    }
+    // `HULLBREAKERS_AMBIENCE=<name>` or `<archetype>:<seed>`: every
+    // scenario under that sky (for screenshots).
+    if let Ok(text) = std::env::var("HULLBREAKERS_AMBIENCE") {
+        let choice = Choice::parse(&text).unwrap_or_else(|err| {
+            eprintln!("hullbreakers: HULLBREAKERS_AMBIENCE: {err}");
+            std::process::exit(2);
+        });
+        if let Some(mut director) = app.world_mut().get_resource_mut::<Director>() {
+            director.ambience = Some(choice);
         }
     }
     app.run();

@@ -4,6 +4,7 @@
 //! [`input::PlayerInput`] components; the client layer reads state back out,
 //! including each player's tick-stamped [`events::EventLog`].
 
+pub mod ambience;
 pub mod asteroids;
 pub mod bodies;
 pub mod bots;

@@ -1,6 +1,8 @@
 //! Embeds every ship design and module (`assets/ships/**/*.ron`) in the
 //! binary, so the simulation has them without loading assets (see
-//! `src/sim/design.rs`).
+//! `src/sim/design.rs`), and every named ambience (`assets/ambience/*.ron`,
+//! see `src/sim/ambience.rs`), so a host without the assets can still set
+//! one.
 
 use std::path::Path;
 
@@ -9,19 +11,29 @@ fn main() {
     // this script was compiled (`env!`): a build script is reused across
     // copies of the tree with the same source, and one compiled in a copy
     // since deleted walked nothing and embedded no designs at all.
-    let root = Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("assets/ships");
+    let assets = Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("assets");
+    embed(&assets.join("ships"), "SHIP_FILES", "ship_files.rs", "ship designs");
+    embed(&assets.join("ambience"), "AMBIENCE_FILES", "ambience_files.rs", "ambiences");
+}
+
+/// Writes `OUT_DIR/<out>`: a `const <name>` of every `.ron` under `root`, as
+/// (path without `.ron`, contents).
+fn embed(root: &Path, name: &str, out: &str, what: &str) {
     println!("cargo:rerun-if-changed={}", root.display());
     let mut files = Vec::new();
-    walk(&root, &root, &mut files);
-    assert!(!files.is_empty(), "no ship designs under {}", root.display());
+    walk(root, root, &mut files);
+    assert!(!files.is_empty(), "no {what} under {}", root.display());
     files.sort();
-    let mut out = String::from("/// Every `.ron` under `assets/ships`: (path without `.ron`, contents).\npub const SHIP_FILES: &[(&str, &str)] = &[\n");
+    let mut text = format!(
+        "/// Every `.ron` under `assets/{}`: (path without `.ron`, contents).\npub const {name}: &[(&str, &str)] = &[\n",
+        root.file_name().unwrap().to_string_lossy()
+    );
     for (name, path) in files {
-        out += &format!("    ({name:?}, include_str!({:?})),\n", path.display().to_string());
+        text += &format!("    ({name:?}, include_str!({:?})),\n", path.display().to_string());
     }
-    out += "];\n";
-    let dest = Path::new(&std::env::var("OUT_DIR").unwrap()).join("ship_files.rs");
-    std::fs::write(dest, out).unwrap();
+    text += "];\n";
+    let dest = Path::new(&std::env::var("OUT_DIR").unwrap()).join(out);
+    std::fs::write(dest, text).unwrap();
 }
 
 fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, std::path::PathBuf)>) {

@@ -158,12 +158,14 @@ pub fn setup_lighting(mut commands: Commands) {
         shadow_maps_enabled: true,
         ..default()
     };
-    let towards = Transform::default().looking_to(-super::sky::SUN_DIRECTION, Vec3::Y);
-    commands.spawn((Name::new("Sun"), sun, RenderLayers::layer(0), towards));
+    // Pointed, coloured and set by the sky (`ambience::light_the_place`).
+    let towards = Transform::default().looking_to(Vec3::new(-0.4, -0.5, 0.3), Vec3::Y);
+    commands.spawn((Name::new("Sun"), super::ambience::SunLight, sun, RenderLayers::layer(0), towards));
     // The same sun on your hands (see `camera::spawn_camera`), its shadows
     // only as far as they reach.
     commands.spawn((
         Name::new("Sun on the hands"),
+        super::ambience::SunLight,
         sun,
         CascadeShadowConfigBuilder {
             num_cascades: 1,
@@ -213,14 +215,14 @@ pub fn add_ship_model(
 pub fn add_ship_lights(
     add: On<Add, crate::sim::ship::ShipHull>,
     hulls: Query<&crate::sim::ship::ShipHull>,
-    sky: Res<super::sky::Sky>,
+    sky: Res<super::ambience::SkyMaps>,
     mut commands: Commands,
 ) {
     let ship = add.entity;
     let Ok(hull) = hulls.get(ship) else { return };
     let design = hull.design();
     for cabin in &design.cabins {
-        let probe = commands.spawn(super::sky::interior_light(&sky, cabin.center, cabin.size)).id();
+        let probe = commands.spawn(super::ambience::interior_light(&sky, cabin.center, cabin.size)).id();
         commands.entity(ship).add_child(probe);
     }
     let normal = ShipLight {

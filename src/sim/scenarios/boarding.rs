@@ -51,6 +51,7 @@ pub static SCENARIO: Scenario = Scenario {
     // Won, the crew picks what's next; lost, they drift a while first.
     return_after: |phase, tuning| (phase == Phase::Lost).then_some(tuning.wreck_return_seconds),
     homecoming: true,
+    ambience: crate::sim::ambience::Choice::named("boarding"),
 };
 
 /// The enemy ship in a boarding action.

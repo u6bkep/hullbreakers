@@ -34,7 +34,7 @@ pub use affixes::{Affix, Affixes, Condition, absorb, robot_upkeep};
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Wrecked;
 pub use blast::{Detonation, blast_of, detonate};
-pub use crew::{POST_LEASH, Posting, Threat, compose_crew, crew_ship, man_posts, mount, spawn_zoo, zoo_cell};
+pub use crew::{POST_LEASH, Posting, Threat, compose_crew, crew_ship, man_posts, mount, spawn_dormant, spawn_zoo, zoo_cell};
 
 use avian3d::prelude::*;
 use bevy::ecs::entity::MapEntities;
@@ -534,6 +534,12 @@ impl MapEntities for Brain {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Leash(pub f32);
 
+/// A cap on how far a robot notices the crew (m), under its kind's own
+/// (see `Robot::sight`): a hull turret posted as an obstacle on the way
+/// in, not artillery over the whole scene.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Sight(pub f32);
+
 /// A new robot of `kind` with `affixes`, in `mode`, guarding `home` from
 /// `post` (in home's frame), where it returns with nothing to fight.
 /// `index` varies its timing.
@@ -655,6 +661,7 @@ pub fn think(
     mut damage: MessageReader<Damage>,
     mut robots: Query<RobotQuery>,
     leashes: Query<&Leash>,
+    sights: Query<&Sight>,
     rocks: Query<(Entity, &super::asteroids::Asteroid)>,
 ) {
     let dt = time.delta_secs();
@@ -750,15 +757,16 @@ pub fn think(
         if brain.rethink <= 0.0 {
             brain.rethink = 0.3;
             let was_visible = brain.visible;
+            let sight = sights.get(entity).map_or(mind.sight, |s| s.0.min(mind.sight));
             let current = brain.target.and_then(|t| Some((t, where_is(t)?)));
             let seen = current
-                .filter(|(_, at)| at.distance(eye) < mind.sight && clear_line(eye, *at))
+                .filter(|(_, at)| at.distance(eye) < sight && clear_line(eye, *at))
                 .or_else(|| {
                     everyone
                         .iter()
                         .filter(|(_, _, team, _)| crew(*team))
                         .filter_map(|(e, ..)| Some((e, where_is(e)?)))
-                        .filter(|(_, at)| at.distance(eye) < mind.sight && clear_line(eye, *at))
+                        .filter(|(_, at)| at.distance(eye) < sight && clear_line(eye, *at))
                         .min_by(|a, b| a.1.distance(eye).total_cmp(&b.1.distance(eye)))
                 });
             brain.visible = seen.is_some();

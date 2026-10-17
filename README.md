@@ -9,6 +9,7 @@ cargo run -- --server [--port 5888]      # dedicated headless server
 cargo test                               # movement, client-world and netplay tests
 HULLBREAKERS_SHOTS=dir cargo run           # scripted screenshot tour, then exit
 HULLBREAKERS_SCENARIO=boarding cargo run   # host straight into a scenario
+HULLBREAKERS_AMBIENCE=derelict cargo run   # every scenario under that sky (or calm:42)
 HULLBREAKERS_SAVE=alt.ron cargo run        # another profile (default profile.ron)
 ```
 
@@ -18,8 +19,8 @@ The crew's ship has a **mission wall** on the port side of the bridge: click
 a button (F, within reach) to start a scenario. Every switch rebuilds the
 world and puts everyone back on the deck. The game starts in the
 **asteroid field**, and its button takes you back there.
-`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `recovery`, `escort`, `gallery`) starts in
-another. When a mission is decided a banner says how; back in the field, the
+`HULLBREAKERS_SCENARIO=boarding` (or `run`, `derelict`, `recovery`, `escort`, `gallery`, `sky`) starts in
+another. Each scenario has its own sky (its **ambience**, see below). When a mission is decided a banner says how; back in the field, the
 **debrief** gives its report, every crew member's score card (time in vacuum,
 longest swing on one rope, presses, deaths, and what they did) and awards.
 
@@ -114,6 +115,21 @@ longest swing on one rope, presses, deaths, and what they did) and awards.
   grazer); they don't fight back. To the right, every
   weapon part; behind, rolled guns (a row per frame, and one of the families). An area's labels show only
   while you face it.
+
+- **Sky preview** (debug): you float behind our ship facing a test stand
+  (a hull section, a rock and a dormant Gunner) under a sky, with the
+  **sky console** to your left, worked like the mission wall. Its buttons
+  step through the skies (every file in `assets/ambience`, then every
+  archetype) and a generated sky's seed. Its levers take away a layer each
+  (stars, band, nebulae, bodies, the sun's disc). Its junction moves the
+  sun: its own place, high, low, behind the stand, edge-on, or turning. The
+  status board names the sky and says what the validator thinks of it. A
+  sky's file is read again whenever it's saved, so you can edit it with
+  the preview open. `HULLBREAKERS_SCENARIO=sky HULLBREAKERS_SHOTS=dir
+  HULLBREAKERS_SHOTS_SHIP=sky` screenshots every sky from the stand
+  (`HULLBREAKERS_SKY_ONLY=a,b` for some, `HULLBREAKERS_SKY_SEEDS=n` seeds of
+  each archetype); `tools/sky-sheet dir` tiles them into a contact sheet
+  per sky.
 
 You start with the base kit (your suit and its grapple) and whatever your
 profile says you carry (see **Progression**). Guns are in the **weapons
@@ -468,6 +484,13 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
   - **Scenarios** are the authority's, one module each under
     `sim/scenarios/` with a common shape: build a world, judge it (systems
     that run only while it's on), and say when to go back to the field.
+  - **Ambience** (`sim/ambience/`): how a place looks, its sky and the
+    light it gives, as data. It's either named (`assets/ambience/*.ron`,
+    embedded at build time) or generated from an archetype and a seed. A
+    scenario names its own, and the authority spawns it with the world,
+    replicated whole. `ambience::problems` judges one: clear of the weak
+    spots' magenta, a backdrop dark enough for silhouettes, nothing over
+    the sun. Cosmetic only: the sim never reads it.
     `sim/mission.rs` is what they share: button presses are player events
     (`Pressed`) that the `Director` acts on after the players move; a switch
     despawns the world, spawns the scenario's, and respawns every player on
@@ -500,6 +523,14 @@ Land feet-first, slowly (< `attach_max_speed`), with boots on, to stick.
     client predicts being shoved by one. Only damage is the authority's.
 - `src/client/` is input, camera, greybox rendering, the HUD, and the tuning
   panel. It presents the `LocalPlayer` and writes only `LocalInput`.
+  The sky (`client/ambience/`) is drawn from the replicated `Ambience` in
+  layers: the band and nebulae baked on the GPU into an HDR cubemap
+  whenever the sky changes (shown by Bevy's `Skybox`); stars as quads at
+  infinity, a fixed few pixels across, so they're sharp at any field of
+  view; bodies and the sun's disc as impostors shaded per pixel; and the
+  light (the sun's, the ambient, and the cameras' fill, filtered from a
+  second baked cubemap with the bodies in it). The shaders share
+  `sky.wgsl`, so the light a place gives is the sky you see.
 - `src/net/` is lightyear: `--host` (listen server, the default), `--connect`,
   `--server`. Replicated state is the sim's own: generating components that
   every peer expands locally (`ShipHull` builds the hull, `Asteroid { seed }`

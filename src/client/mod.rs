@@ -2,6 +2,7 @@
 //! only [`LocalInput`] and [`crate::sim::ship::ShipCommand`] (plus debug
 //! actions). Which player is local is the network layer's business.
 
+pub mod ambience;
 pub mod animate;
 pub mod armory;
 pub mod bindings;
@@ -26,7 +27,7 @@ pub mod render;
 pub mod robot_fx;
 pub mod save;
 pub mod sfx;
-pub mod sky;
+pub mod sky_tour;
 pub mod stress;
 pub mod telemetry;
 pub mod viewmodel;
@@ -64,7 +65,7 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((EguiPlugin::default(), combat_fx::CombatFxPlugin, robot_fx::RobotFxPlugin, fauna_fx::FaunaFxPlugin, hud::HudPlugin))
+        app.add_plugins((EguiPlugin::default(), ambience::AmbiencePlugin, combat_fx::CombatFxPlugin, robot_fx::RobotFxPlugin, fauna_fx::FaunaFxPlugin, hud::HudPlugin))
             .insert_resource(input::MouseCaptured(true))
             .init_resource::<guns::GunModels>()
             .init_resource::<input::TuningOpen>()
@@ -82,7 +83,6 @@ impl Plugin for ClientPlugin {
             .add_observer(render::add_ship_model)
             .add_observer(devices::build_devices)
             .add_observer(devices::fit_beacons)
-            .add_observer(sky::add_sky_to_cameras)
             .add_observer(gallery::set_out_gallery)
             .add_observer(viewmodel::spawn_view_hands)
             .add_observer(camera::light_view_model::<PointLight>)
@@ -96,7 +96,6 @@ impl Plugin for ClientPlugin {
                     bindings::load_bindings,
                     menu::load_stances,
                     save::load_profile,
-                    sky::setup_sky,
                 ),
             )
             .add_systems(
@@ -156,7 +155,7 @@ impl Plugin for ClientPlugin {
                     sfx::play_hit_sounds,
                     push_feel::feel_pushes.after(events::present_events),
                     (devices::show_devices, devices::glow_cables, devices::dim_dark_cabins, devices::interior_ambient, devices::flash_beacons),
-                    (gallery::hide_colliders, gallery::arrange_exhibits, gallery::turn_exhibits, gallery::draw_sockets, gallery::pulse_cores, sky::settle_environment_maps),
+                    (gallery::hide_colliders, gallery::arrange_exhibits, gallery::turn_exhibits, gallery::draw_sockets, gallery::pulse_cores),
                     (
                         weapons_fx::spawn_tracers,
                         weapons_fx::fly_tracers,
@@ -177,7 +176,9 @@ impl Plugin for ClientPlugin {
         if let Some(telemetry) = telemetry::telemetry_from_env() {
             app.insert_resource(telemetry).add_systems(Update, telemetry::write_telemetry);
         }
-        if let Some(script) = debug_shots::shot_script_from_env() {
+        if let Some(tour) = sky_tour::sky_tour_from_env() {
+            app.insert_resource(tour).add_systems(Update, sky_tour::run_sky_tour);
+        } else if let Some(script) = debug_shots::shot_script_from_env() {
             app.insert_resource(script)
                 .add_systems(Update, debug_shots::run_shot_script);
         }

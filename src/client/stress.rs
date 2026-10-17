@@ -19,6 +19,9 @@
 //! `=race` (start in the grapple run): the player flown round the race's
 //! line at 40 m/s, looking ahead, lap after lap: the whole rock field in
 //! view, coming and going (`HULLBREAKERS_RACE_ROCKS` sets its size).
+//! `=sky` (start in the sky preview): the console's sun set turning, so the
+//! sky is baked again every few ticks (`sky_bake_*` in the GPU passes),
+//! the player at the stand looking toward where it turns.
 
 use bevy::prelude::*;
 
@@ -37,6 +40,7 @@ pub enum Stress {
     Derelict,
     Aboard,
     Race,
+    Sky,
 }
 
 pub fn stress_from_env() -> Option<Stress> {
@@ -46,8 +50,9 @@ pub fn stress_from_env() -> Option<Stress> {
         "derelict" => Some(Stress::Derelict),
         "aboard" => Some(Stress::Aboard),
         "race" => Some(Stress::Race),
+        "sky" => Some(Stress::Sky),
         other => {
-            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight, carrier, derelict, aboard, race)");
+            warn!("unknown HULLBREAKERS_STRESS {other:?} (firefight, carrier, derelict, aboard, race, sky)");
             None
         }
     }
@@ -77,6 +82,9 @@ impl Plugin for StressPlugin {
             }
             Stress::Race => {
                 app.add_systems(Update, fly_the_race);
+            }
+            Stress::Sky => {
+                app.add_systems(Update, turn_the_sun);
             }
         }
     }
@@ -300,4 +308,21 @@ fn hold_fire(time: Res<Time>, state: Res<Firefight>, mut local: ResMut<LocalInpu
     }
     local.0.main.held = true;
     local.0.add_look(Vec2::new(SWEEP * time.delta_secs(), 0.0));
+}
+
+/// The sky preview's sun set turning (the console's junction, as a crew
+/// would turn it), once.
+fn turn_the_sun(mut ships: Query<(&crate::sim::ship::ShipHull, &mut crate::sim::devices::Devices)>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    let Some((hull, mut devices)) = ships.iter_mut().find(|(h, _)| h.0 == crate::sim::scenarios::sky::CONSOLE) else {
+        return;
+    };
+    let design = hull.design();
+    let sun = design.device("sun");
+    if let crate::sim::devices::DeviceKind::Junction { ways } = design.devices[sun].kind {
+        devices.0[sun].set = ways - 1;
+    }
+    *done = true;
 }
